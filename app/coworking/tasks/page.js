@@ -16,7 +16,6 @@ import DailyReportModal from "../../../components/coworking/tasks/DailyReportMod
 import EditDeadlineModal from "../../../components/coworking/tasks/EditDeadlineModal";
 import SubmitCompletionModal from "../../../components/coworking/tasks/SubmitCompletionModal";
 import ReviewCompletionModal from "../../../components/coworking/tasks/ReviewCompletionModal";
-import RequestModal from "../../../components/coworking/tasks/RequestModal";
 import DeadlineBadge, { getDeadlineInfo } from "../../../components/coworking/tasks/DeadlineBadge";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
@@ -51,32 +50,32 @@ async function apiFetch(path, opts = {}) {
 
 // Status Constants
 const STATUS = {
-  open: { label: "Open", color: "#667085", bg: "#F2F4F7", dot: "#98A2B3", glow: "rgba(152,162,179,0.3)" },
-  confirmed: { label: "Confirmed", color: "#1A73E8", bg: "#EBF3FE", dot: "#1A73E8", glow: "rgba(26,115,232,0.3)" },
-  in_progress: { label: "In Progress", color: "#E37400", bg: "#FFF4E5", dot: "#F9AB00", glow: "rgba(249,171,0,0.3)" },
-  done: { label: "Done", color: "#1E8E3E", bg: "#E6F4EA", dot: "#34A853", glow: "rgba(52,168,83,0.3)" },
-  pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F3E8FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
+  open: { label: "Not Started", color: "#D97706", bg: "#FEF3C7", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
+  confirmed: { label: "Confirmed", color: "#4F46E5", bg: "#EEF2FF", dot: "#4F46E5", glow: "rgba(79,70,229,0.3)" },
+  in_progress: { label: "In Progress", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
+  done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
+  pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
 };
 
 const COMP = {
-  submitted: { label: "Awaiting TL Review", color: "#E37400", bg: "#FFF4E5", icon: "⏳" },
-  tl_approved: { label: "TL Approved · CEO Review", color: "#1A73E8", bg: "#EBF3FE", icon: "✓" },
-  tl_rejected: { label: "TL Rejected", color: "#D93025", bg: "#FCE8E6", icon: "✕" },
-  ceo_approved: { label: "Approved — Complete!", color: "#1E8E3E", bg: "#E6F4EA", icon: "🏆" },
-  ceo_rejected: { label: "CEO Rejected", color: "#D93025", bg: "#FCE8E6", icon: "✕" }
+  submitted: { label: "Awaiting TL Review", color: "#D97706", bg: "#FEF3C7", icon: "⏳" },
+  tl_approved: { label: "TL Approved · CEO Review", color: "#5B5EF4", bg: "#EDEDFE", icon: "✓" },
+  tl_rejected: { label: "TL Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" },
+  ceo_approved: { label: "Approved — Complete!", color: "#16A34A", bg: "#DCFCE7", icon: "🏆" },
+  ceo_rejected: { label: "CEO Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" }
 };
 
 const PRI = {
-  high: { label: "High", color: "#D93025", bg: "#FCE8E6", dot: "#EA4335" },
-  medium: { label: "Medium", color: "#E37400", bg: "#FFF4E5", dot: "#F9AB00" },
-  low: { label: "Low", color: "#1E8E3E", bg: "#E6F4EA", dot: "#34A853" }
+  high: { label: "Urgent", color: "#B91C1C", bg: "#FEF2F2", dot: "#B91C1C" },
+  medium: { label: "Normal", color: "#92400E", bg: "#FFFBEB", dot: "#D97706" },
+  low: { label: "Lowest", color: "#166534", bg: "#F0FDF4", dot: "#16A34A" }
 };
 
 // Avatar Color Helper
 const AVATAR_COLORS = [
-  ["#1A73E8", "#4285F4"], ["#1E8E3E", "#34A853"], ["#E37400", "#F9AB00"],
-  ["#D93025", "#EA4335"], ["#0E7490", "#00ACC1"], ["#7C3AED", "#9575CD"],
-  ["#00897B", "#26A69A"], ["#AD1457", "#EC407A"],
+  ["#3B4252", "#4C566A"], ["#2563EB", "#3B82F6"], ["#0F766E", "#14B8A6"],
+  ["#7C2D12", "#B91C1C"], ["#6D28D9", "#7C3AED"], ["#0E7490", "#06B6D4"],
+  ["#9D174D", "#EC4899"], ["#374151", "#6B7280"],
 ];
 
 function getAvatarColors(name = "") {
@@ -280,7 +279,7 @@ function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleE
             <span style={{
               fontSize: 9, fontWeight: 800,
               color: "#fff",
-              background: "#34A853",
+              background: "#16A34A",
               padding: "1px 5px", borderRadius: 99,
               minWidth: 18, textAlign: "center",
             }}>
@@ -289,7 +288,7 @@ function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleE
           )}
           {chatTimeStr && isUnread && (
             <span style={{
-              fontSize: 8, color: "#34A853",
+              fontSize: 8, color: "#16A34A",
               fontFamily: "var(--mono,monospace)", fontWeight: 700,
             }}>
               {chatTimeStr}
@@ -311,7 +310,7 @@ function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleE
           {isUnread && (
             <span style={{
               width: 6, height: 6, borderRadius: "50%",
-              background: "#34A853", flexShrink: 0,
+              background: "#16A34A", flexShrink: 0,
             }} />
           )}
           {dl.status === "overdue" && !isUnread && <span className="gv-overdue-dot" />}
@@ -395,7 +394,7 @@ function EmployeeGroup({
           {hasUnread && (
             <span style={{
               width: 8, height: 8, borderRadius: "50%",
-              background: "#34A853", flexShrink: 0,
+              background: "#16A34A", flexShrink: 0,
               boxShadow: "0 0 0 2px rgba(16,185,129,0.3)",
               animation: "od-pulse 2s ease-in-out infinite",
               display: "inline-block",
@@ -408,7 +407,7 @@ function EmployeeGroup({
           <span style={{
             fontSize: 9, fontWeight: 800,
             color: "#fff",
-            background: "#34A853",
+            background: "#16A34A",
             padding: "1px 6px", borderRadius: 99,
             minWidth: 18, textAlign: "center",
           }}>
@@ -420,7 +419,7 @@ function EmployeeGroup({
         {latestTime && (
           <span style={{
             fontSize: 8,
-            color: hasUnread ? "#34A853" : "var(--text-4)",
+            color: hasUnread ? "#16A34A" : "var(--text-4)",
             fontFamily: "var(--mono)",
             fontWeight: hasUnread ? 700 : 400,
             marginLeft: 2,
@@ -490,8 +489,8 @@ if (!document.querySelector('#employee-group-styles')) {
 /* ─── ReportCard ─── */
 function ReportCard({ report }) {
   const pct = report.progressPercent || 0;
-  const pctColor = pct >= 100 ? "#1E8E3E" : pct >= 50 ? "var(--p,#1A73E8)" : "#E37400";
-  const pctBg = pct >= 100 ? "#E6F4EA" : pct >= 50 ? "var(--p-lt,#EBF3FE)" : "#FFF4E5";
+  const pctColor = pct >= 100 ? "#16A34A" : pct >= 50 ? "var(--p,#5B5EF4)" : "#F59E0B";
+  const pctBg = pct >= 100 ? "#DCFCE7" : pct >= 50 ? "var(--p-lt,#EDEDFE)" : "#FEF3C7";
   return (
     <div className="gv-report-card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -520,181 +519,329 @@ function ReportCard({ report }) {
 
 
 
-/* ─── Detail Panel Body (shared desktop + mobile) ─── */
+/* ─── Detail Panel Body — Task.Co Card Style (shared desktop + mobile) ─── */
+
+/* ─── TaskRequestsPanel ─── */
+function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewRequest }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!task?.taskId) return;
+    setLoading(true);
+    let unsub;
+    try {
+      const ref = collection(firebaseDb, "cowork_requests");
+      unsub = onSnapshot(query(ref, where("taskId", "==", task.taskId)), snap => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0) > 0 ? -1 : 1);
+        setRequests(docs);
+        setLoading(false);
+      }, () => setLoading(false));
+    } catch (e) {
+      console.error("requests listener:", e);
+      setLoading(false);
+    }
+    return () => { if (unsub) unsub(); };
+  }, [task?.taskId]);
+
+  const fmt = (ts) => {
+    if (!ts) return "";
+    const ms = ts?.seconds ? ts.seconds * 1000 : new Date(ts).getTime();
+    const diff = Math.floor((Date.now() - ms) / 60000);
+    if (diff < 1) return "just now";
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+    return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  };
+
+  const statusColor = (s) => s === "approved" ? "#16A34A" : s === "rejected" ? "#B91C1C" : "#D97706";
+  const statusBg = (s) => s === "approved" ? "#F0FDF4" : s === "rejected" ? "#FEF2F2" : "#FFFBEB";
+  const statusLabel = (s) => s === "approved" ? "Approved" : s === "rejected" ? "Rejected" : "Pending";
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Header with New Request btn */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>All Requests</span>
+        <button onClick={onNewRequest} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "var(--p)", color: "#fff", border: "none", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)" }}>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          New
+        </button>
+      </div>
+      {/* List */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}><GwSpinner /></div>
+        ) : requests.length === 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "32px 16px", textAlign: "center" }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+            </div>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", margin: 0 }}>No requests yet</p>
+            <p style={{ fontSize: 10, color: "var(--text-4)", marginTop: 3 }}>Tap New to send a request</p>
+          </div>
+        ) : requests.map(req => (
+          <div key={req.id} style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <GwAvatar name={req.fromName || req.senderName || "?"} size={26} />
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-1)", lineHeight: 1.2 }}>{req.fromName || req.senderName || "Unknown"}</div>
+                  <div style={{ fontSize: 9, color: "var(--text-4)", marginTop: 1 }}>{fmt(req.createdAt)}</div>
+                </div>
+              </div>
+              <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 99, color: statusColor(req.status), background: statusBg(req.status), flexShrink: 0 }}>{statusLabel(req.status || "pending")}</span>
+            </div>
+            {req.message && <p style={{ fontSize: 11, color: "var(--text-2)", lineHeight: 1.55, margin: 0, whiteSpace: "pre-wrap" }}>{req.message}</p>}
+            {req.type && <div style={{ marginTop: 5 }}><span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 5, background: "var(--bg)", color: "var(--text-3)", border: "1px solid var(--border)", fontWeight: 600 }}>{req.type}</span></div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setActiveDetailTab,
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
-  employeeId, pct, pctColor, pctGradient, unreadCounts }) {
+  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages }) {
   const st = STATUS[task.status] || STATUS.open;
   const comp = task.completionStatus ? COMP[task.completionStatus] : null;
   const pri = task.priority ? (PRI[task.priority] || PRI.medium) : PRI.medium;
 
+  const createdDate = task.createdAt
+    ? new Date(typeof task.createdAt === "object" && task.createdAt.seconds ? task.createdAt.seconds * 1000 : task.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : null;
+
+  /* ── Field row helper ── */
+  const Field = ({ icon, label, children }) => (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+      <span style={{ fontSize: 11, color: "var(--text-4)", width: 90, flexShrink: 0, display: "flex", alignItems: "center", gap: 5, paddingTop: 1 }}>
+        {icon} {label}
+      </span>
+      <div style={{ flex: 1, fontSize: 12, color: "var(--text-1)", lineHeight: 1.5 }}>{children}</div>
+    </div>
+  );
+
+  /* ── Collect all files from task.attachments + chat message attachments ── */
+  const allFiles = (() => {
+    const files = [];
+    // Task-level attachments
+    (task.attachments || []).forEach(att => files.push({ ...att, source: "task" }));
+    // Chat message attachments
+    const msgs = chatMessages || task.chatMessages || [];
+    msgs.forEach(msg => {
+      (msg.attachments || []).forEach(att => {
+        if (att.url) files.push({ name: att.name || att.fileName || (att.type === "image" ? "Image" : att.type === "pdf" ? "Document.pdf" : att.type === "voice" ? "Voice Note" : "File"), url: att.url, type: att.type || "file", size: att.size || 0, source: "chat" });
+      });
+      if (msg.mediaUrl && !msg.attachments?.length) files.push({ name: "Image", url: msg.mediaUrl, type: "image", size: 0, source: "chat" });
+      if (msg.pdfUrl && !msg.attachments?.length) files.push({ name: "Document.pdf", url: msg.pdfUrl, type: "pdf", size: 0, source: "chat" });
+    });
+    return files;
+  })();
+
   return (
     <>
       {activeDetailTab === "info" && (
-        <div className="gv-detail-scroll">
-          {/* Breadcrumb */}
-          {task.path?.length > 0 && (
-            <div className="gv-bc">
-              {task.path.map(p => (
-                <span key={p.taskId} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                  <button className="gv-bc-btn" onClick={() => handleSelectNode(p)}>{p.title}</button>
-                  <span className="gv-bc-sep">›</span>
-                </span>
-              ))}
-              <span className="gv-bc-cur">{task.title}</span>
+        <div className="gv-detail-scroll" style={{ gap: 0, padding: "0 0 16px" }}>
+
+          {/* ── Header block: created date + badges + title ── */}
+          <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--border)" }}>
+            {createdDate && (
+              <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                Created on {createdDate}
+              </div>
+            )}
+            {/* Badges row */}
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 9px", borderRadius: 6, color: "var(--p)", background: "var(--p-lt)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" /><path d="M3 5h4" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" /></svg>
+                Task Name
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: pri.color, background: pri.bg, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>
+                {pri.label}
+              </span>
+              {st && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: st.color, background: st.bg, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} /> {st.label}
+              </span>}
+              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text-4)", padding: "3px 7px", background: "var(--bg)", borderRadius: 5, border: "1px solid var(--border)" }}>{task.taskId}</span>
+            </div>
+            {/* Big title */}
+            <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", lineHeight: 1.3, margin: 0, letterSpacing: "-0.01em" }}>{task.title}</h2>
+          </div>
+
+          {/* ── Description ── */}
+          {task.description && (
+            <div style={{ margin: "0 14px 0", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.65, color: "var(--text-2)" }}>
+              {task.description}
             </div>
           )}
 
-          {/* Meta */}
-          <div className="gv-meta-row">
-            {task.dueDate && <DeadlineBadge dueDate={task.dueDate} />}
-            <span className="gv-meta-pill" style={{ position: "relative", cursor: "pointer" }}
-              onMouseEnter={(e) => {
-                const tip = e.currentTarget.querySelector('.gv-assignee-tip');
-                if (tip) tip.style.display = 'block';
-              }}
-              onMouseLeave={(e) => {
-                const tip = e.currentTarget.querySelector('.gv-assignee-tip');
-                if (tip) tip.style.display = 'none';
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="3.5" r="2" stroke="currentColor" strokeWidth="1" /><path d="M1 9c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
-              {task.assigneeIds?.length || 0}
-              <div className="gv-assignee-tip" style={{
-                display: "none", position: "absolute", top: "100%", left: 0, marginTop: 4,
-                background: "#1A1D21", color: "#fff", borderRadius: 8, padding: "8px 12px",
-                fontSize: 11, whiteSpace: "nowrap", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                minWidth: 120,
-              }}>
-                <div style={{ fontWeight: 700, marginBottom: 4, color: "#98A2B3", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>Assigned to</div>
-                {(task.assigneeNames || task.assigneeIds || []).map((name, i) => (
-                  <div key={i} style={{ padding: "2px 0", display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34A853" }} />
-                    {typeof name === "string" ? name : name}
-                  </div>
-                ))}
-                {(!task.assigneeNames?.length && !task.assigneeIds?.length) && <div>No one assigned</div>}
+          {/* ── Structured fields ── */}
+          <div style={{ display: "flex", flexDirection: "column", padding: "0 14px" }}>
+            {/* People */}
+            <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>} label="People">
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {(task.assigneeIds || []).length > 0
+                  ? (task.assigneeIds || []).map((id, i) => {
+                    const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
+                    const [c1, c2] = getAvatarColors(nm || id);
+                    return (
+                      <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px 3px 3px", borderRadius: 99, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 500 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {(nm || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                        </span>
+                        {nm}
+                      </span>
+                    );
+                  })
+                  : <span style={{ color: "var(--text-4)", fontSize: 11 }}>Unassigned</span>
+                }
               </div>
-            </span>
-            {(task.subtaskIds?.length || 0) > 0 && (
-              <span className="gv-meta-pill">
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="3" height="3" rx=".7" stroke="currentColor" strokeWidth=".9" /><rect x="6" y="1" width="3" height="3" rx=".7" stroke="currentColor" strokeWidth=".9" /><rect x="1" y="6" width="3" height="3" rx=".7" stroke="currentColor" strokeWidth=".9" /></svg>
-                {task.subtaskIds.length} subs
-              </span>
-            )}
-            {task.chatMessageCount > 0 && (
-              <span className="gv-meta-pill">
-                💬 {task.chatMessageCount}
-                {(unreadCounts?.[task.taskId] || 0) > 0 && (
-                  <span style={{
-                    marginLeft: 4, fontSize: 9, fontWeight: 800,
-                    color: "#fff", background: "#34A853",
-                    padding: "1px 5px", borderRadius: 99,
-                    minWidth: 16, textAlign: "center", display: "inline-block",
-                  }}>
-                    {unreadCounts[task.taskId] > 99 ? "99+" : unreadCounts[task.taskId]} new
+            </Field>
+
+            {/* Timeline */}
+            {(task.startDate || task.dueDate) && (
+              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>} label="Timeline Date">
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)" }}>
+                    {[
+                      task.startDate ? new Date(task.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null,
+                      task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null
+                    ].filter(Boolean).join(" – ")}
                   </span>
-                )}
-              </span>
+                  {task.dueDate && <DeadlineBadge dueDate={task.dueDate} />}
+                </div>
+              </Field>
+            )}
+
+            {/* Type / category if exists */}
+            {task.type && (
+              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>} label="Type">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 600 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+                  {task.type}
+                </span>
+              </Field>
+            )}
+
+            {/* Attachments — sidebar card style */}
+            {allFiles.length > 0 && (
+              <div style={{ padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 7 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)" }}>Attachments ( {allFiles.length} )</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {allFiles.map((att, i) => {
+                    const isImg = att.type === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name || att.fileName || "");
+                    return (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)" }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: isImg ? "#FEF3C7" : "var(--p-lt)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {isImg
+                            ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
+                            : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--p)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                          }
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name || att.fileName || "Attachment"}</div>
+                          <div style={{ fontSize: 9, color: "var(--text-4)", marginTop: 1 }}>
+                            {att.size ? `${(att.size / 1048576).toFixed(2)} MB` : ""}
+                            {att.url && <>{att.size ? " • " : ""}<a href={att.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--p)", fontWeight: 600, textDecoration: "none" }}>Preview</a></>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {task.notes && (
+              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>} label="Notes">
+                <div style={{ fontSize: 11, lineHeight: 1.6, color: "var(--text-2)", whiteSpace: "pre-wrap" }}>{task.notes}</div>
+              </Field>
             )}
           </div>
 
-          {task.description && <p className="gv-desc">{task.description}</p>}
-          {task.notes && (
-            <div className="gv-notes">
-              <span style={{ flexShrink: 0, fontSize: 14 }}>📝</span>
-              <span className="gv-notes-text">{task.notes}</span>
+          {/* Progress bar */}
+          <div style={{ marginTop: 14, padding: "0 14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Progress</span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--mono)", color: pctColor }}>{pct}%</span>
             </div>
-          )}
-
-          {/* Progress */}
-          <div className="gv-prog">
-            <div className="gv-prog-head">
-              <span className="gv-prog-lbl">Progress</span>
-              <span className="gv-prog-pct" style={{ color: pctColor }}>{pct}%</span>
-            </div>
-            <div className="gv-prog-track">
-              <div className="gv-prog-fill" style={{ width: `${pct}%`, background: pctGradient }} />
+            <div style={{ height: 4, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: pctGradient, transition: "width 0.6s" }} />
             </div>
           </div>
 
           {/* Completion banner */}
           {comp && (
-            <div className="gv-comp-banner" style={{ color: comp.color, background: comp.bg, borderColor: `${comp.color}33` }}>
-              <span className="gv-comp-icon">{comp.icon}</span>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 12px", borderRadius: 8, border: `1px solid ${comp.color}33`, color: comp.color, background: comp.bg, marginTop: 12, marginRight: 14 }}>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>{comp.icon}</span>
               <div>
-                <div className="gv-comp-text" style={{ color: comp.color }}>{comp.label}</div>
-                {task.completionStatus === "tl_rejected" && task.tlReview?.rejectionReason && <div className="gv-comp-sub">{task.tlReview.rejectionReason}</div>}
-                {task.completionStatus === "ceo_rejected" && task.ceoReview?.rejectionReason && <div className="gv-comp-sub">{task.ceoReview.rejectionReason}</div>}
+                <div style={{ fontSize: 11, fontWeight: 700 }}>{comp.label}</div>
+                {task.completionStatus === "tl_rejected" && task.tlReview?.rejectionReason && <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{task.tlReview.rejectionReason}</div>}
+                {task.completionStatus === "ceo_rejected" && task.ceoReview?.rejectionReason && <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{task.ceoReview.rejectionReason}</div>}
               </div>
             </div>
           )}
 
-          {/* Workflow */}
+          {/* Workflow actions */}
           {(isAssignee || isTL || isCEO) && (
-            <div>
-              <div className="gv-sec-lbl">Workflow</div>
+            <div style={{ marginTop: 14, padding: "0 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6 }}>Workflow</div>
               {isAssignee && !isConfirmed && task.status === "open" && (
                 <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   Confirm Task
                 </button>
               )}
               {isAssignee && isConfirmed && !isStarted && (
                 <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
                   Start Working
                 </button>
               )}
               {isAssignee && task.status === "in_progress" && (
-                <button className="gv-wf-btn gv-wf-report" onClick={() => handleAction("report")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1.5" y="2.5" width="9" height="7" rx="1" stroke="currentColor" strokeWidth="1.1" /><path d="M4 5.5h4M4 7.5h2.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
-                  Daily Report
-                </button>
+                <button className="gv-wf-btn gv-wf-report" onClick={() => handleAction("report")}>Daily Report</button>
               )}
               {isAssignee && task.status === "in_progress" && !["submitted", "tl_approved", "ceo_approved"].includes(task.completionStatus) && (
-                <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v7M3 4.5l3-3.5 3 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /><path d="M2 11h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
-                  Submit for Review
-                </button>
+                <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>Submit for Review</button>
               )}
-              {/* TL Approve Button - FIXED: Properly integrated */}
               {isTL && task.status === "pending_tl_approval" && task.assigneeIds?.includes(employeeId) && (
-                <button className="gv-wf-btn"
-                  style={{ background: "#f3e8ff", color: "#9333ea", borderColor: "rgba(147,51,234,.3)" }}
-                  disabled={actionBusy}
-                  onClick={() => handleAction("approve_tl")}>
-                  ⭐ Approve Task
-                </button>
+                <button className="gv-wf-btn" style={{ background: "#EDEDFE", color: "#5B5EF4", borderColor: "rgba(91,94,244,.3)" }} disabled={actionBusy} onClick={() => handleAction("approve_tl")}>⭐ Approve Task</button>
               )}
               {(isTL || isCEO) && task.completionStatus === "submitted" && (
-                <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.1" /><circle cx="6" cy="6" r="2" stroke="currentColor" strokeWidth="1" /></svg>
-                  Review Submission
-                </button>
+                <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>Review Submission</button>
               )}
               {isCEO && task.completionStatus === "tl_approved" && (
-                <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("ceo_review")}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  CEO Final Approval
-                </button>
+                <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("ceo_review")}>CEO Final Approval</button>
               )}
             </div>
           )}
 
-          {/* Subtasks */}
+          {/* Subtasks — Task.Co style */}
           {task.subtasks?.length > 0 && (
-            <div>
-              <div className="gv-sec-lbl">Subtasks ({task.subtasks.length})</div>
+            <div style={{ marginTop: 14, padding: "0 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="6" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="1" y="6" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
+                Subtasks ({task.subtasks.length})
+              </div>
               {task.subtasks.map(sub => {
                 const sst = STATUS[sub.status] || STATUS.open;
                 return (
-                  <div key={sub.taskId} className="gv-sub-item" onClick={() => handleSelectNode(sub)}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: sst.dot, flexShrink: 0 }} />
-                    <span className="gv-sub-name">{sub.title}</span>
-                    {sub.subtaskIds?.length > 0 && <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text-4)", background: "var(--bg2)", padding: "1px 5px", borderRadius: 99 }}>{sub.subtaskIds.length}</span>}
-                    <span className="gv-badge" style={{ color: sst.color, background: sst.bg, borderColor: `${sst.color}22`, fontSize: 9 }}>{sst.label}</span>
-                    <svg width="9" height="9" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0 }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <div key={sub.taskId} onClick={() => handleSelectNode(sub)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg)", cursor: "pointer", marginBottom: 3, transition: "all 0.1s", border: "1px solid transparent" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "var(--p-lt)"; e.currentTarget.style.borderColor = "var(--p)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "transparent"; }}
+                  >
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sst.dot, flexShrink: 0, display: "inline-block" }} />
+                    <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub.title}</span>
+                    <svg width="8" height="8" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0 }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </div>
                 );
               })}
@@ -703,18 +850,14 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
 
           {/* Deadline history */}
           {isCEO && task.deadlineHistory?.length > 0 && (
-            <div>
-              <div className="gv-sec-lbl">Deadline History</div>
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6 }}>Deadline History</div>
               {task.deadlineHistory.map((h, i) => (
-                <div key={i} className="gv-dl-entry">
-                  <span style={{ fontSize: 10, color: "var(--text-4)", fontFamily: "var(--mono)", flexShrink: 0 }}>{new Date(h.editedAt).toLocaleDateString("en-IN")}</span>
-                  <span style={{ fontSize: 11, color: "var(--text-2)", flex: 1 }}>
-                    {h.editedByName}:&nbsp;
-                    <span style={{ color: "var(--danger)", fontWeight: 700 }}>{h.oldDueDate || "None"}</span>
-                    &nbsp;→&nbsp;
-                    <span style={{ color: "var(--success)", fontWeight: 700 }}>{h.newDueDate}</span>
+                <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", padding: "6px 8px", background: "var(--bg)", borderRadius: 6, marginBottom: 3, fontSize: 10 }}>
+                  <span style={{ color: "var(--text-4)", fontFamily: "var(--mono)", flexShrink: 0 }}>{new Date(h.editedAt).toLocaleDateString("en-IN")}</span>
+                  <span style={{ color: "var(--text-2)", flex: 1 }}>
+                    {h.editedByName}: <span style={{ color: "var(--danger)", fontWeight: 700 }}>{h.oldDueDate || "None"}</span> → <span style={{ color: "var(--success)", fontWeight: 700 }}>{h.newDueDate}</span>
                   </span>
-                  <span style={{ fontSize: 10, color: "var(--text-3)", fontStyle: "italic", flex: 1 }}>{h.reason}</span>
                 </div>
               ))}
             </div>
@@ -767,9 +910,41 @@ export default function TasksPage() {
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [expandedEmps, setExpandedEmps] = useState(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightPanel, setRightPanel] = useState("info"); // "info" | "reports" | null
+  // ── List panel state (hoisted from render to fix Rules of Hooks) ──
+  const [listSearch, setListSearch] = useState("");
+  const [activeStatTab, setActiveStatTab] = useState("all");
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const [rowMenuOpen, setRowMenuOpen] = useState(null);
+  const [rowMenuPos, setRowMenuPos] = useState({ x: 0, y: 0 });
+  const [rightPanel, setRightPanel] = useState("info"); // "info" | "reports" | "requests" | null
 
+  // ── Resizable split panel state ──
+  const [sidebarWidth, setSidebarWidth] = useState(38); // percentage
+  const isDraggingRef = useRef(false);
+  const rootRef = useRef(null);
 
+  const handleMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev) => {
+      if (!isDraggingRef.current || !rootRef.current) return;
+      const rect = rootRef.current.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSidebarWidth(Math.max(20, Math.min(70, pct)));
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
 
   // Phase 2: Context menu on messages
   const [contextMenu, setContextMenu] = useState(null); // { x, y, message }
@@ -781,6 +956,7 @@ export default function TasksPage() {
     if (rightPanel === "info" || rightPanel === "reports") {
       setActiveDetailTab(rightPanel);
     }
+    // "requests" panel is independent — no detail tab sync needed
   }, [rightPanel]);
 
 
@@ -809,6 +985,14 @@ export default function TasksPage() {
     return () => document.removeEventListener("click", close);
   }, [contextMenu]);
 
+  // Close row action menu on outside click
+  useEffect(() => {
+    if (!rowMenuOpen) return;
+    const fn = () => setRowMenuOpen(null);
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, [rowMenuOpen]);
+
 
   const [unreadTaskIds, setUnreadTaskIds] = useState(new Set());
   // Per-task unread message counts (accurate, based on live chat subcollection count)
@@ -835,7 +1019,7 @@ export default function TasksPage() {
 
   // Data Loading Functions
   const loadEmployees = useCallback(async () => {
-    if (role !== "ceo" && role !== "tl") return;
+    // Load for all roles so avatars show correctly
     setEmployeesLoading(true);
     try {
       const snap = await getDocs(collection(firebaseDb, "cowork_employees"));
@@ -861,6 +1045,25 @@ export default function TasksPage() {
   const lastMsgTimesRef = useRef({});
   // Keep a ref-copy of allTaskMap so setupChatCountListeners never needs it as a dep
   const allTaskMapRef = useRef(new Map());
+  const latestTaskIdRef = useRef(null); // tracks last clicked task to discard stale responses
+  // ── Background chat prefetch cache ──
+  const chatCacheRef = useRef({});        // taskId -> messages[]
+  const prefetchingRef = useRef(new Set()); // currently prefetching
+
+  const prefetchChat = useCallback((taskId) => {
+    if (!taskId || chatCacheRef.current[taskId] || prefetchingRef.current.has(taskId)) return;
+    prefetchingRef.current.add(taskId);
+    const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
+    const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+    getDocs(q).then(snap => {
+      chatCacheRef.current[taskId] = snap.docs.map(d => ({
+        ...d.data(), id: d.id,
+        createdAt: d.data().createdAt?.seconds ? new Date(d.data().createdAt.seconds * 1000).toISOString() : d.data().createdAt,
+        temp: false, sending: false, error: false,
+      }));
+      prefetchingRef.current.delete(taskId);
+    }).catch(() => prefetchingRef.current.delete(taskId));
+  }, []);
   // Per-task lastReadAt timestamps loaded from Firestore (ms). Key = taskId.
   // Used as the baseline: only messages AFTER this time count as unread.
   const firestoreLastReadRef = useRef({});
@@ -1020,10 +1223,15 @@ export default function TasksPage() {
       const map = new Map(tasks.map(t => [t.taskId, t]));
       allTaskMapRef.current = map;
       setAllTaskMap(map);
-      setExpandedIds(new Set(tasks.filter(t => !t.parentTaskId).map(t => t.taskId)));
+      setExpandedIds(new Set()); // subtasks collapsed by default
 
       // Per-task chat count listeners give 100% accurate real-time unread counts
       setupChatCountListeners(tasks);
+      // Background-prefetch chats staggered so they're ready before user clicks
+      const rootsForPrefetch = tasks.filter(t => !t.parentTaskId && t.status !== 'done');
+      rootsForPrefetch.forEach((t, i) => {
+        setTimeout(() => prefetchChat(t.taskId), 300 + i * 150);
+      });
 
     } catch (e) {
       console.error(e);
@@ -1033,19 +1241,31 @@ export default function TasksPage() {
   }, [employeeId, role]); // setupChatCountListeners intentionally omitted — stable empty-dep callback
 
   const loadDetail = useCallback(async (taskId) => {
+    latestTaskIdRef.current = taskId; // mark this as the latest requested task
     setDetailLoading(true);
-    setChatMessages([]);
     setDailyReports([]);
+    // ── Serve cached messages instantly ──
+    if (chatCacheRef.current[taskId]?.length) {
+      setChatMessages(chatCacheRef.current[taskId]);
+      setDetailLoading(false);
+    } else {
+      setChatMessages([]);
+    }
     try {
       const task = await getFullTask(taskId);
+      // ── STALE RESPONSE GUARD: discard if user has since clicked a different task ──
+      if (latestTaskIdRef.current !== taskId) return;
       setSelectedTask(task);
-      setChatMessages(task.chatMessages || []);
+      // Update messages from REST only if cache was empty
+      if (!chatCacheRef.current[taskId]?.length && task.chatMessages?.length) {
+        setChatMessages(task.chatMessages);
+      }
     } catch (e) {
-      console.error(e);
+      if (latestTaskIdRef.current === taskId) console.error(e);
     } finally {
-      setDetailLoading(false);
+      if (latestTaskIdRef.current === taskId) setDetailLoading(false);
     }
-  }, []);
+  }, [prefetchChat]);
 
   const loadReports = useCallback(async (taskId) => {
     setReportsLoading(true);
@@ -1058,13 +1278,26 @@ export default function TasksPage() {
     }
   }, []);
 
+  const handleHoverPrefetch = useCallback((taskId) => {
+    prefetchChat(taskId);
+  }, [prefetchChat]);
+
   const handleSelectNode = async (node) => {
-    // First, load the detail
-    loadDetail(node.taskId);
+    // Immediately show the task in 30% panel and open chat panel
+    // Use cached data first to avoid ANY perceived wait
+    setSelectedTask(allTaskMap.get(node.taskId) || node);
     setActiveDetailTab("info");
     setMobDetailPanel(null);
     setDetailCollapsed(false);
     setMobileView("chat");
+    // Serve cached chat immediately
+    if (chatCacheRef.current[node.taskId]?.length) {
+      setChatMessages(chatCacheRef.current[node.taskId]);
+    } else {
+      setChatMessages([]);
+    }
+    // Load full detail in background
+    loadDetail(node.taskId);
 
     // Expand this task and collapse all others
     setExpandedIds(new Set([node.taskId]));
@@ -1565,319 +1798,240 @@ export default function TasksPage() {
   const st = task ? (STATUS[task.status] || STATUS.open) : null;
   const pri = task?.priority ? (PRI[task.priority] || PRI.medium) : PRI.medium;
   const pct = task?.progressPercent || 0;
-  const pctColor = task?.status === "done" ? "#1E8E3E" : pct >= 70 ? "var(--p,#1A73E8)" : pct >= 30 ? "#E37400" : "#EA4335";
+  const pctColor = task?.status === "done" ? "#16A34A" : pct >= 70 ? "var(--p,#5B5EF4)" : pct >= 30 ? "#F59E0B" : "#EF4444";
   const pctGradient = task?.status === "done"
-    ? "linear-gradient(90deg,#1E8E3E,#34A853)"
+    ? "linear-gradient(90deg,#22C55E,#4ADE80)"
     : pct >= 70
-      ? "linear-gradient(90deg,var(--p,#1A73E8),#818CF8)"
+      ? "linear-gradient(90deg,var(--p,#5B5EF4),#818CF8)"
       : pct >= 30
-        ? "linear-gradient(90deg,#E37400,#FBBC04)"
+        ? "linear-gradient(90deg,#F59E0B,#FBBF24)"
         : "linear-gradient(90deg,#EF4444,#F87171)";
 
   const grouped = groupByDate(chatMessages);
   const getModalTask = () => activeModal ? (allTaskMap.get(activeModal.taskId) || activeModal.task || task) : task;
+  const rootOnlyTasks = allTasks.filter(t => !t.parentTaskId);
   const stats = {
-    total: allTasks.length,
-    open: allTasks.filter(t => t.status === "open").length,
-    active: allTasks.filter(t => t.status === "in_progress").length,
-    done: allTasks.filter(t => t.status === "done").length,
+    total: rootOnlyTasks.filter(t => t.status !== "done").length,
+    open: rootOnlyTasks.filter(t => t.status === "open").length,
+    active: rootOnlyTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
+    done: rootOnlyTasks.filter(t => t.status === "done").length,
   };
 
   const employeeGroups = buildEmployeeGroups();
 
   // Styles
   const STYLES = `
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       --mono: 'IBM Plex Mono', ui-monospace, monospace;
-      --p: #1A73E8; --p-mid: #1557B0; --p-lt: #EBF3FE; --p-glow: rgba(26,115,232,0.12);
-      --surface: #FFFFFF; --bg: #F0F2F5; --bg2: #E4E7EC;
-      --border: #E4E7EC; --border2: #D0D5DD;
-      --text-1: #1A1D21; --text-2: #344054; --text-3: #667085; --text-4: #98A2B3;
-      --success: #1E8E3E; --warn: #E37400; --danger: #D93025;
-      --radius: 10px; --radius-lg: 12px;
+      --p: #4F46E5; --p-mid: #4338CA; --p-lt: #EEF2FF; --p-glow: rgba(79,70,229,0.12);
+      --surface: #FFFFFF; --bg: #F3F4F6; --bg2: #E5E7EB;
+      --border: #E5E7EB; --border2: #D1D5DB;
+      --text-1: #111827; --text-2: #374151; --text-3: #6B7280; --text-4: #9CA3AF;
+      --success: #22C55E; --warn: #F59E0B; --danger: #EF4444;
+      --radius: 8px; --radius-lg: 12px;
       --ease: cubic-bezier(0.2,0,0,1); --ease2: cubic-bezier(0.4,0,0.2,1);
-      --shadow-sm: 0 1px 3px rgba(60,64,67,0.08); --shadow-md: 0 2px 8px rgba(60,64,67,0.12);
-      --shadow-xl: 0 8px 28px rgba(60,64,67,0.16);
+      --shadow-sm: 0 1px 2px rgba(26,29,46,0.05); --shadow-md: 0 2px 8px rgba(26,29,46,0.07);
+      --shadow-xl: 0 8px 24px rgba(26,29,46,0.1);
+      --sidebar-bg: #FAFBFF;
     }
 
-    /* ═══ ROOT ═══ */
-    .gv-root { display:flex; height:100%; overflow:hidden; background:var(--bg); font-family:var(--font); }
+    .gv-root { display:flex; height:100%; overflow:hidden; background:var(--bg); font-family:var(--font); position:relative; }
 
-    /* ═══ COL 1 — LEFT SIDEBAR ═══ */
-    .gv-tree {
-      width: 300px; min-width: 300px; display:flex; flex-direction:column;
-      background:var(--surface); border-right:1px solid var(--border); z-index:3;
-      transition: width 0.25s var(--ease), min-width 0.25s var(--ease), opacity 0.2s;
-    }
-    .gv-tree.collapsed { width:0; min-width:0; overflow:hidden; opacity:0; border:none; }
+    /* ═══ RESIZER ═══ */
+    .gv-resizer { width:4px; cursor:col-resize; background:transparent; flex-shrink:0; position:relative; z-index:10; transition:background 0.15s; }
+    .gv-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:2px; height:32px; border-radius:2px; background:var(--border2); opacity:0; transition:opacity 0.15s; }
+    .gv-resizer:hover { background:var(--p-lt); }
+    .gv-resizer:hover::after { opacity:1; }
+    .gv-resizer:active { background:var(--p); }
 
-    .gv-tree-head { border-bottom:1px solid var(--border); flex-shrink:0; background:var(--surface); }
+    /* ═══ COL 1 — LIST PANEL ═══ */
+    @keyframes chatSlideIn { from{opacity:0;transform:translateX(18px)} to{opacity:1;transform:translateX(0)} }
+    .gv-list-panel { display:flex; flex-direction:column; background:var(--surface); z-index:3; overflow:hidden; border-right:1px solid var(--border); transition: width 0.3s cubic-bezier(0.4,0,0.2,1), min-width 0.3s cubic-bezier(0.4,0,0.2,1); }
+    .gv-chat { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; position:relative; transition: flex 0.3s cubic-bezier(0.4,0,0.2,1); animation:chatSlideIn 0.25s cubic-bezier(0.4,0,0.2,1); }
 
-    .gv-brand-row { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; gap:8px; }
-    .gv-logo { display:flex; align-items:center; gap:8px; }
-    .gv-logo-mark {
-      width:28px; height:28px; border-radius:8px; background:var(--p);
-      display:flex; align-items:center; justify-content:center; flex-shrink:0;
-    }
-    .gv-logo-text { font-size:14px; font-weight:700; color:var(--text-1); letter-spacing:-0.02em; }
-    .gv-logo-sub { font-size:10px; color:var(--text-4); margin-top:1px; }
-    .gv-new-btn {
-      display:flex; align-items:center; gap:4px; padding:6px 12px; border-radius:20px;
-      background:var(--p); color:#fff; font-size:12px; font-weight:600; border:none;
-      cursor:pointer; font-family:var(--font); transition:all 0.15s;
-      box-shadow: 0 1px 3px var(--p-glow);
-    }
-    .gv-new-btn:hover { background:var(--p-mid); box-shadow:var(--shadow-md); transform:translateY(-1px); }
+    .gv-lp-topbar { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--surface); }
+    .gv-lp-title { font-size:13px; font-weight:700; color:var(--text-1); flex:1; }
+    .gv-search-box { display:flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); transition:all 0.15s; flex:1; max-width:220px; }
+    .gv-search-box:focus-within { border-color:var(--p); background:#fff; box-shadow:0 0 0 2px var(--p-glow); }
+    .gv-search-box input { border:none; background:none; outline:none; font-size:11px; color:var(--text-1); font-family:var(--font); width:100%; }
+    .gv-search-box input::placeholder { color:var(--text-4); }
 
-    /* Sidebar toggle (outside sidebar) */
-    .gv-sidebar-toggle {
-      position:absolute; left:0; top:50%; transform:translateY(-50%);
-      width:20px; height:40px; background:var(--surface); border:1px solid var(--border);
-      border-left:none; border-radius:0 8px 8px 0; cursor:pointer; z-index:4;
-      display:flex; align-items:center; justify-content:center; color:var(--text-4);
-      transition:all 0.15s; box-shadow:2px 0 4px rgba(0,0,0,0.04);
-    }
-    .gv-sidebar-toggle:hover { color:var(--p); background:var(--p-lt); }
-    .gv-sidebar-toggle svg { transition:transform 0.2s; }
-    .gv-sidebar-toggle.flip svg { transform:rotate(180deg); }
+    .gv-new-btn { display:flex; align-items:center; gap:4px; padding:5px 12px; border-radius:8px; background:var(--p); color:#fff; font-size:11px; font-weight:600; border:none; cursor:pointer; font-family:var(--font); transition:all 0.15s; white-space:nowrap; box-shadow:0 1px 4px var(--p-glow); }
+    .gv-new-btn:hover { background:var(--p-mid); transform:translateY(-1px); }
+    .gv-back-btn { display:flex; align-items:center; gap:4px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-family:var(--font); font-size:11px; font-weight:600; color:var(--text-2); transition:all 0.13s; flex-shrink:0; }
+    .gv-back-btn:hover { background:var(--p-lt); border-color:var(--p); color:var(--p); }
 
-    /* Stats */
-    .gv-stats {
-      display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--border); flex-shrink:0;
-    }
-    .gv-stat {
-      display:flex; flex-direction:column; align-items:center; gap:1px; padding:8px 4px;
-      cursor:default; transition:background 0.1s; border-right:1px solid var(--border);
-    }
-    .gv-stat:last-child { border-right:none; }
-    .gv-stat:hover { background:#F5F7FA; }
-    .gv-stat-n { font-size:15px; font-weight:700; line-height:1; font-family:var(--mono); }
+    /* Stats tabs */
+    .gv-stats { display:flex; gap:0; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--surface); padding:0 8px; }
+    .gv-stat { display:flex; align-items:center; gap:4px; padding:7px 12px; cursor:pointer; transition:all 0.12s; border-bottom:2px solid transparent; flex:1; justify-content:center; }
+    .gv-stat:hover { background:var(--bg); }
+    .gv-stat.active-tab { border-bottom-color:var(--p); }
+    .gv-stat.active-tab .gv-stat-n { color:var(--p); }
+    .gv-stat.active-tab .gv-stat-l { color:var(--p); font-weight:700; }
+    .gv-stat-n { font-size:12px; font-weight:700; line-height:1; font-family:var(--mono); color:var(--text-1); }
     .gv-stat-l { font-size:8px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-4); }
 
-    /* Tree list */
-    .gv-tree-list { flex:1; overflow-y:auto; padding:4px 0; }
+    .gv-list-body { flex:1; overflow-y:auto; overflow-x:visible; }
+    .gv-list-body::-webkit-scrollbar { width:3px; }
+    .gv-list-body::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+
+    /* ── Table — Task.Co clean style ── */
+    .gv-tbl-group { }
+    .gv-grp-header { display:flex; align-items:center; gap:6px; padding:7px 14px; border-bottom:1px solid var(--border); cursor:pointer; user-select:none; background:var(--surface); position:sticky; top:0; z-index:5; }
+    .gv-grp-header:hover { background:#FAFBFF; }
+    .gv-grp-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:99px; font-size:10px; font-weight:700; }
+    .gv-grp-count { font-size:10px; font-weight:700; padding:1px 7px; border-radius:99px; background:var(--bg2); color:var(--text-3); }
+
+    .gv-tbl-head { display:flex; align-items:center; padding:0 6px; height:30px; background:#F7F8FC; border-bottom:1px solid var(--border); font-size:10px; font-weight:700; color:var(--text-4); text-transform:uppercase; letter-spacing:0.05em; position:sticky; top:34px; z-index:4; }
+    .gv-tbl-head .col-name    { flex:2; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-desc    { flex:2.5; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-people  { width:90px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-pri     { width:88px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-date    { width:116px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-status  { width:108px; padding:0 10px; flex-shrink:0; }
+    .gv-tbl-head .col-act     { width:30px; flex-shrink:0; }
+
+    .gv-tbl-row { display:flex; align-items:center; padding:0 6px; height:40px; border-bottom:1px solid #F3F4F8; cursor:pointer; transition:background 0.08s; background:var(--surface); overflow:visible; }
+    .gv-tbl-row:hover { background:#F7F8FC; }
+    .gv-tbl-row.selected { background:var(--p-lt); }
+    .gv-tbl-row.subtask-row { background:#FAFBFF; }
+    .gv-tbl-row.subtask-row:hover { background:#F0F2FA; }
+    .gv-tbl-drag { width:16px; display:flex; align-items:center; justify-content:center; color:var(--border2); flex-shrink:0; opacity:0; transition:opacity 0.1s; }
+    .gv-tbl-row:hover .gv-tbl-drag { opacity:1; }
+    .gv-tbl-check { width:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .gv-tbl-expand { width:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .gv-tbl-row .col-name  { flex:2; min-width:0; padding:0 10px; display:flex; align-items:center; gap:4px; border-right:1px solid var(--border); }
+    .gv-tbl-row .col-desc  { flex:2.5; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
+    .gv-tbl-row .col-people { width:90px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); overflow:visible; }
+    .gv-tbl-row .col-pri   { width:88px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
+    .gv-tbl-row .col-date  { width:116px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
+    .gv-tbl-row .col-status { width:108px; padding:0 10px; flex-shrink:0; }
+    .gv-tbl-row .col-act   { width:30px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .gv-task-name { font-size:12px; font-weight:500; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gv-task-name.done-line { text-decoration:line-through; color:var(--text-4); font-weight:400; }
+    .gv-task-desc { font-size:11px; color:var(--text-4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    .gv-avatar-stack { display:flex; position:relative; overflow:visible; }
+    .gv-avatar-stack-tip { display:none; position:fixed; background:#1A1D2E; color:#fff; border-radius:8px; padding:6px 10px; font-size:10px; white-space:nowrap; z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,0.3); pointer-events:none; margin-top:-90px; }
+    .gv-avatar-stack:hover .gv-avatar-stack-tip { display:block; position:absolute; bottom:calc(100% + 6px); left:0; z-index:9999; margin-top:0; }
+
+    .gv-compact-grp-head { padding:5px 12px; font-size:9px; font-weight:700; color:var(--text-4); text-transform:uppercase; letter-spacing:0.07em; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:4px; }
+    .gv-compact-item { display:flex; align-items:center; gap:6px; padding:8px 12px; border-bottom:1px solid #F3F4F8; cursor:pointer; transition:all 0.08s; }
+    .gv-compact-item:hover { background:#F0F2FA; }
+    .gv-compact-item.active { background:var(--p-lt); border-left:2px solid var(--p); }
+    .gv-compact-item-name { font-size:11px; font-weight:500; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+    .gv-compact-item.active .gv-compact-item-name { color:var(--p); font-weight:600; }
+
+    .gv-row-menu { position:fixed; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-xl); min-width:160px; padding:4px; animation:ctx-in 0.12s ease; }
+
+    .gv-sidebar-toggle { position:absolute; left:0; top:50%; transform:translateY(-50%); width:16px; height:36px; background:var(--surface); border:1px solid var(--border); border-left:none; border-radius:0 6px 6px 0; cursor:pointer; z-index:4; display:flex; align-items:center; justify-content:center; color:var(--text-4); transition:all 0.15s; }
+    .gv-sidebar-toggle:hover { color:var(--p); background:var(--p-lt); }
+
+    /* Tree */
+    .gv-tree-list { flex:1; overflow-y:auto; padding:2px 0; }
     .gv-tree-list::-webkit-scrollbar { width:3px; }
     .gv-tree-list::-webkit-scrollbar-thumb { background:var(--bg2); border-radius:2px; }
-
-    /* Employee group — conversation style */
     .gv-emp-group { margin:0; }
-    .gv-emp-header {
-      display:flex; align-items:center; gap:8px; padding:10px 14px;
-      cursor:pointer; transition:background 0.1s; user-select:none;
-    }
-    .gv-emp-header:hover { background:#F5F7FA; }
-    .gv-emp-folder-icon { width:16px; height:16px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); }
-    .gv-emp-name { font-size:13px; font-weight:600; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .gv-emp-dots { font-size:14px; color:var(--text-4); padding:0 4px; cursor:pointer; border-radius:4px; }
+    .gv-emp-header { display:flex; align-items:center; gap:6px; padding:8px 12px; cursor:pointer; transition:background 0.1s; user-select:none; }
+    .gv-emp-header:hover { background:#F0F2FA; }
+    .gv-emp-folder-icon { width:14px; height:14px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); }
+    .gv-emp-name { font-size:12px; font-weight:600; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gv-emp-dots { font-size:12px; color:var(--text-4); padding:0 3px; cursor:pointer; border-radius:3px; }
     .gv-emp-dots:hover { background:var(--bg2); }
     .gv-emp-chevron { color:var(--text-4); transition:transform 0.2s var(--ease); flex-shrink:0; }
     .gv-emp-chevron.open { transform:rotate(180deg); }
     .gv-emp-tasks { padding:0 0 2px; }
 
-    /* Tree node — conversation item style */
-    .gv-node {
-      display:flex; align-items:center; gap:6px; padding:8px 14px 8px 24px;
-      cursor:pointer; transition:all 0.1s; border-left:2px solid transparent;
-    }
-    .gv-node:hover { background:#F5F7FA; }
+    .gv-node { display:flex; align-items:center; gap:5px; padding:7px 12px 7px 20px; cursor:pointer; transition:all 0.08s; border-left:2px solid transparent; }
+    .gv-node:hover { background:#F0F2FA; }
     .gv-node.active { background:var(--p-lt); border-left-color:var(--p); }
-    .gv-chevron {
-      width:16px; height:16px; border:none; background:none; cursor:pointer; padding:0;
-      display:flex; align-items:center; justify-content:center; border-radius:3px;
-      color:var(--text-4); transition:transform 0.2s var(--ease);
-    }
+    .gv-chevron { width:14px; height:14px; border:none; background:none; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; border-radius:3px; color:var(--text-4); transition:transform 0.2s var(--ease); }
     .gv-chevron:hover { background:var(--bg2); }
     .gv-chevron.open { transform:rotate(90deg); }
-    .gv-node-file-icon { width:16px; height:16px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); }
+    .gv-node-file-icon { width:14px; height:14px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--text-3); }
     .gv-node.active .gv-node-file-icon { color:var(--p); }
-    .gv-node-name { font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font-weight:400; }
+    .gv-node-name { font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font-weight:400; }
     .gv-node.active .gv-node-name { color:var(--p); font-weight:600; }
-    .gv-node-ct { font-size:9px; font-family:var(--mono); color:var(--text-4); padding:1px 5px; border-radius:99px; background:var(--bg); }
-    .gv-overdue-dot { width:6px; height:6px; border-radius:50%; background:var(--danger); animation:od-pulse 2s ease-in-out infinite; }
+    .gv-node-ct { font-size:8px; font-family:var(--mono); color:var(--text-4); padding:1px 4px; border-radius:99px; background:var(--bg); }
+    .gv-overdue-dot { width:5px; height:5px; border-radius:50%; background:var(--danger); animation:od-pulse 2s ease-in-out infinite; }
     @keyframes od-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
 
     /* ═══ COL 2 — CHAT ═══ */
-    .gv-chat {
-      flex:1; min-width:0; display:flex; flex-direction:column;
-      background:var(--surface); overflow:hidden; position:relative;
-    }
-
-    .gv-chat-head {
-      display:flex; align-items:center; gap:10px; padding:10px 18px;
-      border-bottom:1px solid var(--border); flex-shrink:0; min-height:52px; background:var(--surface);
-    }
-    .gv-chat-task-chip { display:flex; align-items:center; gap:5px; padding:4px 10px; border-radius:6px; background:var(--p-lt); flex-shrink:0; }
-    .gv-chat-tid { font-size:10px; font-family:var(--mono); font-weight:600; color:var(--p); }
-    .gv-chat-task-name { font-size:14px; font-weight:600; color:var(--text-1); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .gv-chat-badge { font-size:10px; font-weight:600; padding:3px 8px; border-radius:4px; flex-shrink:0; }
-
-    /* Chat header action buttons */
-    .gv-chat-actions {
-      display:flex; gap:2px; flex-shrink:0; margin-left:auto; align-items:center;
-    }
-    .gv-chat-act-btn {
-      width:32px; height:32px; border-radius:8px; border:1px solid var(--border);
-      background:var(--surface); cursor:pointer; display:flex; align-items:center;
-      justify-content:center; color:var(--text-3); transition:all 0.12s; flex-shrink:0;
-    }
+    .gv-chat { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; position:relative; }
+    .gv-chat-head { display:flex; align-items:center; gap:8px; padding:9px 16px; border-bottom:1px solid var(--border); flex-shrink:0; min-height:46px; background:var(--surface); }
+    .gv-chat-task-chip { display:flex; align-items:center; gap:4px; padding:2px 8px; border-radius:5px; background:var(--p-lt); flex-shrink:0; }
+    .gv-chat-tid { font-size:9px; font-family:var(--mono); font-weight:600; color:var(--p); }
+    .gv-chat-task-name { font-size:12px; font-weight:600; color:var(--text-1); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gv-chat-badge { font-size:9px; font-weight:700; padding:2px 8px; border-radius:99px; flex-shrink:0; }
+    .gv-chat-actions { display:flex; gap:2px; flex-shrink:0; margin-left:auto; align-items:center; }
+    .gv-chat-act-btn { width:28px; height:28px; border-radius:7px; border:1px solid var(--border); background:var(--surface); cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-3); transition:all 0.12s; flex-shrink:0; }
     .gv-chat-act-btn:hover { background:var(--p-lt); color:var(--p); border-color:var(--p); }
-
-    /* Mobile-only actions: HIDDEN on desktop */
     .gv-mob-only-actions { display:none; gap:2px; align-items:center; }
+    @media (max-width:767px) { .gv-mob-only-actions { display:flex; } }
 
-    @media (max-width:767px) {
-      /* Show mobile-only actions on mobile */
-      .gv-mob-only-actions { display:flex; }
-    }
-
-    /* Messages */
-    .gv-msgs {
-      flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:1px;
-      background:#F0F2F5;
-      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23e0e0e0' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-    }
-    .gv-msgs::-webkit-scrollbar { width:4px; }
-    .gv-msgs::-webkit-scrollbar-thumb { background:var(--bg2); border-radius:2px; }
-
-    .gv-date-sep { display:flex; align-items:center; gap:12px; margin:14px 0; }
+    .gv-msgs { flex:1; overflow-y:auto; padding:14px 18px; display:flex; flex-direction:column; gap:1px; background:#F5F6FA; background-image:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d5d7e2' fill-opacity='0.1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+    .gv-msgs::-webkit-scrollbar { width:3px; }
+    .gv-msgs::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+    .gv-date-sep { display:flex; align-items:center; gap:10px; margin:12px 0; }
     .gv-date-sep-line { flex:1; height:1px; background:var(--border); }
-    .gv-date-sep-label {
-      font-size:10px; color:var(--text-4); font-weight:600; text-transform:uppercase;
-      letter-spacing:0.06em; white-space:nowrap; padding:3px 10px;
-      background:var(--surface); border-radius:99px; border:1px solid var(--border);
-    }
-
-    .gv-msg-group { display:flex; gap:8px; padding:4px 0; max-width:75%; }
+    .gv-date-sep-label { font-size:9px; color:var(--text-4); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; white-space:nowrap; padding:3px 9px; background:var(--surface); border-radius:99px; border:1px solid var(--border); }
+    .gv-msg-group { display:flex; gap:6px; padding:3px 0; max-width:72%; }
     .gv-msg-group.me { margin-left:auto; flex-direction:row-reverse; }
-    .gv-msg-avatar {
-      width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-      font-size:10px; font-weight:700; color:#fff; background:#667085; flex-shrink:0; position:relative;
-    }
+    .gv-msg-avatar { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#fff; background:var(--p); flex-shrink:0; position:relative; }
     .gv-msg-col { flex:1; min-width:0; }
-    .gv-msg-meta { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-4); margin-bottom:3px; font-weight:500; }
+    .gv-msg-meta { display:flex; align-items:center; gap:3px; font-size:10px; color:var(--text-4); margin-bottom:2px; font-weight:500; }
     .gv-msg-group.me .gv-msg-meta { justify-content:flex-end; }
-
-    .gv-bubble-wrapper { display:flex; align-items:flex-start; gap:4px; position:relative; }
+    .gv-bubble-wrapper { display:flex; align-items:flex-start; gap:3px; position:relative; }
     .gv-msg-group.me .gv-bubble-wrapper { flex-direction:row-reverse; }
-
-    .gv-bubble {
-      padding:8px 12px 6px; border-radius:2px 12px 12px 12px; background:#FFFFFF;
-      font-size:13.5px; line-height:1.5; color:var(--text-1); max-width:100%; word-wrap:break-word;
-      border:1px solid #E4E7EC; box-shadow:0 1px 2px rgba(0,0,0,0.04);
-    }
-    .gv-msg-group.me .gv-bubble { 
-      background:#1A73E8; color:#fff; border-radius:12px 2px 12px 12px; 
-      border:none; box-shadow:0 1px 3px rgba(26,115,232,0.3);
-    }
+    .gv-bubble { padding:7px 11px 5px; border-radius:3px 10px 10px 10px; background:#FFFFFF; font-size:12px; line-height:1.5; color:var(--text-1); max-width:100%; word-wrap:break-word; border:1px solid var(--border); box-shadow:0 1px 2px rgba(0,0,0,0.02); }
+    .gv-msg-group.me .gv-bubble { background:var(--p); color:#fff; border-radius:10px 3px 10px 10px; border:none; box-shadow:0 1px 4px rgba(91,94,244,0.25); }
     .gv-bubble.gv-sending { opacity:0.5; }
     .gv-bubble.gv-error { border:1.5px solid var(--danger); }
     .gv-bubble.gv-bubble-new { box-shadow:inset 3px 0 0 var(--success); }
-    .gv-bubble-status { font-size:10px; color:var(--text-4); margin-top:3px; }
+    .gv-bubble-status { font-size:9px; color:var(--text-4); margin-top:2px; }
     .gv-bubble-status.gv-error { color:var(--danger); }
-
-    .gv-image-preview { max-width:220px; max-height:200px; border-radius:8px; cursor:pointer; margin-top:4px; display:block; object-fit:cover; }
-    .gv-attachment {
-      display:inline-flex; align-items:center; gap:6px; padding:8px 12px;
-      background:var(--surface); border:1px solid var(--border); border-radius:8px;
-      font-size:12px; color:var(--text-2); text-decoration:none; margin-top:4px;
-    }
+    .gv-image-preview { max-width:200px; max-height:180px; border-radius:8px; cursor:pointer; margin-top:3px; display:block; object-fit:cover; }
+    .gv-attachment { display:inline-flex; align-items:center; gap:5px; padding:6px 10px; background:var(--surface); border:1px solid var(--border); border-radius:8px; font-size:11px; color:var(--text-2); text-decoration:none; margin-top:3px; }
     .gv-attachment:hover { background:var(--bg); }
     .gv-attachment-download { color:var(--p); }
-
-    /* Context menu on messages (replaces delete X) */
-    .gv-delete-msg {
-      width:24px; height:24px; border-radius:50%; border:none; background:transparent;
-      color:var(--text-4); cursor:pointer; font-size:12px; display:none;
-      align-items:center; justify-content:center; flex-shrink:0; transition:all 0.1s;
-      position:absolute; top:-8px; right:-8px;
-    }
+    .gv-delete-msg { width:20px; height:20px; border-radius:50%; border:none; background:transparent; color:var(--text-4); cursor:pointer; font-size:10px; display:none; align-items:center; justify-content:center; flex-shrink:0; position:absolute; top:-6px; right:-6px; }
     .gv-bubble-wrapper:hover .gv-delete-msg { display:flex; }
     .gv-delete-msg:hover { background:#FEE2E2; color:var(--danger); }
+    .gv-sys-msg { text-align:center; padding:4px 12px; font-size:10px; color:var(--text-4); font-style:italic; }
+    .gv-input-bar { border-top:1px solid var(--border); background:var(--surface); flex-shrink:0; padding:6px 12px; }
+    .gv-input-bar textarea, .gv-input-bar input[type="text"] { border-radius:10px !important; background:var(--bg) !important; border:1px solid var(--border) !important; padding:8px 14px !important; font-size:12px !important; }
+    .gv-input-bar textarea:focus, .gv-input-bar input[type="text"]:focus { border-color:var(--p) !important; box-shadow:0 0 0 2px var(--p-glow) !important; }
 
-    .gv-sys-msg { text-align:center; padding:6px 16px; font-size:11px; color:var(--text-4); font-style:italic; }
-    .gv-input-bar { 
-      border-top:1px solid var(--border); background:#F0F2F5; flex-shrink:0; padding:6px 12px;
-    }
-    .gv-input-bar textarea, .gv-input-bar input[type="text"] {
-      border-radius:20px !important; background:#fff !important; border:1px solid #E4E7EC !important;
-      padding:10px 16px !important; font-size:14px !important;
-    }
-    .gv-input-bar textarea:focus, .gv-input-bar input[type="text"]:focus {
-      border-color:#1A73E8 !important; box-shadow:0 0 0 2px rgba(26,115,232,0.1) !important;
-    }
-
-    /* ═══ COL 3 — RIGHT PANEL with TOOLBAR ═══ */
+    /* ═══ COL 3 — RIGHT PANEL ═══ */
     .gv-right-area { display:flex; height:100%; }
-
-    /* Vertical toolbar */
-    .gv-toolbar {
-      width:44px; min-width:44px; background:var(--surface); border-left:1px solid var(--border);
-      display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:4px;
-    }
-    .gv-tool-btn {
-      width:36px; height:36px; border-radius:10px; border:none; background:transparent;
-      cursor:pointer; display:flex; align-items:center; justify-content:center;
-      color:var(--text-3); transition:all 0.12s; position:relative;
-    }
-    .gv-tool-btn:hover { background:#F5F7FA; color:var(--text-1); }
+    .gv-toolbar { width:38px; min-width:38px; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:3px; }
+    .gv-tool-btn { width:30px; height:30px; border-radius:8px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-3); transition:all 0.12s; position:relative; }
+    .gv-tool-btn:hover { background:var(--bg); color:var(--text-1); }
     .gv-tool-btn.active { background:var(--p-lt); color:var(--p); }
-    .gv-tool-btn.active::after {
-      content:''; position:absolute; right:0; top:8px; bottom:8px; width:2px;
-      background:var(--p); border-radius:2px 0 0 2px;
-    }
-    .gv-tool-sep { width:24px; height:1px; background:var(--border); margin:4px 0; }
+    .gv-tool-btn.active::after { content:''; position:absolute; right:0; top:6px; bottom:6px; width:2px; background:var(--p); border-radius:2px 0 0 2px; }
+    .gv-tool-sep { width:20px; height:1px; background:var(--border); margin:4px 0; }
 
-    /* Detail panel */
-    .gv-detail {
-      width:320px; min-width:320px; display:flex; flex-direction:column;
-      background:var(--surface); border-right:1px solid var(--border);
-      transition:width 0.25s var(--ease), min-width 0.25s var(--ease), opacity 0.2s;
-      overflow:hidden; order:1;
-    }
+    .gv-detail { width:340px; min-width:340px; display:flex; flex-direction:column; background:var(--surface); border-right:1px solid var(--border); transition:width 0.2s var(--ease), min-width 0.2s var(--ease), opacity 0.15s; overflow:hidden; order:1; }
     .gv-detail.collapsed { width:0; min-width:0; opacity:0; border:none; overflow:hidden; }
-
-    .gv-detail-toggle {
-      position:absolute; left:-12px; top:50%; transform:translateY(-50%);
-      width:24px; height:24px; border-radius:50%; border:1px solid var(--border);
-      background:var(--surface); cursor:pointer; display:none;
-      align-items:center; justify-content:center; color:var(--text-3); z-index:5;
-      box-shadow:var(--shadow-sm);
-    }
-
-    /* Detail header with close */
-    .gv-detail-head {
-      display:flex; align-items:center; justify-content:space-between;
-      padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0;
-    }
-    .gv-detail-head-title { font-size:13px; font-weight:700; color:var(--text-1); }
-    .gv-detail-head-actions { display:flex; gap:4px; }
-    .gv-detail-icon-btn {
-      width:28px; height:28px; border-radius:6px; border:1px solid var(--border);
-      background:transparent; cursor:pointer; display:flex; align-items:center;
-      justify-content:center; color:var(--text-3); transition:all 0.1s;
-    }
-    .gv-detail-icon-btn:hover { background:#F5F7FA; color:var(--text-1); }
-    .gv-detail-icon-btn.danger:hover { background:#FEE2E2; color:var(--danger); border-color:var(--danger); }
-
+    .gv-detail-toggle { display:none; }
+    .gv-detail-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }
+    .gv-detail-head-title { font-size:12px; font-weight:700; color:var(--text-1); }
+    .gv-detail-head-actions { display:flex; gap:3px; }
+    .gv-detail-icon-btn { width:26px; height:26px; border-radius:6px; border:1px solid var(--border); background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-3); transition:all 0.1s; }
+    .gv-detail-icon-btn:hover { background:var(--bg); color:var(--text-1); }
+    .gv-detail-icon-btn.danger:hover { background:#FEE2E2; color:var(--danger); }
     .gv-detail-inner { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
     .gv-detail-inner::-webkit-scrollbar { width:3px; }
     .gv-detail-inner::-webkit-scrollbar-thumb { background:var(--bg2); border-radius:2px; }
+    .gv-placeholder { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; text-align:center; }
 
-    .gv-placeholder {
-      flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-      padding:24px; text-align:center;
-    }
-
-    .gv-d-title-row { display:flex; justify-content:space-between; align-items:flex-start; padding:14px 14px 8px; gap:8px; }
-    .gv-d-title { font-size:15px; font-weight:700; color:var(--text-1); line-height:1.35; }
-    .gv-actions { display:flex; gap:4px; flex-wrap:wrap; flex-shrink:0; }
-    .gv-abtn {
-      padding:5px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface);
-      cursor:pointer; font-size:11px; font-weight:600; font-family:var(--font); transition:all 0.12s;
-    }
+    .gv-d-title-row { display:flex; justify-content:space-between; align-items:flex-start; padding:12px 12px 6px; gap:6px; }
+    .gv-d-title { font-size:14px; font-weight:700; color:var(--text-1); line-height:1.3; }
+    .gv-actions { display:flex; gap:3px; flex-wrap:wrap; flex-shrink:0; }
+    .gv-abtn { padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-size:10px; font-weight:600; font-family:var(--font); transition:all 0.12s; }
     .gv-abtn:hover { background:var(--bg); }
     .gv-abtn-p { color:var(--p); border-color:var(--p); }
     .gv-abtn-p:hover { background:var(--p-lt); }
@@ -1885,150 +2039,182 @@ export default function TasksPage() {
     .gv-abtn-d { color:var(--danger); border-color:var(--danger); }
     .gv-abtn-d:hover { background:#FEE2E2; }
 
-    .gv-badge-row { display:flex; gap:5px; flex-wrap:wrap; padding:0 14px 10px; }
-    .gv-code-tag { font-size:10px; font-family:var(--mono); color:var(--text-4); background:var(--bg); padding:2px 8px; border-radius:4px; }
-    .gv-badge { font-size:10px; font-weight:600; padding:2px 8px; border-radius:4px; border:1px solid; display:inline-flex; align-items:center; gap:4px; }
-    .gv-badge-dot { width:5px; height:5px; border-radius:50%; }
+    .gv-badge-row { display:flex; gap:4px; flex-wrap:wrap; padding:0 12px 8px; }
+    .gv-code-tag { font-size:9px; font-family:var(--mono); color:var(--text-4); background:var(--bg); padding:1px 6px; border-radius:4px; }
+    .gv-badge { font-size:9px; font-weight:600; padding:2px 7px; border-radius:5px; border:1px solid; display:inline-flex; align-items:center; gap:3px; }
+    .gv-badge-dot { width:4px; height:4px; border-radius:50%; }
 
-    .gv-detail-tabs { display:flex; border-bottom:1px solid var(--border); padding:0 14px; flex-shrink:0; }
-    .gv-dtab {
-      display:flex; align-items:center; gap:5px; padding:9px 14px; font-size:12px; font-weight:500;
-      color:var(--text-3); border:none; background:none; cursor:pointer; font-family:var(--font);
-      border-bottom:2px solid transparent; transition:all 0.12s;
-    }
+    .gv-detail-tabs { display:flex; border-bottom:1px solid var(--border); padding:0 12px; flex-shrink:0; }
+    .gv-dtab { display:flex; align-items:center; gap:4px; padding:8px 12px; font-size:11px; font-weight:500; color:var(--text-3); border:none; background:none; cursor:pointer; font-family:var(--font); border-bottom:2px solid transparent; transition:all 0.12s; }
     .gv-dtab:hover { color:var(--text-1); }
-    .gv-dtab.active { color:var(--p); border-bottom-color:var(--p); font-weight:600; }
-    .gv-dtab-ct { font-size:9px; font-weight:700; color:var(--p); background:var(--p-lt); padding:1px 5px; border-radius:99px; }
+    .gv-dtab.active { color:var(--p); border-bottom-color:var(--p); font-weight:700; }
+    .gv-dtab-ct { font-size:8px; font-weight:700; color:var(--p); background:var(--p-lt); padding:1px 5px; border-radius:99px; }
 
-    .gv-detail-scroll, .gv-reports-scroll { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:12px; }
+    .gv-detail-scroll, .gv-reports-scroll { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:8px; }
+    .gv-info-row { display:flex; align-items:flex-start; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); }
+    .gv-info-lbl { font-size:10px; color:var(--text-4); font-weight:500; width:84px; flex-shrink:0; display:flex; align-items:center; gap:4px; padding-top:1px; }
+    .gv-info-val { font-size:11px; color:var(--text-1); flex:1; font-weight:500; line-height:1.4; }
     .gv-bc { display:flex; align-items:center; flex-wrap:wrap; gap:2px; }
-    .gv-bc-btn { font-size:11px; color:var(--p); background:none; border:none; cursor:pointer; font-family:var(--font); font-weight:500; }
+    .gv-bc-btn { font-size:10px; color:var(--p); background:none; border:none; cursor:pointer; font-family:var(--font); font-weight:500; }
     .gv-bc-btn:hover { text-decoration:underline; }
-    .gv-bc-sep { font-size:10px; color:var(--text-4); margin:0 2px; }
-    .gv-bc-cur { font-size:11px; color:var(--text-3); font-weight:600; }
+    .gv-bc-sep { font-size:9px; color:var(--text-4); margin:0 1px; }
+    .gv-bc-cur { font-size:10px; color:var(--text-3); font-weight:600; }
 
-    .gv-meta-row { display:flex; gap:6px; flex-wrap:wrap; }
-    .gv-meta-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:99px; background:var(--bg); border:1px solid var(--border); font-size:10px; color:var(--text-3); font-weight:600; }
-    .gv-desc { font-size:13px; line-height:1.65; color:var(--text-2); white-space:pre-wrap; }
-    .gv-notes { display:flex; gap:8px; align-items:flex-start; padding:10px 12px; background:#FFF8E1; border:1px solid rgba(249,171,0,0.2); border-radius:8px; }
-    .gv-notes-text { font-size:12px; line-height:1.6; color:#7B4F00; flex:1; }
+    .gv-meta-row { display:flex; gap:5px; flex-wrap:wrap; }
+    .gv-meta-pill { display:inline-flex; align-items:center; gap:3px; padding:3px 8px; border-radius:99px; background:var(--bg); border:1px solid var(--border); font-size:9px; color:var(--text-3); font-weight:600; }
+    .gv-desc { font-size:12px; line-height:1.6; color:var(--text-2); white-space:pre-wrap; }
+    .gv-notes { display:flex; gap:6px; align-items:flex-start; padding:8px 10px; background:#FFF8E1; border:1px solid rgba(245,158,11,0.2); border-radius:8px; }
+    .gv-notes-text { font-size:11px; line-height:1.6; color:#7B4F00; flex:1; }
 
-    .gv-prog { display:flex; flex-direction:column; gap:6px; }
+    .gv-prog { display:flex; flex-direction:column; gap:4px; }
     .gv-prog-head { display:flex; justify-content:space-between; align-items:center; }
-    .gv-prog-lbl { font-size:11px; font-weight:600; color:var(--text-2); }
-    .gv-prog-pct { font-size:13px; font-weight:700; font-family:var(--mono); }
-    .gv-prog-track { height:5px; background:var(--bg); border-radius:99px; overflow:hidden; }
+    .gv-prog-lbl { font-size:10px; font-weight:600; color:var(--text-3); }
+    .gv-prog-pct { font-size:11px; font-weight:700; font-family:var(--mono); }
+    .gv-prog-track { height:4px; background:var(--bg); border-radius:99px; overflow:hidden; }
     .gv-prog-fill { height:100%; border-radius:99px; transition:width 0.6s var(--ease2); }
 
-    .gv-comp-banner { display:flex; align-items:flex-start; gap:10px; padding:12px; border-radius:8px; border:1px solid; }
-    .gv-comp-icon { font-size:16px; flex-shrink:0; }
-    .gv-comp-text { font-size:12px; font-weight:700; }
-    .gv-comp-sub { font-size:11px; opacity:0.8; margin-top:3px; }
-    .gv-sec-lbl { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-4); margin-bottom:6px; }
+    .gv-comp-banner { display:flex; align-items:flex-start; gap:8px; padding:10px; border-radius:8px; border:1px solid; }
+    .gv-comp-icon { font-size:14px; flex-shrink:0; }
+    .gv-comp-text { font-size:11px; font-weight:700; }
+    .gv-comp-sub { font-size:10px; opacity:0.8; margin-top:2px; }
+    .gv-sec-lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-4); margin-bottom:4px; }
 
-    .gv-wf-btn {
-      display:flex; align-items:center; gap:6px; width:100%; padding:9px 14px; border-radius:8px;
-      font-size:12px; font-weight:600; border:1.5px solid; cursor:pointer; font-family:var(--font);
-      transition:all 0.15s; margin-bottom:4px;
-    }
-    .gv-wf-confirm { background:var(--p-lt); color:var(--p); border-color:rgba(26,115,232,0.2); }
+    .gv-wf-btn { display:flex; align-items:center; gap:5px; width:100%; padding:7px 12px; border-radius:8px; font-size:11px; font-weight:600; border:1.5px solid; cursor:pointer; font-family:var(--font); transition:all 0.15s; margin-bottom:3px; }
+    .gv-wf-confirm { background:var(--p-lt); color:var(--p); border-color:rgba(91,94,244,0.2); }
     .gv-wf-confirm:hover { background:var(--p); color:#fff; }
-    .gv-wf-start { background:#E6F4EA; color:#1E8E3E; border-color:rgba(30,142,62,0.2); }
-    .gv-wf-start:hover { background:#1E8E3E; color:#fff; }
-    .gv-wf-report { background:#FFF4E5; color:#E37400; border-color:rgba(227,116,0,0.2); }
-    .gv-wf-report:hover { background:#E37400; color:#fff; }
-    .gv-wf-submit { background:var(--p-lt); color:var(--p); border-color:rgba(26,115,232,0.2); }
+    .gv-wf-start { background:#DCFCE7; color:#16A34A; border-color:rgba(22,163,74,0.2); }
+    .gv-wf-start:hover { background:#16A34A; color:#fff; }
+    .gv-wf-report { background:#FEF3C7; color:#D97706; border-color:rgba(217,119,6,0.2); }
+    .gv-wf-report:hover { background:#D97706; color:#fff; }
+    .gv-wf-submit { background:var(--p-lt); color:var(--p); border-color:rgba(91,94,244,0.2); }
     .gv-wf-submit:hover { background:var(--p); color:#fff; }
     .gv-wf-review { background:var(--bg); color:var(--text-2); border-color:var(--border); }
     .gv-wf-review:hover { background:var(--text-1); color:#fff; }
-    .gv-wf-ceo { background:#FFF4E5; color:#E37400; border-color:rgba(227,116,0,0.2); }
-    .gv-wf-ceo:hover { background:#E37400; color:#fff; }
+    .gv-wf-ceo { background:#FEF3C7; color:#D97706; border-color:rgba(217,119,6,0.2); }
+    .gv-wf-ceo:hover { background:#D97706; color:#fff; }
     .gv-wf-btn:disabled { opacity:0.5; pointer-events:none; }
 
-    .gv-sub-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; background:var(--bg); cursor:pointer; margin-bottom:4px; transition:all 0.1s; }
-    .gv-sub-item:hover { background:var(--p-lt); transform:translateX(2px); }
-    .gv-sub-name { font-size:12px; font-weight:600; color:var(--text-2); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-    .gv-dl-entry { display:flex; gap:8px; align-items:flex-start; padding:7px 10px; background:var(--bg); border-radius:8px; margin-bottom:4px; }
-    .gv-report-card { background:var(--bg); border-radius:10px; padding:14px; margin-bottom:8px; transition:box-shadow 0.12s; }
+    .gv-sub-item { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:6px; background:var(--bg); cursor:pointer; margin-bottom:3px; transition:all 0.1s; }
+    .gv-sub-item:hover { background:var(--p-lt); }
+    .gv-sub-name { font-size:11px; font-weight:500; color:var(--text-2); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gv-dl-entry { display:flex; gap:6px; align-items:flex-start; padding:5px 8px; background:var(--bg); border-radius:6px; margin-bottom:3px; }
+    .gv-report-card { background:var(--bg); border-radius:10px; padding:12px; margin-bottom:6px; }
     .gv-report-card:hover { box-shadow:var(--shadow-sm); }
 
-    .gv-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 16px; text-align:center; }
-    .gv-empty-icon { font-size:28px; margin-bottom:8px; opacity:0.5; }
-    .gv-empty-t { font-size:13px; font-weight:600; color:var(--text-3); }
-    .gv-empty-s { font-size:11px; color:var(--text-4); margin-top:2px; }
+    .gv-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:30px 14px; text-align:center; }
+    .gv-empty-icon { font-size:24px; margin-bottom:8px; opacity:0.5; }
+    .gv-empty-t { font-size:12px; font-weight:600; color:var(--text-3); }
+    .gv-empty-s { font-size:10px; color:var(--text-4); margin-top:3px; }
 
-    /* Skeleton loader */
-    .gv-skeleton {
-      background: linear-gradient(90deg, #F0F2F5 25%, #E4E7EC 50%, #F0F2F5 75%);
-      background-size: 200% 100%; animation: skel-shimmer 1.5s infinite; border-radius:6px;
-    }
+    .gv-skeleton { background:linear-gradient(90deg,#F0F2FA 25%,#E8E9F0 50%,#F0F2FA 75%); background-size:200% 100%; animation:skel-shimmer 1.5s infinite; border-radius:6px; }
     @keyframes skel-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-    .gv-skel-row { display:flex; gap:10px; align-items:center; padding:10px 14px; }
-    .gv-skel-circle { width:30px; height:30px; border-radius:50%; flex-shrink:0; }
-    .gv-skel-lines { flex:1; display:flex; flex-direction:column; gap:6px; }
-    .gv-skel-line { height:10px; border-radius:4px; }
-
-    /* also keep old shimmer class for compat */
-    .gv-shimmer {
-      background: linear-gradient(90deg, var(--bg) 30%, var(--bg2) 50%, var(--bg) 70%);
-      background-size: 200% 100%; animation: skel-shimmer 1.5s infinite; border-radius:6px;
-    }
-
-    .gv-mobile-back {
-      display:none; align-items:center; gap:5px; padding:8px 14px;
-      font-size:12px; font-weight:600; color:var(--p); background:none; border:none;
-      cursor:pointer; font-family:var(--font); border-bottom:1px solid var(--border);
-    }
+    .gv-skel-row { display:flex; gap:8px; align-items:center; padding:8px 12px; }
+    .gv-skel-circle { width:24px; height:24px; border-radius:50%; flex-shrink:0; }
+    .gv-skel-lines { flex:1; display:flex; flex-direction:column; gap:5px; }
+    .gv-skel-line { height:8px; border-radius:3px; }
+    .gv-shimmer { background:linear-gradient(90deg,var(--bg) 30%,var(--bg2) 50%,var(--bg) 70%); background-size:200% 100%; animation:skel-shimmer 1.5s infinite; border-radius:5px; }
+    .gv-mobile-back { display:none; align-items:center; gap:4px; padding:8px 12px; font-size:11px; font-weight:600; color:var(--p); background:none; border:none; cursor:pointer; font-family:var(--font); border-bottom:1px solid var(--border); }
     .gv-mobile-tabs-bar { display:none; border-bottom:1px solid var(--border); }
-    .gv-mob-tab {
-      flex:1; padding:8px; border:none; background:none; font-size:12px; font-weight:500;
-      color:var(--text-3); cursor:pointer; font-family:var(--font);
-    }
+    .gv-mob-tab { flex:1; padding:6px; border:none; background:none; font-size:11px; font-weight:500; color:var(--text-3); cursor:pointer; font-family:var(--font); }
     .gv-mob-tab.active { color:var(--p); border-bottom:2px solid var(--p); }
 
-    /* ─── Sidebar Tabs ─── */
-
-        /* ─── Context Menu ─── */
-    .gv-ctx-menu {
-      position:fixed; z-index:1000; background:var(--surface);
-      border:1px solid var(--border); border-radius:10px;
-      box-shadow:var(--shadow-xl); min-width:160px; padding:4px;
-      animation:ctx-in 0.12s ease;
-    }
+    .gv-ctx-menu { position:fixed; z-index:1000; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-xl); min-width:150px; padding:4px; animation:ctx-in 0.12s ease; }
     @keyframes ctx-in { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
-    .gv-ctx-item {
-      display:flex; align-items:center; gap:8px; padding:8px 12px;
-      font-size:12px; font-weight:500; color:var(--text-2); cursor:pointer;
-      border-radius:6px; transition:background 0.1s; border:none; background:none;
-      width:100%; font-family:var(--font); text-align:left;
-    }
-    .gv-ctx-item:hover { background:#F5F7FA; }
+    .gv-ctx-item { display:flex; align-items:center; gap:6px; padding:7px 10px; font-size:11px; font-weight:500; color:var(--text-2); cursor:pointer; border-radius:6px; transition:background 0.1s; border:none; background:none; width:100%; font-family:var(--font); text-align:left; }
+    .gv-ctx-item:hover { background:var(--bg); }
     .gv-ctx-item.danger { color:var(--danger); }
     .gv-ctx-item.danger:hover { background:#FEE2E2; }
-    .gv-ctx-sep { height:1px; background:var(--border); margin:4px 8px; }
+    .gv-ctx-sep { height:1px; background:var(--border); margin:3px 6px; }
 
-
-        /* ─── Mobile ─── */
     @media (max-width:767px) {
-      .gv-root { height:calc(100vh - 56px); flex-direction:column; }
-      .gv-tree { width:100%; min-width:100%; border-right:none; border-bottom:1px solid var(--border); max-height:100%; transition:max-height 0.25s var(--ease2),opacity 0.2s; }
-      .gv-tree.mob-hidden { max-height:0!important; opacity:0; pointer-events:none; overflow:hidden; border-bottom:none; }
-      .gv-chat { width:100%; flex:1; }
+      .gv-root { height:calc(100dvh - 56px); flex-direction:column; overflow:hidden; }
+      .gv-list-panel {
+        width:100%!important; min-width:100%!important; border-right:none;
+        max-height:100%; flex-shrink:0;
+        transform:translateX(0); transition:transform 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.22s;
+      }
+      .gv-list-panel.mob-hidden { transform:translateX(-100%); opacity:0; pointer-events:none; position:absolute; height:100%; }
+      .gv-chat {
+        width:100%; flex:1; position:absolute; inset:0;
+        transform:translateX(100%); transition:transform 0.28s cubic-bezier(0.4,0,0.2,1);
+        background:var(--surface); z-index:10;
+      }
+      .gv-chat.mob-visible { transform:translateX(0); animation:none; }
       .gv-chat.mob-hidden { display:none; }
       .gv-right-area { display:none; }
       .gv-toolbar { display:none; }
       .gv-detail { width:100%!important; min-width:100%!important; position:fixed; inset:0; z-index:50; border:none; }
       .gv-detail.collapsed { display:none; }
       .gv-detail.mob-tab-active { display:flex; }
-      .gv-detail-toggle { display:none; }
       .gv-sidebar-toggle { display:none; }
       .gv-mobile-back { display:flex; }
       .gv-mobile-tabs-bar { display:flex; }
-      .gv-msgs { padding:12px; }
-      .gv-msg-group { max-width:88%; }
+      .gv-resizer { display:none; }
+      .gv-msgs { padding:10px 12px; }
+      .gv-msg-group { max-width:86%; }
+      .gv-tbl-head .col-desc, .gv-tbl-row .col-desc,
+      .gv-tbl-head .col-date, .gv-tbl-row .col-date,
+      .gv-tbl-head .col-pri, .gv-tbl-row .col-pri,
+      .gv-tbl-head .col-status, .gv-tbl-row .col-status,
+      .gv-tbl-check, .gv-tbl-drag { display:none; }
+      .gv-tbl-row { height:54px; }
+      .gv-tbl-head .col-people { display:none; }
+      .gv-tbl-row .col-people { width:auto; max-width:140px; flex:0 1 auto; padding:0 6px; overflow:hidden; border-right:none; }
+      .gv-mob-people-names { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+      .gv-tbl-row .col-act { width:32px; }
+      .gv-compact-item { padding:10px 14px; }
+      .gv-compact-item-name { font-size:13px; }
+      .gv-lp-topbar { padding:10px 14px; }
+      .gv-grp-header { padding:10px 14px; }
     }
+
+    /* ═══ COMPACT MODE (30% panel) ═══ */
+    .gv-list-panel.is-compact .col-desc,
+    .gv-list-panel.is-compact .col-people,
+    .gv-list-panel.is-compact .col-pri,
+    .gv-list-panel.is-compact .col-date,
+    .gv-list-panel.is-compact .gv-tbl-drag,
+    .gv-list-panel.is-compact .gv-tbl-check { display:none; }
+    .gv-list-panel.is-compact .gv-tbl-row { height:38px; }
+    .gv-list-panel.is-compact .col-name { flex:1; padding:0 8px; border-right:none; }
+    .gv-list-panel.is-compact .col-status { width:90px; padding:0 6px; }
+    .gv-list-panel.is-compact .col-act { width:26px; }
+    .gv-list-panel.is-compact .gv-tbl-row.selected .col-name .gv-task-name { color:var(--p); font-weight:700; }
+    .gv-list-panel.is-compact .gv-grp-header { padding:6px 10px; }
+    .gv-list-panel.is-compact .gv-tbl-head { display:none; }
+    .gv-list-panel.is-compact .gv-grp-badge { font-size:10px; padding:3px 8px; }
+    .gv-list-panel.is-compact .gv-lp-topbar { padding:8px 10px; gap:5px; }
+    .gv-list-panel.is-compact .gv-stats { display:none; }
+    .gv-list-panel.is-compact .gv-tbl-expand { width:16px; }
     @media (max-width:480px) { .gv-chat-task-name { display:none; } }
+    .gv-mob-detail-hero { display:none; flex-shrink:0; }
+    .gv-desk-detail-head { display:block; }
+    @media (max-width:767px) {
+      .gv-mob-detail-hero { display:block; }
+      .gv-desk-detail-head { display:none; }
+      .gv-detail.mob-tab-active { background:var(--bg); }
+    }
+    /* ═══ MOBILE WHATSAPP-STYLE CHAT HEADER ═══ */
+    .gv-mob-chat-topbar { display:none; align-items:center; gap:8px; padding:8px 12px; background:#fff; border-bottom:1px solid var(--border); flex-shrink:0; min-height:50px; }
+    .gv-mob-back-btn { width:32px; height:32px; border:none; background:transparent; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-2); flex-shrink:0; }
+    .gv-mob-back-btn:active { background:var(--bg); }
+    .gv-mob-group-avatar { display:none; }
+    .gv-mob-group-info { display:flex; align-items:center; gap:9px; flex:1; min-width:0; cursor:pointer; }
+    .gv-mob-group-text { flex:1; min-width:0; }
+    .gv-mob-group-name { font-size:14px; font-weight:700; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.2; }
+    .gv-mob-group-members { font-size:10px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px; line-height:1.3; }
+    .gv-mob-chat-actions { display:flex; gap:2px; flex-shrink:0; }
+    .gv-mob-icon-btn { width:32px; height:32px; border:none; background:transparent; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-2); }
+    .gv-mob-icon-btn:active { background:var(--bg); }
+    .gv-desk-only { display:flex; }
+    .gv-mob-people-names { display:none; overflow:hidden; line-height:1.2; }
+
+    @media (max-width:767px) {
+      .gv-mob-chat-topbar { display:flex; }
+      .gv-desk-only { display:none !important; }
+      .gv-mob-people-names { display:block; margin-top:1px; overflow:hidden; line-height:1.2; }
+      .gv-mobile-back { display:none; }
+    }
   `;
 
 
@@ -2045,244 +2231,363 @@ export default function TasksPage() {
         />
       )}
 
-      <div className="gv-root" >
+      <div className="gv-root" ref={rootRef}>
 
-        {/* COL-1: TASK TREE */}
-        <div className={`gv-tree ${sidebarCollapsed ? "collapsed" : ""} ${mobileView === "chat" ? "mob-hidden" : ""}`}>
-          <div className="gv-tree-head">
-            <div className="gv-brand-row">
-              <div className="gv-logo">
-                <div className="gv-logo-mark">
-                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                    <rect x="1" y="1" width="5" height="5" rx="1.2" fill="white" opacity=".9" />
-                    <rect x="7" y="1" width="5" height="5" rx="1.2" fill="white" />
-                    <rect x="1" y="7" width="5" height="5" rx="1.2" fill="white" />
-                    <rect x="7" y="7" width="5" height="5" rx="1.2" fill="white" opacity=".6" />
-                  </svg>
+        {/* COL-1: FULL-WIDTH TABLE / COMPACT LIST PANEL */}
+        {(() => {
+          const STATUS_GROUPS_TABLE = [
+            { key: "open", label: "Not Started", color: "#EF4444", bg: "#FEF2F2", dot: "#EF4444" },
+            { key: "confirmed", label: "Confirmed", color: "#5B5EF4", bg: "#EDEDFE", dot: "#5B5EF4" },
+            { key: "in_progress", label: "In Progress", color: "#8B5CF6", bg: "#F3E8FF", dot: "#8B5CF6" },
+            { key: "done", label: "Done", color: "#16A34A", bg: "#DCFCE7", dot: "#16A34A" },
+          ];
+
+
+
+          const rootTasks = allTasks.filter(t => !t.parentTaskId);
+          const filteredRoots = rootTasks.filter(t => {
+            const q = listSearch.toLowerCase();
+            const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
+            const matchSt = activeStatTab === "all"
+              ? t.status !== "done"
+              : (activeStatTab === "open" && t.status === "open")
+              || (activeStatTab === "in_progress" && (t.status === "in_progress" || t.status === "confirmed"))
+              || (activeStatTab === "done" && t.status === "done");
+            return matchQ && matchSt;
+          });
+
+          const AvatarStack = ({ t }) => {
+            const ids = t.assigneeIds || [];
+            const shown = ids.slice(0, 3);
+            const extra = ids.length - 3;
+            const names = ids.map((id, i) => employeeMap?.get(id) || t.assigneeNameMap?.[id] || t.assigneeNames?.[i] || id);
+            return (
+              <div className="gv-avatar-stack">
+                <div style={{ display: "flex" }}>
+                  {shown.map((id, i) => {
+                    const name = employeeMap?.get(id) || t.assigneeNameMap?.[id] || (t.assigneeNames?.[idx] ?? null) || id || "?";
+                    const [c1, c2] = getAvatarColors(name);
+                    return (
+                      <div key={id} style={{ width: 20, height: 20, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff", marginLeft: i > 0 ? -6 : 0, flexShrink: 0, position: "relative", zIndex: shown.length - i }}>
+                        {name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                    );
+                  })}
+                  {extra > 0 && <div style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--bg2)", color: "var(--text-3)", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff", marginLeft: -6 }}>+{extra}</div>}
                 </div>
-                <div>
-                  <div className="gv-logo-text">Task Board</div>
-                  <div className="gv-logo-sub">{(isCEO || isTL) ? "By employee" : "Select task to open"}</div>
+                <div className="gv-avatar-stack-tip">
+                  <div style={{ fontWeight: 700, fontSize: 9, color: "#98A2B3", marginBottom: 3, textTransform: "uppercase" }}>Assigned to</div>
+                  {names.slice(0, 6).map((n, i) => <div key={i} style={{ padding: "1px 0" }}>{n}</div>)}
+                  {!names.length && <div>Unassigned</div>}
                 </div>
               </div>
-              {(isCEO || isTL) && (
-                <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}>
-                  <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg>
-                  New
-                </button>
-              )}
-            </div>
-          </div>
+            );
+          };
 
-
-          <div className="gv-stats">
-            {[
-              { v: stats.total, l: "All", c: "#1A73E8" },
-              { v: stats.open, l: "Open", c: "#98A2B3" },
-              { v: stats.active, l: "Active", c: "#F9AB00" },
-              { v: stats.done, l: "Done", c: "#34A853" },
-            ].map(s => (
-              <div key={s.l} className="gv-stat">
-                <span className="gv-stat-n" style={{ color: s.c }}>{s.v}</span>
-                <span className="gv-stat-l">{s.l}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="gv-tree-list">
-            {tasksLoading ? (
-              <div style={{ padding: "14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="gv-skel-row">
-                    <div className="gv-skeleton gv-skel-circle" />
-                    <div className="gv-skel-lines">
-                      <div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} />
-                      <div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} />
+          const TblRow = ({ t, depth = 0, isSubtask = false }) => {
+            const dl = getDeadlineInfo(t.dueDate);
+            const st = STATUS[t.status] || STATUS.open;
+            const p = PRI[t.priority] || PRI.medium;
+            // Only show expand arrow for subtasks visible to current user
+            const allSubtaskIds = t.subtaskIds || [];
+            const visibleSubtaskIds = isCEO
+              ? allSubtaskIds.filter(sid => {
+                const s = allTaskMap.get(sid);
+                return s && (s.createdByCeo === true || (s.assignedBy === employeeId && !s.createdByTl));
+              })
+              : allSubtaskIds;
+            const hasChildren = visibleSubtaskIds.length > 0;
+            const isExp = expandedIds.has(t.taskId);
+            const isSel = task?.taskId === t.taskId;
+            const unread = unreadCounts?.[t.taskId] || 0;
+            return (
+              <>
+                <div className={`gv-tbl-row${isSel ? " selected" : ""}${isSubtask ? " subtask-row" : ""}`} style={{ paddingLeft: 8 + depth * 18 }} onClick={() => handleSelectNode(t)} onMouseEnter={() => handleHoverPrefetch(t.taskId)}>
+                  <div className="gv-tbl-drag"><svg width="9" height="12" viewBox="0 0 9 12" fill="currentColor"><circle cx="3" cy="2" r="1.1" /><circle cx="6" cy="2" r="1.1" /><circle cx="3" cy="6" r="1.1" /><circle cx="6" cy="6" r="1.1" /><circle cx="3" cy="10" r="1.1" /><circle cx="6" cy="10" r="1.1" /></svg></div>
+                  <div className="gv-tbl-check" onClick={e => e.stopPropagation()}>
+                    <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${t.status === "done" ? "#16A34A" : "var(--border2)"}`, background: t.status === "done" ? "#16A34A" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {t.status === "done" && <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2.5 2.5 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                     </div>
+                  </div>
+                  <div className="gv-tbl-expand" onClick={e => { if (hasChildren) { e.stopPropagation(); e.preventDefault(); toggleExpand(t.taskId); } }}>
+                    {hasChildren && <span style={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)", cursor: "pointer" }}>
+                      <svg width="9" height="9" viewBox="0 0 9 9" fill="none" style={{ transform: isExp ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    </span>}
+                  </div>
+                  <div className="col-name">
+                    <span className={`gv-task-name${t.status === "done" ? " done-line" : ""}`}>{t.title}</span>
+                    {unread > 0 && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#16A34A", padding: "1px 5px", borderRadius: 99, flexShrink: 0 }}>{unread > 99 ? "99+" : unread}</span>}
+                    {dl.status === "overdue" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, display: "inline-block", marginLeft: 3 }} />}
+                  </div>
+                  <div className="col-desc"><span className="gv-task-desc">{t.description || ""}</span></div>
+                  <div className="col-people">
+                    {/* Desktop: avatar stack */}
+                    <span className="gv-desk-only"><AvatarStack t={t} /></span>
+                    {/* Mobile: plain names, no avatars */}
+                    <div className="gv-mob-people-names">
+                      {(() => {
+                        const ids = t.assigneeIds || [];
+                        const shown = ids.slice(0, 6);
+                        const extra = ids.length - 6;
+                        const names = shown.map((id, i) => {
+                          const full = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || t.assigneeNameMap?.[id] || (t.assigneeNames || [])[i] || id;
+                          return (full || "").split(" ")[0] || id;
+                        });
+                        return <span style={{ fontSize: 10, fontWeight: 500, color: "var(--text-2)", lineHeight: 1.25, letterSpacing: "-0.01em", wordBreak: "break-word" }}>
+                          {names.join(", ")}{extra > 0 && <span style={{ color: "var(--text-4)", fontWeight: 600 }}> +{extra}</span>}
+                        </span>;
+                      })()}
+                    </div>
+                  </div>
+                  <div className="col-pri">{t.priority && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: p.color, background: p.bg, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}><span style={{ fontSize: 9 }}>⚑</span> {p.label}</span>}</div>
+                  <div className="col-date">
+                    {(t.startDate || t.dueDate) ? (
+                      <span style={{ fontSize: 10, color: dl.status === "overdue" ? "var(--danger)" : dl.status === "near" ? "var(--warn)" : "var(--text-3)", fontWeight: dl.status !== "safe" ? 600 : 400, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 2 }}>
+                        {t.startDate && <>{new Date(t.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}<span style={{ color: "var(--text-4)", margin: "0 1px" }}>→</span></>}
+                        {t.dueDate && new Date(t.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      </span>
+                    ) : <span style={{ fontSize: 11, color: "var(--border2)" }}>—</span>}
+                  </div>
+                  <div className="col-status"><span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: st.color, background: st.bg, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot, display: "inline-block" }} />{st.label}</span></div>
+                  <div className="col-act" onClick={e => e.stopPropagation()}>
+                    <button style={{ width: 26, height: 26, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                      onClick={e => { e.stopPropagation(); setRowMenuOpen(rowMenuOpen === t.taskId ? null : t.taskId); setRowMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
+                    </button>
+                  </div>
+                </div>
+                {rowMenuOpen === t.taskId && (
+                  <div className="gv-row-menu" style={{ top: Math.min(rowMenuPos.y + 4, window.innerHeight - 280), left: Math.min(rowMenuPos.x - 160, window.innerWidth - 190) }} onMouseDown={e => e.stopPropagation()}>
+                    {[
+                      { l: "Open Chat", a: () => { handleSelectNode(t); setRowMenuOpen(null); } },
+                      ...((isCEO || isTL) ? [{ l: "Add Subtask", a: () => { setActiveModal({ type: "add_subtask", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(!isCEO ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(!isCEO ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO ? [{ l: "Edit Deadline", a: () => { setActiveModal({ type: "deadline", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO && ["submitted", "tl_approved"].includes(t.completionStatus) ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO ? [{ l: "Delete Task", d: true, a: () => { setSelectedTask(t); setShowDeleteConf(true); setRowMenuOpen(null); } }] : []),
+                    ].map((item, i) => (
+                      <button key={i} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, color: item.d ? "var(--danger)" : "var(--text-2)", textAlign: "left", borderRadius: 6, fontFamily: "var(--font)", transition: "background 0.1s" }}
+                        onMouseEnter={e => e.currentTarget.style.background = item.d ? "#FEE2E2" : "var(--bg)"}
+                        onMouseLeave={e => e.currentTarget.style.background = "none"}
+                        onClick={item.a}>
+                        {item.l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {isExp && visibleSubtaskIds.map(sid => {
+                  const sub = allTaskMap.get(sid); if (!sub) return null;
+                  return <TblRow key={sid} t={sub} depth={depth + 1} isSubtask />;
+                })}
+              </>
+            );
+          };
+
+          const CompactItem = ({ t, isSubEl = false }) => {
+            const dl = getDeadlineInfo(t.dueDate);
+            const st = STATUS[t.status] || STATUS.open;
+            const isSel = task?.taskId === t.taskId;
+            const unread = unreadCounts?.[t.taskId] || 0;
+            const hasChildren = (t.subtaskIds || []).length > 0;
+            const isExp = expandedIds.has(t.taskId);
+            return (
+              <>
+                <div className={`gv-compact-item${isSel ? " active" : ""}`} style={{ paddingLeft: isSubEl ? 24 : 12 }} onClick={() => handleSelectNode(t)}>
+                  <span style={{ width: isSubEl ? 6 : 7, height: isSubEl ? 6 : 7, borderRadius: "50%", background: st.dot, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="gv-compact-item-name" style={{ fontSize: isSubEl ? 11 : 12 }}>{t.title}</div>
+                    {dl.status !== "safe" && t.dueDate && <div style={{ fontSize: 9, color: dl.status === "overdue" ? "var(--danger)" : "var(--warn)", marginTop: 1, fontWeight: 600 }}>{dl.text || ""}</div>}
+                  </div>
+                  {unread > 0 && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#16A34A", padding: "1px 5px", borderRadius: 99, flexShrink: 0 }}>{unread > 99 ? "99+" : unread}</span>}
+                  {!isSubEl && hasChildren && (
+                    <button style={{ width: 16, height: 16, border: "none", background: "none", cursor: "pointer", color: "var(--text-4)", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}
+                      onClick={e => { e.stopPropagation(); toggleExpand(t.taskId); }}>
+                      <svg width="9" height="9" viewBox="0 0 9 9" fill="none" style={{ transform: isExp ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    </button>
+                  )}
+                </div>
+                {!isSubEl && isExp && (t.subtaskIds || []).map(sid => {
+                  const sub = allTaskMap.get(sid); if (!sub) return null;
+                  return <CompactItem key={sid} t={sub} isSubEl />;
+                })}
+              </>
+            );
+          };
+
+          const isCompact = !!task;
+
+          return (
+            <div className={`gv-list-panel ${isCompact ? "is-compact" : ""} ${mobileView === "chat" ? "mob-hidden" : ""}`} style={isCompact ? { width: '30%', minWidth: 220, maxWidth: '40%', flexShrink: 0, transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)' } : { width: '100%', minWidth: '100%', transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)' }}>
+              <div className="gv-lp-topbar">
+                {isCompact ? (
+                  <>
+                    <button className="gv-back-btn" onClick={() => { setSelectedTask(null); setChatMessages([]); }}>
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2L3 5.5l4 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      All Tasks
+                    </button>
+                    <span className="gv-lp-title" style={{ fontSize: 14 }}>Tasks</span>
+                    <div className="gv-search-box" style={{ maxWidth: 180 }}>
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
+                      <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search..." />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <span className="gv-lp-title">Tasks</span>
+                    <div className="gv-search-box">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
+                      <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search tasks..." />
+                    </div>
+                    {(isCEO || isTL) && <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Task</button>}
+                  </>
+                )}
+              </div>
+              {/* Task.Co-style project info */}
+              {!isCompact && (
+                <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", marginBottom: 2 }}>Daily Task Board</div>
+                    <div style={{ display: "flex", gap: 12, fontSize: 10, color: "var(--text-3)" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="4" r="2" stroke="currentColor" strokeWidth="1" /><path d="M2 10.5c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg> {role === "ceo" ? "CEO" : role === "tl" ? "Team Lead" : "Member"}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3 }}><svg width="10" height="10" viewBox="0 0 12 12" fill="none"><rect x="1" y="1.5" width="10" height="9" rx="1" stroke="currentColor" strokeWidth="1" /><path d="M1 4.5h10" stroke="currentColor" strokeWidth="1" /></svg> {stats.total} Tasks</span>
+                    </div>
+                  </div>
+                  {(isCEO || isTL) && <button className="gv-new-btn" style={{ padding: "4px 10px", fontSize: 10 }} onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="8" height="8" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add</button>}
+                </div>
+              )}
+              <div className="gv-stats">
+                {[{ key: "all", l: "ALL", v: stats.total, c: "#5B5EF4" }, { key: "open", l: "OPEN", v: stats.open, c: "#EF4444" }, { key: "in_progress", l: "ACTIVE", v: stats.active, c: "#8B5CF6" }, { key: "done", l: "DONE", v: stats.done, c: "#16A34A" }].map(s => (
+                  <div key={s.key} className={`gv-stat${activeStatTab === s.key ? " active-tab" : ""}`} onClick={() => setActiveStatTab(s.key)}>
+                    <span className="gv-stat-n" style={{ color: s.c }}>{s.v}</span>
+                    <span className="gv-stat-l">{s.l}</span>
                   </div>
                 ))}
               </div>
-            ) : allTasks.length === 0 ? (
-              <div className="gv-empty">
-                <div className="gv-empty-icon">📋</div>
-                <p className="gv-empty-t">No tasks yet</p>
-                <p className="gv-empty-s">{(isCEO || isTL) ? "Click + New to start" : "No tasks assigned"}</p>
+              <div className="gv-list-body">
+                {tasksLoading ? (
+                  <div style={{ padding: "14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[1, 2, 3, 4].map(i => (<div key={i} className="gv-skel-row"><div className="gv-skeleton gv-skel-circle" /><div className="gv-skel-lines"><div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} /><div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} /></div></div>))}
+                  </div>
+                ) : filteredRoots.length === 0 ? (
+                  <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch ? "Click + Add Task to start" : "No tasks assigned"}</p></div>
+                ) : (
+                  STATUS_GROUPS_TABLE.map(grp => {
+                    const grpTasks = filteredRoots.filter(t => t.status === grp.key);
+                    if (!grpTasks.length) return null;
+                    const collapsed = collapsedGroups.has(grp.key);
+                    return (
+                      <div key={grp.key} className="gv-tbl-group">
+                        <div className="gv-grp-header" onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); n.has(grp.key) ? n.delete(grp.key) : n.add(grp.key); return n; })}>
+                          <span className="gv-grp-badge" style={{ color: grp.color, background: grp.bg, border: `1px solid ${grp.color}33` }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: grp.dot, display: "inline-block" }} />{grp.label}</span>
+                          <span className="gv-grp-count">{grpTasks.length}</span>
+                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ marginLeft: "auto", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--text-4)" }}><path d="M2 3.5l3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        </div>
+                        {!collapsed && (
+                          <>
+                            <div className="gv-tbl-head">
+                              <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
+                              <div className="col-name">Task Name</div>
+                              <div className="col-desc">Description</div>
+                              <div className="col-people">People</div>
+                              <div className="col-pri">Priority</div>
+                              <div className="col-date">Timeline</div>
+                              <div className="col-status">Status</div>
+                              <div className="col-act" />
+                            </div>
+                            {grpTasks.map(t => <TblRow key={t.taskId} t={t} />)}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            ) : (isCEO || isTL) && employeeGroups ? (
-              <>
-                {employeesLoading && (
-                  <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 6 }}>
-                    <GwSpinner />
-                    <span style={{ fontSize: 10, color: "var(--text-4)" }}>Loading employees…</span>
-                  </div>
-                )}
-                {(() => {
-                  // Sort employee groups: unread first, then by latest real message time
-                  const getMsForEmp = (empTasks) => {
-                    const rootTs = empTasks.filter(t => !t.parentTaskId);
-                    const times = rootTs.map(t => lastMsgTimes[t.taskId] || 0);
-                    return times.length ? Math.max(...times) : 0;
-                  };
-                  const getEmpUnread = (empTasks) =>
-                    empTasks.filter(t => !t.parentTaskId).reduce((sum, t) => sum + (unreadCounts?.[t.taskId] || 0), 0);
+            </div>
+          );
+        })()}
 
-                  const sortedEntries = Array.from(employeeGroups.entries()).sort((a, b) => {
-                    const ua = getEmpUnread(a[1].tasks);
-                    const ub = getEmpUnread(b[1].tasks);
-                    if (ua > 0 && ub === 0) return -1;
-                    if (ub > 0 && ua === 0) return 1;
-                    return getMsForEmp(b[1].tasks) - getMsForEmp(a[1].tasks);
-                  });
-
-                  return sortedEntries.map(([empId, { name, tasks: empTasks }], idx) => (
-                    <div key={empId}>
-                      <EmployeeGroup
-                        empId={empId}
-                        empName={name}
-                        tasks={empTasks}
-                        allTaskMap={allTaskMap}
-                        selectedId={task?.taskId}
-                        onSelect={handleSelectNode}
-                        expandedIds={expandedIds}
-                        toggleExpand={toggleExpand}
-                        expandedEmps={expandedEmps}
-                        toggleEmp={toggleEmp}
-                        viewerRole={role}
-                        viewerEmployeeId={employeeId}
-                        unreadTaskIds={unreadTaskIds}
-                        unreadCounts={unreadCounts}
-                        lastMsgTimes={lastMsgTimes}
-                      />
-                      {idx < sortedEntries.length - 1 && <div style={{ height: "0.5px", background: "var(--border)", margin: "3px 12px" }} />}
-                    </div>
-                  ));
-                })()}
-                {employeeGroups.size === 0 && (
-                  <div className="gv-empty">
-                    <div className="gv-empty-icon">👥</div>
-                    <p className="gv-empty-t">No employees yet</p>
-                    <p className="gv-empty-s">Assign tasks to employees first</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              // Flat tree — sorted by real latest message time (WhatsApp style)
-              allTasks
-                .filter(t => !t.parentTaskId)
-                .sort((a, b) => {
-                  const ua = unreadCounts?.[a.taskId] || 0;
-                  const ub = unreadCounts?.[b.taskId] || 0;
-                  if (ua > 0 && ub === 0) return -1;
-                  if (ub > 0 && ua === 0) return 1;
-                  return (lastMsgTimes[b.taskId] || 0) - (lastMsgTimes[a.taskId] || 0);
-                })
-                .map(t => (
-                  <TreeNode key={t.taskId} node={t} allTaskMap={allTaskMap}
-                    selectedId={task?.taskId} onSelect={handleSelectNode}
-                    expandedIds={expandedIds} toggleExpand={toggleExpand} depth={0}
-                    viewerRole={role}
-                    viewerEmployeeId={employeeId}
-                    unreadTaskIds={unreadTaskIds}
-                    unreadCounts={unreadCounts}
-                    lastMsgTimes={lastMsgTimes}
-                  />
-                ))
-            )}
-          </div>
-
-
-        </div>
-        <button
-          className={`gv-sidebar-toggle ${sidebarCollapsed ? "flip" : ""}`}
-          onClick={() => setSidebarCollapsed(v => !v)}
-          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <path d="M6 2L3 5l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {/* RESIZABLE DIVIDER */}
+        {task && <div className="gv-resizer" onMouseDown={handleMouseDown} />}
 
         {/* COL-2: CHAT */}
-        <div className={`gv-chat ${mobileView !== "chat" ? "mob-hidden" : ""} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative" }}>
+        <div className={`gv-chat ${mobileView === "chat" ? "mob-visible" : "mob-hidden"} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative" }}>
 
-          {/* Mobile back button */}
-          <button className="gv-mobile-back" onClick={() => { setMobileView("list"); setSelectedTask(null); }}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            All Tasks
-          </button>
-
-          {/* Chat header */}
-          <div className="gv-chat-head">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-              <path d="M14 10a1.33 1.33 0 0 1-1.33 1.33H4L1.33 14.33V3.33A1.33 1.33 0 0 1 2.67 2H12.67A1.33 1.33 0 0 1 14 3.33V10z" fill="var(--p,#1A73E8)" opacity=".15" stroke="var(--p,#1A73E8)" strokeWidth="1.1" strokeLinejoin="round" />
-            </svg>
-            {task ? (
-              <>
-                <div className="gv-chat-task-chip">
-                  <span className="gv-chat-tid">{task.taskId}</span>
-                </div>
-                <span className="gv-chat-task-name">{task.title}</span>
-                {task.status && (
-                  <span className="gv-chat-badge" style={{ color: (STATUS[task.status] || STATUS.open).color, background: (STATUS[task.status] || STATUS.open).bg }}>
-                    {(STATUS[task.status] || STATUS.open).label}
-                  </span>
-                )}
-
-                {/* Action buttons in header */}
-                <div className="gv-chat-actions">
-                  {/* ── MOBILE ONLY: ALL buttons including Info/Reports ── */}
-                  <div className="gv-mob-only-actions">
-                    <button className="gv-chat-act-btn" style={{ background: "linear-gradient(135deg,#D93025,#EA4335)", color: "#fff", border: "none", fontWeight: 800, fontSize: 10 }}
-                      onClick={() => setRequestModal({ taskId: task.taskId, taskTitle: task.title })} title="Send Request">
-                      R
-                    </button>
-                    {(isCEO || isTL) && (
-                      <button className="gv-chat-act-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                      </button>
-                    )}
-                    {(isCEO || isTL || isAssignee) && task.status !== "done" && (
-                      <button className="gv-chat-act-btn" onClick={() => handleAction("forward")} title="Forward Task">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 014-4h12" /></svg>
-                      </button>
-                    )}
-                    {isCEO && (
-                      <button className="gv-chat-act-btn" onClick={() => handleAction("deadline")} title="Edit Deadline">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                      </button>
-                    )}
-                    {isCEO && (
-                      <button className="gv-chat-act-btn" style={{ color: "var(--danger)" }} onClick={() => handleAction("delete")} title="Delete Task">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
-                      </button>
-                    )}
-                    <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px", flexShrink: 0 }} />
-                    <button className="gv-chat-act-btn" style={mobDetailPanel === "info" ? { background: "var(--p-lt)", color: "var(--p)", borderColor: "var(--p)" } : {}}
-                      onClick={() => setMobDetailPanel(mobDetailPanel === "info" ? null : "info")} title="Task Info">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                    </button>
-                    <button className="gv-chat-act-btn" style={mobDetailPanel === "reports" ? { background: "var(--p-lt)", color: "var(--p)", borderColor: "var(--p)" } : {}}
-                      onClick={() => setMobDetailPanel(mobDetailPanel === "reports" ? null : "reports")} title="Reports">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
-                    </button>
+          {/* ── Chat header: WhatsApp-style on mobile, standard on desktop ── */}
+          {task ? (
+            <>
+              {/* MOBILE BACK + GROUP HEADER */}
+              <div className="gv-mob-chat-topbar">
+                <button className="gv-mob-back-btn" onClick={() => { setMobileView("list"); setSelectedTask(null); }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
+                </button>
+                {/* Tappable group info area */}
+                <div className="gv-mob-group-info" onClick={() => setMobDetailPanel("info")}>
+                  <div className="gv-mob-group-avatar">
+                    {(task.title || "T")[0].toUpperCase()}
+                  </div>
+                  <div className="gv-mob-group-text">
+                    <div className="gv-mob-group-name">{task.title}</div>
+                    <div className="gv-mob-group-members">
+                      {(task.assigneeIds || []).slice(0, 4).map((id, i) => {
+                        const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
+                        return <span key={id}>{nm}{i < Math.min((task.assigneeIds || []).length, 4) - 1 ? ", " : ""}</span>;
+                      })}
+                      {(task.assigneeIds || []).length > 4 && <span> +{task.assigneeIds.length - 4} more</span>}
+                      {!(task.assigneeIds?.length) && <span>No members</span>}
+                    </div>
                   </div>
                 </div>
-              </>
-            ) : (
+                {/* Action icons */}
+                <div className="gv-mob-chat-actions">
+                  <button className="gv-mob-icon-btn" onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", taskId: task.taskId, taskTitle: task.title } }))} title="Request">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                  </button>
+                  {(isCEO || isTL) && <button className="gv-mob-icon-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  </button>}
+                  <button className="gv-mob-icon-btn" onClick={() => setMobDetailPanel("info")} title="Details">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* DESKTOP: standard header (hidden on mobile) */}
+              <div className="gv-chat-head gv-desk-only">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M14 10a1.33 1.33 0 0 1-1.33 1.33H4L1.33 14.33V3.33A1.33 1.33 0 0 1 2.67 2H12.67A1.33 1.33 0 0 1 14 3.33V10z" fill="var(--p)" opacity=".15" stroke="var(--p)" strokeWidth="1.1" strokeLinejoin="round" />
+                </svg>
+                <div className="gv-chat-task-chip"><span className="gv-chat-tid">{task.taskId}</span></div>
+                <span className="gv-chat-task-name">{task.title}</span>
+                {task.status && <span className="gv-chat-badge" style={{ color: (STATUS[task.status] || STATUS.open).color, background: (STATUS[task.status] || STATUS.open).bg }}>{(STATUS[task.status] || STATUS.open).label}</span>}
+                <div className="gv-chat-actions">
+                  <div className="gv-mob-only-actions">
+                    {(isCEO || isTL) && <button className="gv-chat-act-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg></button>}
+                    {isCEO && <button className="gv-chat-act-btn" onClick={() => handleAction("deadline")} title="Deadline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg></button>}
+                    {isCEO && <button className="gv-chat-act-btn" style={{ color: "var(--danger)" }} onClick={() => handleAction("delete")} title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg></button>}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="gv-chat-head">
               <span style={{ fontSize: 13, color: "var(--text-4)", fontStyle: "italic" }}>Select a task to start chatting</span>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Mobile tabs now handled by header action buttons above */}
 
           {/* Messages */}
           <div className="gv-msgs">
             {!task ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 40 }}>
-                <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#D0D5DD" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
+                <div style={{ width: 56, height: 56, borderRadius: 14, background: "var(--p-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--p)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                </div>
                 <div style={{ textAlign: "center" }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-3)", marginBottom: 4 }}>No conversation selected</p>
-                  <p style={{ fontSize: 12, color: "var(--text-4)", lineHeight: 1.5 }}>Select a task from the left panel<br />to view its chat thread</p>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)", marginBottom: 3 }}>No conversation selected</p>
+                  <p style={{ fontSize: 10, color: "var(--text-4)", lineHeight: 1.6 }}>Select a task from the sidebar<br />to view its chat thread</p>
                 </div>
               </div>
             ) : detailLoading ? (
@@ -2349,7 +2654,7 @@ export default function TasksPage() {
                           <span style={{
                             position: "absolute", bottom: -1, right: -1,
                             width: 9, height: 9, borderRadius: "50%",
-                            background: "#34A853",
+                            background: "#16A34A",
                             border: "2px solid var(--bg, #F4F6FB)",
                             flexShrink: 0,
                           }} />
@@ -2370,7 +2675,7 @@ export default function TasksPage() {
                             marginLeft: 6,
                             fontSize: 9,
                             fontWeight: 700,
-                            color: "#34A853",
+                            color: "#16A34A",
                             background: "rgba(16,185,129,0.12)",
                             padding: "1px 6px",
                             borderRadius: 99,
@@ -2484,7 +2789,7 @@ export default function TasksPage() {
 
         {/* MOBILE DETAIL OVERLAY (Info/Reports) */}
         {task && mobDetailPanel && (
-          <div className={`gv-detail mob-tab-active`}>
+          <div className={`gv-detail mob-tab-active`} style={{ flexDirection: "column" }}>
             <div className="gv-detail-inner">
               {/* Mobile detail header with back */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
@@ -2498,20 +2803,53 @@ export default function TasksPage() {
                 <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</span>
               </div>
 
-              {/* Detail badge row */}
-              <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <span className="gv-code-tag">{task.taskId}</span>
-                {st && <span className="gv-badge" style={{ color: st.color, background: st.bg, borderColor: `${st.color}22` }}><span className="gv-badge-dot" style={{ background: st.dot }} />{st.label}</span>}
-                <span className="gv-badge" style={{ color: pri.color, background: pri.bg, borderColor: `${pri.color}22` }}><span className="gv-badge-dot" style={{ background: pri.dot }} />{pri.label}</span>
+              {/* Mobile hero header — WhatsApp group info style */}
+              <div className="gv-mob-detail-hero">
+                {/* Top bar: back + task title + toggle */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fff", borderBottom: "1px solid var(--border)" }}>
+                  <button onClick={() => setMobDetailPanel(null)} style={{ width: 32, height: 32, border: "none", background: "var(--bg)", borderRadius: "50%", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-2)", flexShrink: 0 }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
+                  </button>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-4)", display: "flex", gap: 6, marginTop: 1 }}>
+                      <span style={{ fontFamily: "monospace" }}>{task.taskId}</span>
+                      {st && <span style={{ color: st.color, fontWeight: 600 }}>{st.label}</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => setMobDetailPanel(mobDetailPanel === "info" ? "reports" : "info")} style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg)", cursor: "pointer", color: "var(--text-2)", flexShrink: 0 }}>
+                    {mobDetailPanel === "info" ? "Reports" : "Info"}
+                  </button>
+                </div>
+                {/* Action row with SVG icons */}
+                <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+                  {[
+                    ...(isCEO || isTL ? [{ svg: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>, label: "Subtask", a: () => { handleAction("add_subtask"); setMobDetailPanel(null); } }] : []),
+                    ...(!isCEO ? [{ svg: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 014-4h12" /></svg>, label: "Forward", a: () => { handleAction("forward"); setMobDetailPanel(null); } }] : []),
+                    { svg: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>, label: "Request", a: () => { window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", taskId: task.taskId, taskTitle: task.title } })); setMobDetailPanel(null); } },
+                    ...(isCEO ? [{ svg: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>, label: "Deadline", a: () => { handleAction("deadline"); setMobDetailPanel(null); } }] : []),
+                    ...(!isCEO && task.status === "in_progress" ? [{ svg: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>, label: "Report", a: () => { handleAction("report"); setMobDetailPanel(null); } }] : []),
+                  ].map((ac, i) => (
+                    <button key={i} onClick={ac.a} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, padding: "10px 4px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "var(--font)" }}>
+                      <span style={{ width: 32, height: 32, borderRadius: 8, background: "var(--p-lt)", color: "var(--p)", display: "flex", alignItems: "center", justifyContent: "center" }}>{ac.svg}</span>
+                      <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--text-3)" }}>{ac.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-
-              {/* tab switcher inside mobile detail */}
-              <div className="gv-detail-tabs">
-                <button className={`gv-dtab ${mobDetailPanel === "info" ? "active" : ""}`} onClick={() => setMobDetailPanel("info")}>ℹ️ Info</button>
-                <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>
-                  📊 Reports
-                  {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
-                </button>
+              {/* Desktop: keep badge row + tabs (hidden on mobile) */}
+              <div className="gv-desk-detail-head">
+                <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span className="gv-code-tag">{task.taskId}</span>
+                  {st && <span className="gv-badge" style={{ color: st.color, background: st.bg, borderColor: `${st.color}22` }}><span className="gv-badge-dot" style={{ background: st.dot }} />{st.label}</span>}
+                  <span className="gv-badge" style={{ color: pri.color, background: pri.bg, borderColor: `${pri.color}22` }}><span className="gv-badge-dot" style={{ background: pri.dot }} />{pri.label}</span>
+                </div>
+                <div className="gv-detail-tabs">
+                  <button className={`gv-dtab ${mobDetailPanel === "info" ? "active" : ""}`} onClick={() => setMobDetailPanel("info")}>ℹ️ Info</button>
+                  <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>
+                    📊 Reports {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
+                  </button>
+                </div>
               </div>
 
               <DetailBody
@@ -2533,6 +2871,8 @@ export default function TasksPage() {
                 pctColor={pctColor}
                 pctGradient={pctGradient}
                 unreadCounts={unreadCounts}
+                employeeMap={employeeMap}
+                chatMessages={chatMessages}
               />
             </div>
           </div>
@@ -2547,7 +2887,7 @@ export default function TasksPage() {
               onClick={() => setRightPanel(rightPanel === "info" ? null : "info")}
               title="Task Details"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
               </svg>
             </button>
@@ -2556,8 +2896,17 @@ export default function TasksPage() {
               onClick={() => setRightPanel(rightPanel === "reports" ? null : "reports")}
               title="Reports"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            </button>
+            <button
+              className={`gv-tool-btn ${rightPanel === "requests" ? "active" : ""}`}
+              onClick={() => setRightPanel(rightPanel === "requests" ? null : "requests")}
+              title="Requests"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
               </svg>
             </button>
             <div className="gv-tool-sep" />
@@ -2568,7 +2917,7 @@ export default function TasksPage() {
               disabled={!task || (!isCEO && !isTL)}
               style={{ opacity: task && (isCEO || isTL) ? 1 : 0.3 }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             </button>
@@ -2579,7 +2928,7 @@ export default function TasksPage() {
               disabled={!task}
               style={{ opacity: task ? 1 : 0.3 }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 014-4h12" />
               </svg>
             </button>
@@ -2590,7 +2939,7 @@ export default function TasksPage() {
             <div className="gv-detail-inner">
               {/* Detail header with close */}
               <div className="gv-detail-head">
-                <span className="gv-detail-head-title">{rightPanel === "reports" ? "Reports" : "Task Details"}</span>
+                <span className="gv-detail-head-title">{rightPanel === "reports" ? "Reports" : rightPanel === "requests" ? "Requests" : "Task Details"}</span>
                 <div className="gv-detail-head-actions">
                   <button className="gv-detail-icon-btn" onClick={() => setRightPanel(null)} title="Close panel">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -2600,8 +2949,10 @@ export default function TasksPage() {
 
               {!task ? (
                 <div className="gv-placeholder">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#D0D5DD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
-                  <p style={{ fontSize: 12, color: "var(--text-4)", lineHeight: 1.7, maxWidth: 180, textAlign: "center", marginTop: 8 }}>Select a task to view details and reports here.</p>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 6 }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  </div>
+                  <p style={{ fontSize: 11, color: "var(--text-4)", lineHeight: 1.6, maxWidth: 180, textAlign: "center" }}>Select a task to view details here.</p>
                 </div>
               ) : detailLoading ? (
                 <div style={{ padding: "18px 15px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2615,75 +2966,59 @@ export default function TasksPage() {
                 </div>
               ) : (
                 <>
-                  {/* Detail header */}
-                  <div className="gv-d-title-row">
-                    <div className="gv-d-title">{task.title}</div>
-                    <div className="gv-actions">
-                      {/* Circle R — Request button — visible to everyone */}
-                      <button
-                        className="gv-abtn"
-                        style={{
-                          background: "linear-gradient(135deg,#D93025,#EA4335)",
-                          color: "#fff", borderColor: "transparent",
-                          borderRadius: "50%", width: 28, height: 28,
-                          padding: 0, fontSize: 11, fontWeight: 800,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          flexShrink: 0, boxShadow: "0 2px 8px rgba(217,48,37,0.4)",
-                          cursor: "pointer",
-                        }}
-                        title="Send a Request"
-                        onClick={() => setRequestModal({ taskId: task.taskId, taskTitle: task.title })}
-                      >
-                        R
-                      </button>
-                      {(isCEO || isTL) && <button className="gv-abtn gv-abtn-p" onClick={() => handleAction("add_subtask")}>+Sub</button>}
-                      {(isCEO || isTL || isAssignee) && task.status !== "done" && <button className="gv-abtn gv-abtn-o" onClick={() => handleAction("forward")}>↗ Fwd</button>}
-                      {isCEO && <button className="gv-abtn gv-abtn-o" onClick={() => handleAction("deadline")}>📅</button>}
-                      {isCEO && <button className="gv-abtn gv-abtn-d" onClick={() => handleAction("delete")}>🗑</button>}
-                    </div>
-                  </div>
-
-                  <div className="gv-badge-row">
-                    <span className="gv-code-tag">{task.taskId}</span>
-                    {!task.parentTaskId && <span className="gv-badge" style={{ color: "var(--p)", background: "var(--p-lt)", borderColor: "rgba(91,94,244,.2)" }}>Root</span>}
-                    {st && <span className="gv-badge" style={{ color: st.color, background: st.bg, borderColor: `${st.color}22` }}><span className="gv-badge-dot" style={{ background: st.dot }} />{st.label}</span>}
-                    <span className="gv-badge" style={{ color: pri.color, background: pri.bg, borderColor: `${pri.color}22` }}><span className="gv-badge-dot" style={{ background: pri.dot }} />{pri.label}</span>
-                  </div>
+                  {/* No duplicate header — DetailBody renders its own */}
 
 
                   {/* Desktop tabs */}
                   <div className="gv-detail-tabs">
-                    <button className={`gv-dtab ${(rightPanel || activeDetailTab) === "info" ? "active" : ""}`} onClick={() => { setActiveDetailTab("info"); setRightPanel("info"); }}>
+                    <button className={`gv-dtab ${rightPanel === "info" ? "active" : ""}`} onClick={() => { setActiveDetailTab("info"); setRightPanel("info"); }}>
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" strokeWidth="1" /><path d="M5.5 5v3M5.5 3.5v.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
                       Info
                     </button>
-                    <button className={`gv-dtab ${(rightPanel || activeDetailTab) === "reports" ? "active" : ""}`} onClick={() => { setActiveDetailTab("reports"); setRightPanel("reports"); }}>
+                    <button className={`gv-dtab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => { setActiveDetailTab("reports"); setRightPanel("reports"); }}>
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="1" y="7" width="2" height="3.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="4.5" y="4" width="2" height="6.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="8" y="1" width="2" height="9.5" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
                       Reports
                       {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
                     </button>
+                    <button className={`gv-dtab ${rightPanel === "requests" ? "active" : ""}`} onClick={() => setRightPanel("requests")}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                      Requests
+                    </button>
                   </div>
 
-                  <DetailBody
-                    task={task}
-                    dailyReports={dailyReports}
-                    reportsLoading={reportsLoading}
-                    activeDetailTab={activeDetailTab}
-                    setActiveDetailTab={setActiveDetailTab}
-                    isAssignee={isAssignee}
-                    isConfirmed={isConfirmed}
-                    isStarted={isStarted}
-                    isCEO={isCEO}
-                    isTL={isTL}
-                    actionBusy={actionBusy}
-                    handleAction={handleAction}
-                    handleSelectNode={handleSelectNode}
-                    employeeId={employeeId}
-                    pct={pct}
-                    pctColor={pctColor}
-                    pctGradient={pctGradient}
-                    unreadCounts={unreadCounts}
-                  />
+                  {rightPanel === "requests" ? (
+                    <TaskRequestsPanel
+                      task={task}
+                      employeeId={employeeId}
+                      employeeName={employeeName}
+                      isCEO={isCEO}
+                      isTL={isTL}
+                      onNewRequest={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", taskId: task.taskId, taskTitle: task.title } }))}
+                    />
+                  ) : (
+                    <DetailBody
+                      task={task}
+                      dailyReports={dailyReports}
+                      reportsLoading={reportsLoading}
+                      activeDetailTab={activeDetailTab}
+                      setActiveDetailTab={setActiveDetailTab}
+                      isAssignee={isAssignee}
+                      isConfirmed={isConfirmed}
+                      isStarted={isStarted}
+                      isCEO={isCEO}
+                      isTL={isTL}
+                      actionBusy={actionBusy}
+                      handleAction={handleAction}
+                      handleSelectNode={handleSelectNode}
+                      employeeId={employeeId}
+                      pct={pct}
+                      pctColor={pctColor}
+                      pctGradient={pctGradient}
+                      unreadCounts={unreadCounts}
+                      employeeMap={employeeMap}
+                      chatMessages={chatMessages}
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -2769,16 +3104,7 @@ export default function TasksPage() {
         onCancel={() => setShowDeleteConf(false)}
       />
 
-      {/* Request Modal - for sending requests to team members */}
-      {requestModal && (
-        <RequestModal
-          taskId={requestModal.taskId}
-          taskTitle={requestModal.taskTitle}
-          currentEmployeeId={employeeId}
-          currentEmployeeName={employeeName}
-          onClose={() => setRequestModal(null)}
-        />
-      )}
+      {/* Request panel is now universal — opened via window event from toolbar/mobile */}
     </>
   );
 }

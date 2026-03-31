@@ -1,10 +1,901 @@
 "use client";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { firebaseAuth } from "../../../lib/coworkFirebase";
+import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../../lib/coworkUtils";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import {
+  collection, doc, setDoc, updateDoc, getDocs, getDoc,
+  query, where, orderBy, onSnapshot, serverTimestamp,
+} from "firebase/firestore";
+
+
+/* ── helpers shared by the panel ── */
+const CLD_CLOUD = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const CLD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+async function fetchEmployees(excludeId) {
+  const snap = await getDocs(collection(firebaseDb, "cowork_employees"));
+  const list = [];
+  snap.forEach(d => {
+    const e = d.data();
+    if (e.employeeId && e.employeeId !== excludeId) list.push(e);
+  });
+  return list;
+}
+
+async function uploadImageCld(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("upload_preset", CLD_PRESET);
+  fd.append("folder", "cowork-requests");
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLD_CLOUD}/image/upload`, { method: "POST", body: fd });
+  const d = await res.json();
+  if (!res.ok) throw new Error(d.error?.message || "Upload failed");
+  return { url: d.secure_url, name: file.name, type: "image", size: d.bytes || file.size };
+}
+
+async function uploadPdfBackend(file) {
+  const token = await firebaseAuth.currentUser?.getIdToken();
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${BASE_URL}/cowork/upload/pdf`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
+  });
+  const d = await res.json();
+  if (!res.ok) throw new Error(d.error || "PDF upload failed");
+  return { url: d.url || d.viewUrl, name: file.name, type: "pdf", size: d.size || file.size };
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const ms = ts?.seconds ? ts.seconds * 1000 : new Date(ts).getTime();
+  const diff = Math.floor((Date.now() - ms) / 60000);
+  if (diff < 1) return "just now";
+  if (diff < 60) return `${diff}m ago`;
+  if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+  if (diff < 10080) return `${Math.floor(diff / 1440)}d ago`;
+  return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+function ReqAvatar({ name = "?" }) {
+  const colors = ["#1A73E8", "#0F9D58", "#F29900", "#7B1FA2", "#D93025", "#00ACC1"];
+  const bg = colors[name.charCodeAt(0) % colors.length];
+  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return (
+    <div style={{
+      width: 30, height: 30, borderRadius: 8, background: bg, color: "#fff",
+      fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+    }}>
+      {initials}
+    </div>
+  );
+}
+
+const PRIORITY_OPTIONS = ["low", "medium", "high", "urgent"];
+const TYPE_OPTIONS = ["Information", "Approval", "Resource", "Review", "Clarification", "Support", "Other"];
+const STATUS_COLORS = {
+  pending: { color: "#D97706", bg: "#FEF3C7" },
+  approved: { color: "#16A34A", bg: "#F0FDF4" },
+  rejected: { color: "#DC2626", bg: "#FEF2F2" },
+};
+
+/* ─── RequestSidebarPanel ─── */
+function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null }) {
+  const [tab, setTab] = useState(initialTab); // "compose" | "received" | "sent"
+  const [employees, setEmployees] = useState([]);
+  // compose form
+  const [toIds, setToIds] = useState([]);
+  const [subject, setSubject] = useState("");
+  const [msg, setMsg] = useState("");
+  const [priority, setPriority] = useState("medium");
+  const [type, setType] = useState("Information");
+  const [dueDate, setDueDate] = useState("");
+  const [taskRef, setTaskRef] = useState(""); // optional task reference
+  const [taskQuery, setTaskQuery] = useState("");
+  const [taskSuggestions, setTaskSuggestions] = useState([]);
+  const [showTaskDrop, setShowTaskDrop] = useState(false);
+  const [selectedTaskObj, setSelectedTaskObj] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef(null);
+  // received / sent lists
+  const [received, setReceived] = useState([]);
+  const [sent2, setSent2] = useState([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [respondingId, setRespondingId] = useState(null);
+  const [respondMsg, setRespondMsg] = useState("");
+  const [chatOpenId, setChatOpenId] = useState(null); // which request has chat open
+  const [chatThreads, setChatThreads] = useState({}); // reqId -> messages[]
+  const [chatInput, setChatInput] = useState({});
+  const chatEndRefs = useRef({});
+  const [seenIds, setSeenIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("req_seen_ids") || "[]")); } catch { return new Set(); }
+  });
+  const unseenCount = received.filter(r => !seenIds.has(r.id)).length;
+
+  useEffect(() => {
+    fetchEmployees(employeeId).then(setEmployees).catch(() => { });
+  }, [employeeId]);
+
+  // Pre-fill task when opened from tasks page
+  useEffect(() => {
+    if (prefilledTask?.taskId) {
+      setTaskRef(prefilledTask.taskId);
+      setSelectedTaskObj({ taskId: prefilledTask.taskId, title: prefilledTask.taskTitle || prefilledTask.taskId });
+    }
+  }, [prefilledTask]);
+  // Task autocomplete — simple getDocs with client-side filter, no composite index needed
+  useEffect(() => {
+    if (!taskQuery.trim() || taskQuery.length < 2) { setTaskSuggestions([]); return; }
+    let cancelled = false;
+    getDocs(collection(firebaseDb, "cowork_tasks")).then(snap => {
+      if (cancelled) return;
+      const lower = taskQuery.toLowerCase();
+      const results = snap.docs
+        .map(d => ({ taskId: d.id, ...d.data() }))
+        .filter(t =>
+          !t.parentTaskId &&
+          t.status !== "done" &&
+          (t.title?.toLowerCase().includes(lower) || t.taskId?.toLowerCase().includes(lower))
+        )
+        .slice(0, 6);
+      setTaskSuggestions(results);
+    }).catch(() => { });
+    return () => { cancelled = true; };
+  }, [taskQuery]);
+
+  // Always listen to both received and sent — no orderBy to avoid missing composite index
+  useEffect(() => {
+    if (!employeeId) return;
+    const sortByDate = docs => [...docs].sort((a, b) => {
+      const ta = a.createdAt?.seconds ?? 0;
+      const tb = b.createdAt?.seconds ?? 0;
+      return tb - ta;
+    });
+    const qR = query(collection(firebaseDb, "cowork_requests"), where("toId", "==", employeeId));
+    const unsubR = onSnapshot(qR, snap => {
+      setReceived(sortByDate(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    }, err => console.error("received listener:", err));
+    const qS = query(collection(firebaseDb, "cowork_requests"), where("fromId", "==", employeeId));
+    const unsubS = onSnapshot(qS, snap => {
+      setSent2(sortByDate(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    }, err => console.error("sent listener:", err));
+    return () => { unsubR(); unsubS(); };
+  }, [employeeId]);
+
+  const toggleRecipient = (id) => {
+    setToIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleFilePick = (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = "";
+    setFiles(prev => [...prev, ...picked.filter(f =>
+      f.type.startsWith("image/") || f.type === "application/pdf"
+    ).map(f => ({ file: f, uploading: false, done: false, result: null }))]);
+  };
+
+  const resetForm = () => {
+    setToIds([]); setSubject(""); setMsg(""); setPriority("medium");
+    setType("Information"); setDueDate(""); setTaskRef(""); setTaskQuery(""); setSelectedTaskObj(null); setFiles([]);
+    setError(""); setSent(false);
+  };
+
+  const handleSend = async () => {
+    if (toIds.length === 0) { setError("Select at least one recipient."); return; }
+    if (!subject.trim()) { setError("Subject is required."); return; }
+    if (!msg.trim()) { setError("Message is required."); return; }
+    setError(""); setSending(true);
+    try {
+      // Upload attachments
+      const uploaded = [];
+      const updFiles = [...files];
+      for (let i = 0; i < updFiles.length; i++) {
+        updFiles[i] = { ...updFiles[i], uploading: true };
+        setFiles([...updFiles]);
+        const f = updFiles[i].file;
+        const result = f.type.startsWith("image/") ? await uploadImageCld(f) : await uploadPdfBackend(f);
+        updFiles[i] = { ...updFiles[i], uploading: false, done: true, result };
+        uploaded.push(result);
+        setFiles([...updFiles]);
+      }
+      // Create one request doc per recipient
+      for (const toId of toIds) {
+        const toEmp = employees.find(e => e.employeeId === toId);
+        const reqId = crypto.randomUUID();
+        await setDoc(doc(firebaseDb, "cowork_requests", reqId), {
+          requestId: reqId,
+          taskId: taskRef || null,
+          taskTitle: selectedTaskObj?.title || taskRef || null,
+          fromId: employeeId,
+          fromName: employeeName,
+          toId,
+          toName: toEmp?.name || toId,
+          subject: subject.trim(),
+          message: msg.trim(),
+          type,
+          priority,
+          dueDate: dueDate || null,
+          attachments: uploaded,
+          status: "pending",
+          responseMessage: "",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        // Firestore notification (no dueDate field — keep separate from deadline tracker)
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: toId,
+          type: "request",
+          title: `New request from ${employeeName}`,
+          body: subject.trim(),
+          fromId: employeeId,
+          fromName: employeeName,
+          requestId: reqId,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      }
+      setSent(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Open chat thread for a request
+  const openChat = (reqId) => {
+    setChatOpenId(prev => prev === reqId ? null : reqId);
+    if (!chatThreads[reqId]) {
+      // listen to cowork_requests/{reqId}/chat subcollection
+      const q = query(
+        collection(firebaseDb, "cowork_requests", reqId, "chat"),
+        orderBy("createdAt", "asc")
+      );
+      const unsub = onSnapshot(q, snap => {
+        const msgs = snap.docs.map(d => ({
+          id: d.id, ...d.data(),
+          createdAt: d.data().createdAt?.seconds
+            ? new Date(d.data().createdAt.seconds * 1000).toISOString()
+            : d.data().createdAt
+        }));
+        setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
+        setTimeout(() => chatEndRefs.current[reqId]?.scrollIntoView({ behavior: "smooth" }), 40);
+      }, () => { });
+      // store unsub — we won't clean up for simplicity (panel close will unmount)
+    }
+  };
+
+  const sendChatMsg = async (reqId) => {
+    const text = (chatInput[reqId] || "").trim();
+    if (!text) return;
+    setChatInput(prev => ({ ...prev, [reqId]: "" }));
+    const msgId = crypto.randomUUID();
+    await setDoc(doc(collection(firebaseDb, "cowork_requests", reqId, "chat"), msgId), {
+      messageId: msgId, reqId,
+      senderId: employeeId, senderName: employeeName,
+      text, createdAt: serverTimestamp(),
+    });
+    // update request updatedAt so it surfaces
+    await updateDoc(doc(firebaseDb, "cowork_requests", reqId), { updatedAt: serverTimestamp() });
+  };
+
+  const handleRespond = async (reqId, status) => {
+    setRespondingId(reqId);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
+        status,
+        responseMessage: respondMsg.trim(),
+        updatedAt: serverTimestamp(),
+      });
+      setRespondMsg(""); setRespondingId(null);
+    } catch (e) {
+      console.error(e);
+      setRespondingId(null);
+    }
+  };
+
+  const empLabel = (e) => {
+    if (e.role === "ceo") return `${e.name} (CEO)`;
+    if (e.role === "tl") return `${e.name}${e.department ? ` · ${e.department} TL` : " (TL)"}`;
+    return `${e.name}${e.department ? ` · ${e.department}` : ""}`;
+  };
+
+  const priColor = { low: "#16A34A", medium: "#D97706", high: "#DC2626", urgent: "#7C3AED" };
+  const priBg = { low: "#F0FDF4", medium: "#FEF3C7", high: "#FEF2F2", urgent: "#F5F3FF" };
+
+  return (
+    <>
+      {/* Header */}
+      <div className="cw-req-panel-head">
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, background: "#EBF3FE",
+            display: "flex", alignItems: "center", justifyContent: "center"
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+          </div>
+          <div>
+            <div className="cw-req-panel-title">Requests</div>
+            <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>Send & manage requests</div>
+          </div>
+        </div>
+        <button className="cw-req-panel-close" onClick={onClose}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="cw-req-tab-bar">
+        {[
+          ["compose", <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg> New Request</>],
+          ["received", <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg> Received</>],
+          ["sent", <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg> Sent</>],
+        ].map(([key, label]) => (
+          <button key={key} className={`cw-req-tab${tab === key ? " active" : ""}`} onClick={() => { setTab(key); if (key === "compose") setSent(false); if (key === "received") { const ids = [...received.map(r => r.id), ...seenIds]; setSeenIds(new Set(ids)); try { localStorage.setItem("req_seen_ids", JSON.stringify(ids)); } catch { } } }}>
+            {label}
+            {key === "received" && unseenCount > 0 && (
+              <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 800, color: "#fff", background: "#EF4444", padding: "1px 5px", borderRadius: 99 }}>
+                {unseenCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="cw-req-body">
+        {/* ── COMPOSE TAB ── */}
+        {tab === "compose" && (
+          <div style={{ padding: "16px 18px" }}>
+            {sent ? (
+              <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: "50%", background: "#ECFDF5",
+                  display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px"
+                }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#16A34A", marginBottom: 6 }}>Request Sent!</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 20, lineHeight: 1.6 }}>
+                  Your request has been sent to {toIds.length} recipient{toIds.length > 1 ? "s" : ""}.
+                </div>
+                <button onClick={resetForm} style={{
+                  padding: "8px 20px", background: "#1A73E8", color: "#fff",
+                  border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                }}>
+                  Send Another
+                </button>
+              </div>
+            ) : (
+              <>
+                {error && (
+                  <div style={{
+                    background: "#FEF2F2", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 7,
+                    padding: "8px 12px", color: "#DC2626", fontSize: 12, marginBottom: 14
+                  }}>
+                    {error}
+                  </div>
+                )}
+
+                {/* Recipients — multi-select chips */}
+                <div className="cw-rf-field">
+                  <label className="cw-rf-lbl">To *</label>
+                  <div style={{
+                    display: "flex", flexWrap: "wrap", gap: 5, padding: "8px 10px",
+                    border: "1.5px solid #E4E7EC", borderRadius: 7, background: "#F9FAFB",
+                    minHeight: 40, cursor: "pointer"
+                  }}
+                    onClick={() => document.getElementById('cw-emp-select')?.focus()}>
+                    {toIds.length === 0 && <span style={{ fontSize: 12, color: "#9AA0A6", alignSelf: "center" }}>Select recipients…</span>}
+                    {toIds.map(id => {
+                      const e = employees.find(x => x.employeeId === id);
+                      return (
+                        <span key={id} style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "2px 8px 2px 6px", borderRadius: 99, background: "#EBF3FE",
+                          border: "1px solid #BFDBFE", fontSize: 11, fontWeight: 600, color: "#1A73E8"
+                        }}>
+                          {e?.name || id}
+                          <button onClick={(ev) => { ev.stopPropagation(); toggleRecipient(id); }}
+                            style={{
+                              background: "none", border: "none", cursor: "pointer", color: "#1A73E8",
+                              fontSize: 12, lineHeight: 1, padding: 0, marginLeft: 2
+                            }}>×</button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <select id="cw-emp-select" className="cw-rf-input" style={{ marginTop: 5 }}
+                    value="" onChange={e => { if (e.target.value) toggleRecipient(e.target.value); }}>
+                    <option value="">+ Add recipient</option>
+                    {employees.filter(e => !toIds.includes(e.employeeId)).map(e => (
+                      <option key={e.employeeId} value={e.employeeId}>{empLabel(e)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subject */}
+                <div className="cw-rf-field">
+                  <label className="cw-rf-lbl">Subject *</label>
+                  <input className="cw-rf-input" placeholder="Brief subject line…"
+                    value={subject} onChange={e => setSubject(e.target.value)} />
+                </div>
+
+                {/* Priority + Type row */}
+                <div className="cw-rf-row">
+                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
+                    <label className="cw-rf-lbl">Priority</label>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+                      {PRIORITY_OPTIONS.map(p => (
+                        <button key={p} onClick={() => setPriority(p)}
+                          style={{
+                            padding: "4px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                            cursor: "pointer", fontFamily: "inherit", border: "1px solid",
+                            color: priority === p ? priColor[p] : "#9AA0A6",
+                            background: priority === p ? priBg[p] : "#F9FAFB",
+                            borderColor: priority === p ? `${priColor[p]}44` : "#E4E7EC"
+                          }}>
+                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
+                    <label className="cw-rf-lbl">Type</label>
+                    <select className="cw-rf-input" value={type} onChange={e => setType(e.target.value)}>
+                      {TYPE_OPTIONS.map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Due date + Task ref row */}
+                <div className="cw-rf-row" style={{ marginTop: 14 }}>
+                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
+                    <label className="cw-rf-lbl">Due By</label>
+                    <input className="cw-rf-input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                  </div>
+                  <div className="cw-rf-field" style={{ marginBottom: 0, position: "relative" }}>
+                    <label className="cw-rf-lbl">Linked Task (optional)</label>
+                    {selectedTaskObj ? (
+                      <div style={{
+                        display: "flex", alignItems: "center", gap: 6, padding: "7px 10px",
+                        border: "1.5px solid #BFDBFE", borderRadius: 7, background: "#EFF6FF"
+                      }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                        <span style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#1A73E8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {selectedTaskObj.taskId} · {selectedTaskObj.title}
+                        </span>
+                        <button onClick={() => { setSelectedTaskObj(null); setTaskRef(""); setTaskQuery(""); }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#9AA0A6", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+                      </div>
+                    ) : (
+                      <>
+                        <input className="cw-rf-input" placeholder="Search task name or ID…"
+                          value={taskQuery}
+                          onChange={e => { setTaskQuery(e.target.value); setShowTaskDrop(true); }}
+                          onFocus={() => setShowTaskDrop(true)}
+                          onBlur={() => setTimeout(() => setShowTaskDrop(false), 180)}
+                        />
+                        {showTaskDrop && taskSuggestions.length > 0 && (
+                          <div style={{
+                            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                            background: "#fff", border: "1.5px solid #E4E7EC", borderRadius: 8,
+                            boxShadow: "0 4px 16px rgba(0,0,0,0.10)", zIndex: 99, overflow: "hidden"
+                          }}>
+                            {taskSuggestions.map(t => (
+                              <div key={t.taskId}
+                                onMouseDown={() => { setSelectedTaskObj(t); setTaskRef(t.taskId); setTaskQuery(""); setShowTaskDrop(false); }}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+                                  cursor: "pointer", borderBottom: "1px solid #F3F4F6", fontSize: 12
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#F5F7FA"}
+                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                <span style={{
+                                  fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                                  color: "#1A73E8", background: "#EBF3FE", padding: "2px 5px", borderRadius: 4, flexShrink: 0
+                                }}>
+                                  {t.taskId}
+                                </span>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1A1D21", fontWeight: 500 }}>{t.title}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Message */}
+                <div className="cw-rf-field" style={{ marginTop: 14 }}>
+                  <label className="cw-rf-lbl">Message *</label>
+                  <textarea className="cw-rf-input" rows={4}
+                    style={{ resize: "vertical", lineHeight: 1.6 }}
+                    placeholder="Describe your request in detail…"
+                    value={msg} onChange={e => setMsg(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) handleSend(); }}
+                  />
+                  <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 2 }}>Ctrl + Enter to send</div>
+                </div>
+
+                {/* Attachments */}
+                <div className="cw-rf-field">
+                  <label className="cw-rf-lbl">Attachments</label>
+                  {files.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 7 }}>
+                      {files.map((f, i) => (
+                        <span key={i} style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "3px 8px", borderRadius: 99, background: "#EFF6FF",
+                          border: "1px solid #BFDBFE", fontSize: 11, color: "#1A73E8"
+                        }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            {f.file.type.startsWith("image/")
+                              ? <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>
+                              : <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></>
+                            }
+                          </svg> {f.uploading ? "Uploading…" : f.file.name}
+                          {!f.uploading && <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#9AA0A6", fontSize: 11, padding: 0 }}>×</button>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" onClick={() => fileRef.current?.click()}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px",
+                      background: "#F9FAFB", border: "1.5px dashed #D0D5DD", borderRadius: 7,
+                      color: "#667085", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                    }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
+                    Attach files
+                  </button>
+                  <input ref={fileRef} type="file" multiple style={{ display: "none" }}
+                    accept="image/*,application/pdf" onChange={handleFilePick} />
+                </div>
+
+                {/* Send button */}
+                <button onClick={handleSend} disabled={sending}
+                  style={{
+                    width: "100%", padding: "10px", background: "#1A73E8", color: "#fff",
+                    border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+                    cursor: sending ? "not-allowed" : "pointer", fontFamily: "inherit",
+                    opacity: sending ? 0.7 : 1, display: "flex", alignItems: "center",
+                    justifyContent: "center", gap: 7, transition: "opacity 0.15s"
+                  }}>
+                  {sending ? (
+                    <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Sending…</>
+                  ) : (
+                    <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg> Send Request</>
+                  )}
+                </button>
+                <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── RECEIVED TAB ── */}
+        {tab === "received" && (
+          <div>
+            {loadingList ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 32 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+              </div>
+            ) : received.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: "#9AA0A6" }}>
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 10, opacity: 0.4 }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>No requests yet</div>
+                <div style={{ fontSize: 12 }}>Requests sent to you appear here</div>
+              </div>
+            ) : received.map(req => {
+              const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
+              const isExpanded = respondingId === req.id;
+              return (
+                <div key={req.id} className="cw-req-card">
+                  <div className="cw-req-card-head">
+                    <ReqAvatar name={req.fromName || "?"} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="cw-req-sender">{req.fromName || "Unknown"}</span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
+                          color: sc.color, background: sc.bg
+                        }}>{req.status}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
+                    </div>
+                    {req.priority && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+                        color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB",
+                        border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33`
+                      }}>
+                        {req.priority}
+                      </span>
+                    )}
+                  </div>
+                  {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
+                  {req.taskId && (
+                    <div className="cw-req-task-chip">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                      {req.taskId} {req.taskTitle ? `· ${req.taskTitle}` : ""}
+                    </div>
+                  )}
+                  <div className="cw-req-msg">{req.message}</div>
+                  {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+                  {req.type && <div style={{ marginTop: 5 }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "#F3F4F6", color: "#374151", fontWeight: 600, border: "1px solid #E5E7EB" }}>{req.type}</span></div>}
+                  {req.attachments?.length > 0 && (
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
+                      {req.attachments.map((att, i) => (
+                        <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px",
+                            borderRadius: 6, background: "#EFF6FF", border: "1px solid #BFDBFE",
+                            fontSize: 10, color: "#1A73E8", textDecoration: "none", fontWeight: 600
+                          }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            {att.type === "image"
+                              ? <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>
+                              : <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></>
+                            }
+                          </svg> {att.name || "File"}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {req.responseMessage && (
+                    <div style={{
+                      marginTop: 8, padding: "6px 10px", background: "#F9FAFB", borderRadius: 6,
+                      fontSize: 11, color: "#374151", borderLeft: "3px solid #E4E7EC"
+                    }}>
+                      <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span>{req.responseMessage}
+                    </div>
+                  )}
+                  {/* Chat thread toggle */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {req.status === "pending" && !isExpanded && (
+                        <button className="cw-req-btn cw-req-btn-resolve" onClick={() => { setRespondingId(req.id); setRespondMsg(""); }}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Respond
+                        </button>
+                      )}
+                    </div>
+                    <button onClick={() => openChat(req.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
+                        border: "1px solid #E4E7EC", borderRadius: 6, background: chatOpenId === req.id ? "#EBF3FE" : "#F9FAFB",
+                        color: chatOpenId === req.id ? "#1A73E8" : "#667085",
+                        fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                      }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                      Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                    </button>
+                  </div>
+
+                  {req.status === "pending" && isExpanded && (
+                    <div style={{ marginTop: 8 }}>
+                      <textarea
+                        placeholder="Optional response message…"
+                        value={respondMsg}
+                        onChange={e => setRespondMsg(e.target.value)}
+                        style={{
+                          width: "100%", padding: "7px 10px", border: "1.5px solid #E4E7EC",
+                          borderRadius: 7, fontSize: 12, fontFamily: "inherit", resize: "vertical",
+                          outline: "none", boxSizing: "border-box", minHeight: 60,
+                          background: "#F9FAFB", color: "#1A1D21"
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        <button className="cw-req-btn cw-req-btn-resolve" onClick={() => handleRespond(req.id, "approved")}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Approve
+                        </button>
+                        <button className="cw-req-btn cw-req-btn-reject" onClick={() => handleRespond(req.id, "rejected")}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg> Reject
+                        </button>
+                        <button onClick={() => { setRespondingId(null); setRespondMsg(""); }}
+                          style={{
+                            padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                            cursor: "pointer", fontFamily: "inherit", border: "1px solid #E4E7EC",
+                            background: "#F9FAFB", color: "#667085"
+                          }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inline chat thread */}
+                  {chatOpenId === req.id && (
+                    <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
+                      <div style={{
+                        padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
+                        fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em"
+                      }}>
+                        Chat Thread
+                      </div>
+                      <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, background: "#fff" }}>
+                        {(chatThreads[req.id] || []).length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet. Start the conversation.</div>
+                        ) : (chatThreads[req.id] || []).map((msg, mi) => {
+                          const isMe = msg.senderId === employeeId;
+                          return (
+                            <div key={msg.id || mi} style={{
+                              display: "flex", flexDirection: "column",
+                              alignItems: isMe ? "flex-end" : "flex-start"
+                            }}>
+                              {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
+                              <div style={{
+                                maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
+                                background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21",
+                                fontSize: 12, lineHeight: 1.5
+                              }}>
+                                {msg.text}
+                              </div>
+                              <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
+                                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div ref={el => chatEndRefs.current[req.id] = el} />
+                      </div>
+                      <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
+                        <input
+                          value={chatInput[req.id] || ""}
+                          onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }}
+                          placeholder="Type a message…"
+                          style={{
+                            flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6,
+                            fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff",
+                            color: "#1A1D21"
+                          }}
+                        />
+                        <button onClick={() => sendChatMsg(req.id)}
+                          style={{
+                            padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none",
+                            borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center"
+                          }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── SENT TAB ── */}
+        {tab === "sent" && (
+          <div>
+            {loadingList ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 32 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+              </div>
+            ) : sent2.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: "#9AA0A6" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Nothing sent yet</div>
+                <div style={{ fontSize: 12 }}>Requests you send appear here</div>
+              </div>
+            ) : sent2.map(req => {
+              const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
+              return (
+                <div key={req.id} className="cw-req-card">
+                  <div className="cw-req-card-head">
+                    <ReqAvatar name={req.toName || "?"} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="cw-req-sender">To: {req.toName || req.toId}</span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
+                          color: sc.color, background: sc.bg
+                        }}>{req.status}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
+                    </div>
+                    {req.priority && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+                        color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB"
+                      }}>
+                        {req.priority}
+                      </span>
+                    )}
+                  </div>
+                  {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
+                  {req.taskId && <div className="cw-req-task-chip">{req.taskId}{req.taskTitle ? ` · ${req.taskTitle}` : ""}</div>}
+                  <div className="cw-req-msg">{req.message}</div>
+                  {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+                  {req.responseMessage && (
+                    <div style={{
+                      marginTop: 8, padding: "6px 10px", background: "#F0FDF4", borderRadius: 6,
+                      fontSize: 11, color: "#374151", borderLeft: `3px solid ${sc.color}`
+                    }}>
+                      <span style={{ fontWeight: 700, color: sc.color }}>Response: </span>{req.responseMessage}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                    <button onClick={() => openChat(req.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
+                        border: "1px solid #E4E7EC", borderRadius: 6, background: chatOpenId === req.id ? "#EBF3FE" : "#F9FAFB",
+                        color: chatOpenId === req.id ? "#1A73E8" : "#667085",
+                        fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                      }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                      Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                    </button>
+                  </div>
+                  {chatOpenId === req.id && (
+                    <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
+                      <div style={{
+                        padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
+                        fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em"
+                      }}>
+                        Chat Thread
+                      </div>
+                      <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        {(chatThreads[req.id] || []).length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet.</div>
+                        ) : (chatThreads[req.id] || []).map((msg, mi) => {
+                          const isMe = msg.senderId === employeeId;
+                          return (
+                            <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+                              {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
+                              <div style={{
+                                maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
+                                background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5
+                              }}>
+                                {msg.text}
+                              </div>
+                              <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
+                                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div ref={el => chatEndRefs.current[req.id] = el} />
+                      </div>
+                      <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
+                        <input
+                          value={chatInput[req.id] || ""}
+                          onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }}
+                          placeholder="Type a message…"
+                          style={{
+                            flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6,
+                            fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1A1D21"
+                          }}
+                        />
+                        <button onClick={() => sendChatMsg(req.id)}
+                          style={{
+                            padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none",
+                            borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center"
+                          }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 /* ── Icon set ── */
 function NavIcon({ name, size = 20 }) {
@@ -30,6 +921,22 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const router = useRouter();
   const { notifications, unread, markRead } = useCoworkNotifications(employeeId || "");
   const [notifOpen, setNotifOpen] = useState(false);
+  const [reqPanelOpen, setReqPanelOpen] = useState(false);
+  const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
+
+  const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
+
+  // Allow any page to open the request panel via custom event
+  useEffect(() => {
+    const handler = (e) => {
+      setReqPanelOpen(true);
+      if (e.detail?.tab) setReqPanelInitialTab(e.detail.tab);
+      if (e.detail?.taskId) setReqPanelContext({ taskId: e.detail.taskId, taskTitle: e.detail.taskTitle || e.detail.taskId });
+      else setReqPanelContext(null);
+    };
+    window.addEventListener("openRequestPanel", handler);
+    return () => window.removeEventListener("openRequestPanel", handler);
+  }, []);
 
   useEffect(() => {
     if (!notifOpen) return;
@@ -446,8 +1353,15 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         @media (max-width: 768px) {
           .cw-notif-popup {
-            width: calc(100vw - 24px);
-            right: -8px;
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            width: 100vw;
+            max-height: 75vh;
+            border-radius: 0 0 16px 16px;
+            border-left: none;
+            border-right: none;
           }
         }
         .cw-topbar-avatar {
@@ -479,6 +1393,102 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           z-index: 99;
         }
         .cw-overlay.show { display: block; }
+
+        /* ── Universal Request Sidebar ── */
+        .cw-req-panel {
+          position: fixed;
+          top: 0; right: 0; bottom: 0;
+          width: 480px;
+          max-width: 100vw;
+          background: #fff;
+          border-left: 1px solid #E4E7EC;
+          box-shadow: -8px 0 32px rgba(0,0,0,0.12);
+          z-index: 500;
+          display: flex;
+          flex-direction: column;
+          transform: translateX(100%);
+          transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+        }
+        .cw-req-panel.open { transform: translateX(0); }
+        .cw-req-panel-overlay {
+          display: none;
+          position: fixed; inset: 0;
+          background: rgba(0,0,0,0.25);
+          z-index: 499;
+        }
+        .cw-req-panel-overlay.show { display: block; }
+        .cw-req-panel-head {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 16px 18px; border-bottom: 1px solid #E4E7EC; flex-shrink: 0;
+        }
+        .cw-req-panel-title { font-size: 14px; font-weight: 700; color: #1A1D21; }
+        .cw-req-panel-close {
+          width: 28px; height: 28px; border-radius: 6px; border: 1px solid #E4E7EC;
+          background: #fff; cursor: pointer; display: flex; align-items: center;
+          justify-content: center; color: #667085; font-size: 16px;
+        }
+        .cw-req-panel-close:hover { background: #F5F7FA; }
+        .cw-req-tab-bar {
+          display: flex; border-bottom: 1px solid #E4E7EC; flex-shrink: 0; padding: 0 8px; gap: 2px;
+        }
+        .cw-req-tab {
+          flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+          padding: 9px 8px 8px; font-size: 11px; font-weight: 500; color: #667085;
+          border: none; background: none; cursor: pointer; font-family: inherit;
+          border-bottom: 2px solid transparent; transition: all 0.1s; position: relative;
+        }
+        .cw-req-tab:hover { color: #1A1D21; background: #F9FAFB; border-radius: 4px 4px 0 0; }
+        .cw-req-tab.active { color: #1A73E8; border-bottom-color: #1A73E8; font-weight: 600; }
+        .cw-req-body { flex: 1; overflow-y: auto; }
+        .cw-req-body::-webkit-scrollbar { width: 3px; }
+        .cw-req-body::-webkit-scrollbar-thumb { background: #E4E7EC; border-radius: 2px; }
+
+        /* Form inside request panel */
+        .cw-rf-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+        .cw-rf-lbl { font-size: 10px; font-weight: 700; color: #344054; text-transform: uppercase; letter-spacing: 0.05em; }
+        .cw-rf-input {
+          padding: 8px 11px; border: 1.5px solid #E4E7EC; border-radius: 7px;
+          font-size: 12.5px; font-family: inherit; color: #1A1D21; background: #F9FAFB;
+          outline: none; width: 100%; box-sizing: border-box;
+        }
+        .cw-rf-input:focus { border-color: #1A73E8; background: #fff; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+        .cw-rf-input::placeholder { color: #9AA0A6; }
+        .cw-rf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+        /* Received request card */
+        .cw-req-card {
+          padding: 12px 16px; border-bottom: 1px solid #F2F4F7; cursor: pointer;
+          transition: background 0.08s;
+        }
+        .cw-req-card:hover { background: #F9FAFB; }
+        .cw-req-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+        .cw-req-avatar {
+          width: 28px; height: 28px; border-radius: 8px; background: #1A73E8;
+          color: #fff; font-size: 10px; font-weight: 700;
+          display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .cw-req-sender { font-size: 12px; font-weight: 700; color: #1A1D21; flex: 1; }
+        .cw-req-time { font-size: 10px; color: #9AA0A6; }
+        .cw-req-task-chip {
+          display: inline-flex; align-items: center; gap: 4px;
+          padding: 2px 7px; border-radius: 4px;
+          background: #EBF3FE; color: #1A73E8; font-size: 10px; font-weight: 600;
+          margin-bottom: 5px;
+        }
+        .cw-req-msg { font-size: 12px; color: #374151; line-height: 1.55; white-space: pre-wrap; }
+        .cw-req-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .cw-req-btn {
+          padding: 4px 12px; border-radius: 6px; font-size: 11px; font-weight: 600;
+          cursor: pointer; font-family: inherit; border: 1px solid; transition: all 0.1s;
+        }
+        .cw-req-btn-resolve { background: #ECFDF5; color: #16A34A; border-color: rgba(22,163,74,0.3); }
+        .cw-req-btn-resolve:hover { background: #16A34A; color: #fff; }
+        .cw-req-btn-reject { background: #FEF2F2; color: #DC2626; border-color: rgba(220,38,38,0.25); }
+        .cw-req-btn-reject:hover { background: #DC2626; color: #fff; }
+
+        @media (max-width: 768px) {
+          .cw-req-panel { width: 100vw; }
+        }
 
         @media (max-width: 768px) {
           .cw-sidebar {
@@ -571,16 +1581,55 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                       {notifications.length === 0 ? (
                         <div className="cw-notif-popup-empty">No notifications yet</div>
                       ) : (
-                        notifications.slice(0, 15).map((n, i) => (
-                          <div key={n.id || i} className="cw-notif-popup-item" style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)" }}>
-                            <span className={`cw-notif-popup-item-dot${n.read ? " read" : ""}`} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div className="cw-notif-popup-item-title">{n.title}</div>
-                              {n.body && <div className="cw-notif-popup-item-body">{n.body}</div>}
+                        notifications.slice(0, 15).map((n, i) => {
+                          // Colour + icon per notification type
+                          const TYPE_CFG = {
+                            request: { bg: "#FEF3C7", color: "#D97706", label: "REQ" },
+                            task_assigned: { bg: "#EEF2FF", color: "#4F46E5", label: "TASK" },
+                            task_chat: { bg: "#F0FDF4", color: "#16A34A", label: "CHAT" },
+                            daily_report: { bg: "#F5F3FF", color: "#7C3AED", label: "RPT" },
+                            completion: { bg: "#ECFDF5", color: "#059669", label: "DONE" },
+                            meeting: { bg: "#EFF6FF", color: "#2563EB", label: "MTG" },
+                            dm: { bg: "#FDF4FF", color: "#9333EA", label: "DM" },
+                          };
+                          const cfg = TYPE_CFG[n.type] || { bg: "#F3F4F6", color: "#374151", label: "•" };
+                          const handleNotifClick = () => {
+                            setNotifOpen(false);
+                            if (n.type === "request") {
+                              window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received" } }));
+                            } else if (n.data?.taskId) {
+                              localStorage.setItem("selectedTaskId", n.data.taskId);
+                              window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received", taskId: n.data.taskId } }));
+                            } else if (n.type === "dm" && n.data?.conversationId) {
+                              router.push(`/coworking/direct-messages/${n.data.conversationId}`);
+                            } else {
+                              router.push("/coworking");
+                            }
+                          };
+                          return (
+                            <div key={n.id || i} className="cw-notif-popup-item"
+                              style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.04)" }}
+                              onClick={handleNotifClick}>
+                              {/* Type avatar */}
+                              <div style={{
+                                width: 34, height: 34, borderRadius: 9, background: cfg.bg,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0, fontSize: 9, fontWeight: 800, color: cfg.color,
+                                letterSpacing: "0.04em"
+                              }}>
+                                {cfg.label}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 1 }}>
+                                  <span className="cw-notif-popup-item-title" style={{ fontWeight: n.read ? 500 : 700 }}>{n.title}</span>
+                                  {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1A73E8", flexShrink: 0 }} />}
+                                </div>
+                                {n.body && <div className="cw-notif-popup-item-body">{n.body}</div>}
+                              </div>
+                              <span className="cw-notif-popup-item-time">{timeAgo(n.createdAt)}</span>
                             </div>
-                            <span className="cw-notif-popup-item-time">{timeAgo(n.createdAt)}</span>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                     {notifications.length > 15 && (
@@ -591,6 +1640,18 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </div>
                 )}
               </div>
+              {/* Universal Request Button */}
+              <button
+                className="cw-topbar-icon-btn"
+                title="Requests"
+                onClick={() => setReqPanelOpen(true)}
+                style={{ position: "relative" }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                  <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
+                </svg>
+              </button>
               <div className="cw-topbar-avatar" title={employeeName}>
                 {initials(employeeName)}
               </div>
@@ -601,6 +1662,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             {children}
           </main>
         </div>
+      </div>
+      {/* ── Universal Request Sidebar Panel ── */}
+      <div className={`cw-req-panel-overlay${reqPanelOpen ? " show" : ""}`} onClick={() => setReqPanelOpen(false)} />
+      <div className={`cw-req-panel${reqPanelOpen ? " open" : ""}`}>
+        <RequestSidebarPanel
+          employeeId={employeeId}
+          employeeName={employeeName}
+          onClose={() => setReqPanelOpen(false)}
+          initialTab={reqPanelInitialTab}
+          prefilledTask={reqPanelContext}
+        />
       </div>
     </>
   );
