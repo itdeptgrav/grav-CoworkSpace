@@ -22,6 +22,14 @@ import MessageBubble from "../../../components/coworking/messaging/MessageBubble
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
 import { listTasks, getFullTask, getDailyReports, deleteTask } from "../../../lib/mediaUploadApi";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
+import {
+  MessageCircle,
+  Plus,
+  Forward,
+  BarChart3,
+  Calendar,
+  CheckCircle
+} from "lucide-react";
 
 import {
   collection, doc, setDoc, updateDoc, deleteDoc,
@@ -1002,6 +1010,7 @@ export default function TasksPage() {
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [rowMenuOpen, setRowMenuOpen] = useState(null);
   const [rowMenuPos, setRowMenuPos] = useState({ x: 0, y: 0 });
+  const [sheetTask, setSheetTask] = useState(null); // mobile bottom sheet task
   const [rightPanel, setRightPanel] = useState("info"); // "info" | "reports" | "requests" | null
 
   // ── Resizable split panel state ──
@@ -1056,7 +1065,7 @@ export default function TasksPage() {
 
   const handleLongPressStart = (msg) => {
     longPressTimer.current = setTimeout(() => {
-      setContextMenu({ x: window.innerWidth / 2, y: window.innerHeight / 2, message: msg });
+      setContextMenu({ x: window.innerWidth / 2, y: Math.min(window.innerHeight * 0.5, window.innerHeight - 220), message: msg });
     }, 500);
   };
 
@@ -1073,11 +1082,19 @@ export default function TasksPage() {
   }, [contextMenu]);
 
   // Close row action menu on outside click
+  // Uses "click" (not mousedown) so menu items fire before menu closes
+  // setTimeout(50) prevents the opening tap from immediately closing on mobile
   useEffect(() => {
     if (!rowMenuOpen) return;
-    const fn = () => setRowMenuOpen(null);
-    document.addEventListener("mousedown", fn);
-    return () => document.removeEventListener("mousedown", fn);
+    let fn = null;
+    const timer = setTimeout(() => {
+      fn = () => setRowMenuOpen(null);
+      document.addEventListener("click", fn);
+    }, 50);
+    return () => {
+      clearTimeout(timer);
+      if (fn) document.removeEventListener("click", fn);
+    };
   }, [rowMenuOpen]);
 
 
@@ -1539,13 +1556,14 @@ export default function TasksPage() {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!selectedTask) return;
+    const target = (activeModal?.type === "delete_task" ? activeModal.task : null) || selectedTask;
+    if (!target) return;
     setActionBusy(true);
     try {
-      await deleteTask(selectedTask.taskId);
-      setSelectedTask(null);
-      setChatMessages([]);
+      await deleteTask(target.taskId);
+      if (selectedTask?.taskId === target.taskId) { setSelectedTask(null); setChatMessages([]); }
       setShowDeleteConf(false);
+      setActiveModal(null);
       await loadAllTasks();
       setMobileView("list");
     } catch (e) {
@@ -2016,7 +2034,21 @@ export default function TasksPage() {
     .gv-compact-item-name { font-size:11px; font-weight:500; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
     .gv-compact-item.active .gv-compact-item-name { color:var(--p); font-weight:600; }
 
-    .gv-row-menu { position:fixed; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-xl); min-width:160px; padding:4px; animation:ctx-in 0.12s ease; }
+    .gv-row-menu { position:fixed; z-index:2000; background:#fff; border:1px solid #E5E7EB; border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.12); min-width:180px; padding:4px; animation:ctx-in 0.12s ease; }
+    .gv-row-menu-sheet-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1999; }
+    .gv-row-menu-sheet { display:none; position:fixed; bottom:0; left:0; right:0; background:#fff; border-radius:18px 18px 0 0; z-index:2000; padding:12px 0 max(16px,env(safe-area-inset-bottom)); box-shadow:0 -4px 24px rgba(0,0,0,0.15); animation:sheet-up 0.22s cubic-bezier(0.4,0,0.2,1); }
+    @keyframes sheet-up { from{transform:translateY(100%)} to{transform:translateY(0)} }
+    .gv-row-menu-sheet-handle { width:36px; height:4px; background:#D1D5DB; border-radius:2px; margin:0 auto 12px; }
+    .gv-row-menu-sheet-title { font-size:11px; font-weight:700; color:#9CA3AF; text-transform:uppercase; letter-spacing:0.06em; padding:0 16px 10px; }
+    .gv-row-menu-sheet-item { display:flex; align-items:center; gap:12px; width:100%; padding:13px 18px; border:none; background:none; cursor:pointer; font-size:15px; font-weight:500; color:#111827; text-align:left; font-family:inherit; }
+    .gv-row-menu-sheet-item:active { background:#F9FAFB; }
+    .gv-row-menu-sheet-item.danger { color:#DC2626; }
+    .gv-row-menu-sheet-sep { height:1px; background:#F3F4F6; margin:4px 0; }
+    @media (max-width:767px) {
+      .gv-row-menu { display:none !important; }
+      .gv-row-menu-sheet-overlay { display:block; }
+      .gv-row-menu-sheet { display:block; }
+    }
 
     .gv-sidebar-toggle { position:absolute; left:0; top:50%; transform:translateY(-50%); width:16px; height:36px; background:var(--surface); border:1px solid var(--border); border-left:none; border-radius:0 6px 6px 0; cursor:pointer; z-index:4; display:flex; align-items:center; justify-content:center; color:var(--text-4); transition:all 0.15s; }
     .gv-sidebar-toggle:hover { color:var(--p); background:var(--p-lt); }
@@ -2093,7 +2125,7 @@ export default function TasksPage() {
     .gv-bubble-wrapper:hover .gv-delete-msg { display:flex; }
     .gv-delete-msg:hover { background:#FEE2E2; color:var(--danger); }
     .gv-sys-msg { text-align:center; padding:4px 12px; font-size:10px; color:var(--text-4); font-style:italic; }
-    .gv-input-bar { border-top:1px solid var(--border); background:var(--surface); flex-shrink:0; padding:6px 12px; }
+    .gv-input-bar { border-top:1px solid var(--border); background:var(--surface); flex-shrink:0; padding:6px 12px; padding-bottom:max(6px, env(safe-area-inset-bottom)); }
     .gv-input-bar textarea, .gv-input-bar input[type="text"] { border-radius:10px !important; background:var(--bg) !important; border:1px solid var(--border) !important; padding:8px 14px !important; font-size:12px !important; }
     .gv-input-bar textarea:focus, .gv-input-bar input[type="text"]:focus { border-color:var(--p) !important; box-shadow:0 0 0 2px var(--p-glow) !important; }
 
@@ -2210,7 +2242,7 @@ export default function TasksPage() {
     .gv-mob-tab { flex:1; padding:6px; border:none; background:none; font-size:11px; font-weight:500; color:var(--text-3); cursor:pointer; font-family:var(--font); }
     .gv-mob-tab.active { color:var(--p); border-bottom:2px solid var(--p); }
 
-    .gv-ctx-menu { position:fixed; z-index:1000; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-xl); min-width:150px; padding:4px; animation:ctx-in 0.12s ease; }
+    .gv-ctx-menu { position:fixed; z-index:3000; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-xl); min-width:150px; padding:4px; animation:ctx-in 0.12s ease; }
     @keyframes ctx-in { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
     .gv-ctx-item { display:flex; align-items:center; gap:6px; padding:7px 10px; font-size:11px; font-weight:500; color:var(--text-2); cursor:pointer; border-radius:6px; transition:background 0.1s; border:none; background:none; width:100%; font-family:var(--font); text-align:left; }
     .gv-ctx-item:hover { background:var(--bg); }
@@ -2219,7 +2251,7 @@ export default function TasksPage() {
     .gv-ctx-sep { height:1px; background:var(--border); margin:3px 6px; }
 
     @media (max-width:767px) {
-      .gv-root { height:calc(100dvh - 56px); flex-direction:column; overflow:hidden; }
+      .gv-root { height:calc(100dvh - 56px); flex-direction:column; overflow:hidden; position:relative; }
       .gv-list-panel {
         width:100%!important; min-width:100%!important; border-right:none;
         max-height:100%; flex-shrink:0;
@@ -2227,9 +2259,9 @@ export default function TasksPage() {
       }
       .gv-list-panel.mob-hidden { transform:translateX(-100%); opacity:0; pointer-events:none; position:absolute; height:100%; }
       .gv-chat {
-        width:100%; flex:1; position:absolute; inset:0;
+        width:100%; position:absolute; top:0; left:0; right:0; bottom:0;
         transform:translateX(100%); transition:transform 0.28s cubic-bezier(0.4,0,0.2,1);
-        background:var(--surface); z-index:10;
+        background:var(--surface); z-index:10; display:flex; flex-direction:column;
       }
       .gv-chat.mob-visible { transform:translateX(0); animation:none; }
       .gv-chat.mob-hidden { display:none; }
@@ -2444,7 +2476,7 @@ export default function TasksPage() {
                   <div className="col-act" onClick={e => e.stopPropagation()}>
                     <button style={{ width: 26, height: 26, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)" }}
                       onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                      onClick={e => { e.stopPropagation(); setRowMenuOpen(rowMenuOpen === t.taskId ? null : t.taskId); setRowMenuPos({ x: e.clientX, y: e.clientY }); }}>
+                      onClick={e => { e.stopPropagation(); if (window.innerWidth <= 767) { setSheetTask(t); } else { setRowMenuOpen(rowMenuOpen === t.taskId ? null : t.taskId); setRowMenuPos({ x: e.clientX, y: e.clientY }); } }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
                     </button>
                   </div>
@@ -2734,7 +2766,7 @@ export default function TasksPage() {
                   <SwipeableMessage
                     key={msg.messageId || idx}
                     isMe={isMe}
-                    onReply={() => setReplyTo({ messageId: msg.messageId, text: msg.text || (msg.attachments?.length ? "📎 Attachment" : ""), senderName: msg.senderName })}
+                    onReply={() => setReplyTo({ messageId: msg.messageId, text: msg.text || (msg.attachments?.length ? "📎 Attachment" : ""), senderName: msg.senderName, senderId: msg.senderId })}
                     onContextMenu={(e) => handleContextMenu(e, msg)}
                     onLongPressStart={() => handleLongPressStart(msg)}
                     onLongPressEnd={handleLongPressEnd}
@@ -2783,7 +2815,7 @@ export default function TasksPage() {
                         <div className={`gv-bubble${msg.sending ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}${isNewMsg ? " gv-bubble-new" : ""}`}>
                           {/* Reply quote */}
                           {msg.replyTo && (() => {
-                            const replyIsMe = msg.replyTo.senderName === employeeName;
+                            const replyIsMe = msg.replyTo.senderName === employeeName || msg.replyTo.senderId === employeeId;
                             const replyLabel = replyIsMe ? "You" : msg.replyTo.senderName;
                             return (
                               <div style={{
@@ -3150,6 +3182,40 @@ export default function TasksPage() {
         </div>
       </div>
 
+
+      {/* Mobile bottom sheet row menu */}
+      {sheetTask && (
+        <>
+          <div className="gv-row-menu-sheet-overlay" onClick={() => setSheetTask(null)} />
+          <div className="gv-row-menu-sheet">
+            <div className="gv-row-menu-sheet-handle" />
+            <div className="gv-row-menu-sheet-title">{sheetTask.title}</div>
+            {[
+              { l: "Open Chat", icon: <MessageCircle />, a: () => { handleSelectNode(sheetTask); setSheetTask(null); } },
+              ...((isCEO || isTL) ? [{ l: "Add Subtask", icon: <Plus />, a: () => { setActiveModal({ type: "add_subtask", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(!isCEO ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(!isCEO ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(isCEO ? [{ l: "Edit Deadline", icon: <Calendar />, a: () => { setActiveModal({ type: "deadline", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(isCEO && ["submitted", "tl_approved"].includes(sheetTask.completionStatus) ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+            ].map((item, i) => (
+              <button key={i} className="gv-row-menu-sheet-item" onClick={item.a}>
+                <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>{item.icon}</span>
+                {item.l}
+              </button>
+            ))}
+            {isCEO && (
+              <>
+                <div className="gv-row-menu-sheet-sep" />
+                <button className="gv-row-menu-sheet-item danger" onClick={() => { setActiveModal({ type: "delete_task", taskId: sheetTask.taskId, task: sheetTask }); setShowDeleteConf(true); setSheetTask(null); }}>
+                  <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>🗑</span>
+                  Delete Task
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Context Menu */}
       {contextMenu && (
         <div className="gv-ctx-menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 180), top: Math.min(contextMenu.y, window.innerHeight - 200) }} onClick={e => e.stopPropagation()}>
@@ -3231,10 +3297,11 @@ export default function TasksPage() {
       {/* Delete task confirmation modal */}
       <GwConfirm
         open={showDeleteConf}
+        busy={actionBusy}
         title="Delete Task?"
-        message={`Permanently delete "${task?.title} (${task?.taskId})"${task?.subtaskIds?.length ? ` and all ${task.subtaskIds.length} subtasks` : ""}? This cannot be undone.`}
+        message={`Permanently delete "${(activeModal?.task || task)?.title} (${(activeModal?.task || task)?.taskId})"${(activeModal?.task || task)?.subtaskIds?.length ? ` and all ${(activeModal?.task || task).subtaskIds.length} subtasks` : ""}? This cannot be undone.`}
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setShowDeleteConf(false)}
+        onCancel={() => { if (!actionBusy) setShowDeleteConf(false); }}
       />
 
       {/* Request panel is now universal — opened via window event from toolbar/mobile */}
