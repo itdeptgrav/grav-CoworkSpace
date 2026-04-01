@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../hooks/useCoworkAuth";
 import { useMeetings, useGroups } from "../../hooks/useCoworkData";
 import { getCoworkSocket } from "../../lib/coworkSocket";
-import { GwSpinner } from "../../components/coworking/shared/CoworkShared";
+import { GwSpinner, GwConfirm } from "../../components/coworking/shared/CoworkShared";
+import EditDeadlineModal from "../../components/coworking/tasks/EditDeadlineModal";
+import { deleteTask } from "../../lib/mediaUploadApi";
 import { firebaseAuth, firebaseDb } from "../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../lib/coworkUtils";
@@ -673,7 +675,7 @@ function ReqCard({ req, empMap }) {
 
   return (
     <div style={{ padding: "10px 12px", background: "#FAFAFA", borderRadius: 9, border: "1px solid #F3F4F6", marginBottom: 6, cursor: "pointer" }}
-      onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received" } }))}>
+      onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received", requestId: req.requestId || req.id } }))}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <div style={{ width: 24, height: 24, borderRadius: "50%", background: avC(req.fromName || empMap?.[req.fromId]?.name || ""), color: "#fff", fontSize: 8.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -820,6 +822,9 @@ export default function Dashboard() {
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
   const [empMap, setEmpMap] = useState({});
+  const [deadlineTask, setDeadlineTask] = useState(null); // task being edited
+  const [deleteTarget, setDeleteTarget] = useState(null); // task being deleted
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const prevN = useRef(0);
   const isCEO = role === "ceo";
 
@@ -907,9 +912,8 @@ export default function Dashboard() {
   const greeting = (() => { const h = time.getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; })();
 
   const goTask = t => {
-    window.dispatchEvent(new CustomEvent("openRequestPanel", {
-      detail: { tab: "received", taskId: t.taskId, taskTitle: t.title }
-    }));
+    localStorage.setItem("selectedTaskId", t.taskId);
+    router.push("/coworking/tasks");
   };
 
   const barData = Array.from({ length: 12 }, (_, i) => ({
@@ -1539,12 +1543,12 @@ export default function Dashboard() {
                             <td><span style={{ fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 5, color: sb.c, background: sb.bg, letterSpacing: "0.02em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sb.l}</span></td>
                             <td style={{ paddingRight: 17, width: 56 }}>
                               <div style={{ display: "flex", gap: 5 }}>
-                                <button onClick={e => { e.stopPropagation(); goTask(t); }} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
+                                <button onClick={e => { e.stopPropagation(); setDeadlineTask(t); }} title="Edit Deadline" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
                                   onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"} onMouseLeave={e => e.currentTarget.style.background = "none"}>
                                   <Ic n="edit" s={12} c="#6B7280" />
                                 </button>
                                 {isCEO && (
-                                  <button onClick={e => e.stopPropagation()} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
+                                  <button onClick={e => { e.stopPropagation(); setDeleteTarget(t); }} title="Delete Task" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
                                     onMouseEnter={e => e.currentTarget.style.background = "#FEF2F2"} onMouseLeave={e => e.currentTarget.style.background = "none"}>
                                     <Ic n="trash" s={12} c="#DC2626" />
                                   </button>
@@ -1562,6 +1566,34 @@ export default function Dashboard() {
 
         </div>
       </div>
+
+      {/* Edit Deadline Modal */}
+      {deadlineTask && (
+        <EditDeadlineModal
+          task={deadlineTask}
+          onClose={() => setDeadlineTask(null)}
+          onSuccess={() => { setDeadlineTask(null); loadTasks(); }}
+        />
+      )}
+
+      {/* Delete Task Confirm */}
+      <GwConfirm
+        open={!!deleteTarget}
+        busy={deleteBusy}
+        title="Delete Task?"
+        message={`Permanently delete "${deleteTarget?.title} (${deleteTarget?.taskId})"? This cannot be undone.`}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleteBusy(true);
+          try {
+            await deleteTask(deleteTarget.taskId);
+            setDeleteTarget(null);
+            loadTasks();
+          } catch (e) { alert(e.message); }
+          finally { setDeleteBusy(false); }
+        }}
+      />
 
       <DeadlineSidebar tasks={trackerTasks} role={role} employeeId={employeeId} employeeName={employeeName} empMap={empMap} open={sideOpen} onToggle={() => setSideOpen(p => !p)} onTaskClick={goTask} />
 

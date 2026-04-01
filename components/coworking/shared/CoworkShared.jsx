@@ -78,7 +78,7 @@ export function GwStatusBadge({ status }) {
 }
 
 /* ── Confirm Dialog ─────────────────────────────────────── */
-export function GwConfirm({ open, title, message, onConfirm, onCancel }) {
+export function GwConfirm({ open, title, message, onConfirm, onCancel, busy = false }) {
   if (!open) return null;
   return (
     <div style={{
@@ -101,17 +101,25 @@ export function GwConfirm({ open, title, message, onConfirm, onCancel }) {
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
           <button
             onClick={onCancel}
+            disabled={busy}
             className="grav-btn"
-            style={btnStyle("ghost")}
+            style={{ ...btnStyle("ghost"), opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
+            disabled={busy}
             className="grav-btn"
-            style={btnStyle("danger")}
+            style={{ ...btnStyle("danger"), opacity: busy ? 0.7 : 1, pointerEvents: busy ? "none" : "auto", display: "flex", alignItems: "center", gap: 6, minWidth: 90, justifyContent: "center" }}
           >
-            Delete
+            {busy ? (
+              <>
+                <svg style={{ animation: "gw-spin 0.8s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                Deleting…
+                <style>{"@keyframes gw-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
+              </>
+            ) : "Delete"}
           </button>
         </div>
       </div>

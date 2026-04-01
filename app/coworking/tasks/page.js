@@ -879,6 +879,92 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
   );
 }
 
+
+/* ─── SwipeableMessage — swipe right to reply (WhatsApp-style) ─── */
+function SwipeableMessage({ children, isMe, onReply, onContextMenu, onLongPressStart, onLongPressEnd, style }) {
+  const [swipeX, setSwipeX] = useState(0);
+  const [swiping, setSwiping] = useState(false);
+  const [triggered, setTriggered] = useState(false);
+  const startXRef = useRef(0);
+  const THRESHOLD = 60;
+
+  const handleTouchStart = (e) => {
+    startXRef.current = e.touches[0].clientX;
+    setSwiping(true);
+    setTriggered(false);
+    onLongPressStart?.();
+  };
+
+  const handleTouchMove = (e) => {
+    const dx = e.touches[0].clientX - startXRef.current;
+    // Only allow right swipe for replies (both sides swipe right to reply like WhatsApp)
+    if (dx > 0 && dx <= THRESHOLD + 20) {
+      setSwipeX(dx);
+      if (dx >= THRESHOLD && !triggered) {
+        setTriggered(true);
+        // Haptic feedback if available
+        if (navigator?.vibrate) navigator.vibrate(40);
+      }
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    onLongPressEnd?.();
+    if (triggered) onReply?.();
+    setSwiping(false);
+    setTriggered(false);
+    setSwipeX(0);
+  };
+
+  const progress = Math.min(swipeX / THRESHOLD, 1);
+
+  return (
+    <div
+      style={{ ...style, position: "relative", overflow: "visible" }}
+      onContextMenu={onContextMenu}
+    >
+      {/* Reply icon that appears on swipe */}
+      {swipeX > 8 && (
+        <div style={{
+          position: "absolute",
+          left: isMe ? "auto" : Math.min(swipeX - 8, THRESHOLD - 4),
+          right: isMe ? Math.min(swipeX - 8, THRESHOLD - 4) : "auto",
+          top: "50%", transform: "translateY(-50%)",
+          width: 28, height: 28,
+          borderRadius: "50%",
+          background: `rgba(79,70,229,${Math.min(progress, 1) * 0.15})`,
+          border: `1.5px solid rgba(79,70,229,${Math.min(progress, 1) * 0.5})`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: triggered ? "transform 0.15s" : "none",
+          transform: `translateY(-50%) scale(${triggered ? 1.2 : 0.8 + progress * 0.4})`,
+          pointerEvents: "none",
+          zIndex: 5,
+        }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke={`rgba(79,70,229,${0.4 + progress * 0.6})`}
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 00-4-4H4" />
+          </svg>
+        </div>
+      )}
+      {/* Message content shifted on swipe */}
+      <div
+        className={`gv-msg-group${isMe ? " me" : ""}`}
+        style={{
+          transform: swipeX > 0 ? `translateX(${isMe ? -swipeX : swipeX}px)` : "none",
+          transition: swiping ? "none" : "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Page ─── */
 export default function TasksPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
@@ -948,6 +1034,7 @@ export default function TasksPage() {
 
   // Phase 2: Context menu on messages
   const [contextMenu, setContextMenu] = useState(null); // { x, y, message }
+  const [replyTo, setReplyTo] = useState(null); // { messageId, text, senderName }
   const longPressTimer = useRef(null);
 
 
@@ -1511,6 +1598,7 @@ export default function TasksPage() {
     const tid = selectedTask.taskId;
     const tempId = "temp_" + Date.now();
     const resolvedType = messageType && messageType !== "text" ? messageType : attachments?.length > 0 ? (attachments[0].type || "image") : "text";
+    const currentReplyTo = replyTo;
     const opt = {
       messageId: tempId,
       taskId: tid,
@@ -1519,15 +1607,17 @@ export default function TasksPage() {
       text: text || "",
       attachments: attachments || [],
       messageType: resolvedType,
+      replyTo: currentReplyTo || null,
       temp: true,
       sending: true,
       error: false,
       createdAt: new Date().toISOString()
     };
+    setReplyTo(null); // clear reply after capturing
     // Add to end — will be replaced by real message from onSnapshot
     setChatMessages(prev => [...prev, opt]);
-    // Scroll immediately
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 20);
+    // Scroll immediately — instant for own messages so it doesn't lag
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 10);
 
     try {
       const messageId = crypto.randomUUID();
@@ -1542,6 +1632,7 @@ export default function TasksPage() {
         text: text || "",
         attachments: attachments || [],
         messageType: resolvedType,
+        replyTo: currentReplyTo || null,
         mention: null,
         readBy: [employeeId],
         createdAt: serverTimestamp()
@@ -1742,8 +1833,8 @@ export default function TasksPage() {
   useEffect(() => {
     // Small delay to let DOM render complete before scrolling
     const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 50);
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }, 30);
     return () => clearTimeout(timer);
   }, [chatMessages]);
 
@@ -1988,6 +2079,7 @@ export default function TasksPage() {
     .gv-msg-group.me .gv-bubble-wrapper { flex-direction:row-reverse; }
     .gv-bubble { padding:7px 11px 5px; border-radius:3px 10px 10px 10px; background:#FFFFFF; font-size:12px; line-height:1.5; color:var(--text-1); max-width:100%; word-wrap:break-word; border:1px solid var(--border); box-shadow:0 1px 2px rgba(0,0,0,0.02); }
     .gv-msg-group.me .gv-bubble { background:var(--p); color:#fff; border-radius:10px 3px 10px 10px; border:none; box-shadow:0 1px 4px rgba(91,94,244,0.25); }
+    .gv-reply-quote { border-left:3px solid var(--p); padding:4px 8px; margin-bottom:5px; border-radius:0 4px 4px 0; background:rgba(79,70,229,0.06); }
     .gv-bubble.gv-sending { opacity:0.5; }
     .gv-bubble.gv-error { border:1.5px solid var(--danger); }
     .gv-bubble.gv-bubble-new { box-shadow:inset 3px 0 0 var(--success); }
@@ -2639,11 +2731,13 @@ export default function TasksPage() {
                 const showAvatar = !prevMsg || prevMsg.type === "date" || prevMsg.senderId !== msg.senderId;
 
                 return (
-                  <div key={msg.messageId || idx} className={`gv-msg-group${isMe ? " me" : ""}`}
+                  <SwipeableMessage
+                    key={msg.messageId || idx}
+                    isMe={isMe}
+                    onReply={() => setReplyTo({ messageId: msg.messageId, text: msg.text || (msg.attachments?.length ? "📎 Attachment" : ""), senderName: msg.senderName })}
                     onContextMenu={(e) => handleContextMenu(e, msg)}
-                    onTouchStart={() => handleLongPressStart(msg)}
-                    onTouchEnd={handleLongPressEnd}
-                    onTouchCancel={handleLongPressEnd}
+                    onLongPressStart={() => handleLongPressStart(msg)}
+                    onLongPressEnd={handleLongPressEnd}
                     style={{ marginTop: showAvatar ? 8 : 1 }}
                   >
                     {!isMe && (
@@ -2687,6 +2781,24 @@ export default function TasksPage() {
                       </div>
                       <div className="gv-bubble-wrapper">
                         <div className={`gv-bubble${msg.sending ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}${isNewMsg ? " gv-bubble-new" : ""}`}>
+                          {/* Reply quote */}
+                          {msg.replyTo && (() => {
+                            const replyIsMe = msg.replyTo.senderName === employeeName;
+                            const replyLabel = replyIsMe ? "You" : msg.replyTo.senderName;
+                            return (
+                              <div style={{
+                                background: isMe ? "rgba(0,0,0,0.15)" : "rgba(79,70,229,0.07)",
+                                borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.5)" : "var(--p)"}`,
+                                borderRadius: "0 6px 6px 0",
+                                padding: "5px 9px",
+                                marginBottom: 6,
+                                cursor: "pointer",
+                              }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.9)" : "var(--p)", marginBottom: 2 }}>{replyLabel}</div>
+                                <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 230 }}>{msg.replyTo.text}</div>
+                              </div>
+                            );
+                          })()}
                           {msg.text && <div>{msg.text}</div>}
                           {msg.attachments?.map((att, ai) => {
                             if (att.type === "image") {
@@ -2766,7 +2878,7 @@ export default function TasksPage() {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </SwipeableMessage>
                 );
               })
             )}
@@ -2776,6 +2888,18 @@ export default function TasksPage() {
           {/* Input bar with @ mention */}
           {task && (
             <div style={{ position: "relative" }}>
+              {/* Reply preview bar */}
+              {replyTo && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 5px", background: "var(--p-lt)", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--p)", marginBottom: 1 }}>Replying to {replyTo.senderName === employeeName ? "yourself" : replyTo.senderName}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text}</div>
+                  </div>
+                  <button onClick={() => setReplyTo(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-4)", padding: 3, flexShrink: 0, display: "flex" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  </button>
+                </div>
+              )}
               <div className="gv-input-bar">
                 <MediaMessageInput
                   onSend={handleSendChat}
@@ -3029,6 +3153,15 @@ export default function TasksPage() {
       {/* Context Menu */}
       {contextMenu && (
         <div className="gv-ctx-menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 180), top: Math.min(contextMenu.y, window.innerHeight - 200) }} onClick={e => e.stopPropagation()}>
+          {/* Reply */}
+          <button className="gv-ctx-item" onClick={() => {
+            setReplyTo({ messageId: contextMenu.message.messageId, text: contextMenu.message.text || (contextMenu.message.attachments?.length ? "📎 Attachment" : ""), senderName: contextMenu.message.senderName });
+            setContextMenu(null);
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 00-4-4H4" /></svg>
+            Reply
+          </button>
+          {/* Copy */}
           <button className="gv-ctx-item" onClick={() => {
             if (contextMenu.message?.text) navigator.clipboard?.writeText(contextMenu.message.text);
             setContextMenu(null);

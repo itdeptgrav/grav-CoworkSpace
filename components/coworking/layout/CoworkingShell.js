@@ -83,7 +83,7 @@ const STATUS_COLORS = {
 };
 
 /* ─── RequestSidebarPanel ─── */
-function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null }) {
+function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null, highlightReqId = null }) {
   const [tab, setTab] = useState(initialTab); // "compose" | "received" | "sent"
   const [employees, setEmployees] = useState([]);
   // compose form
@@ -113,6 +113,14 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const [chatThreads, setChatThreads] = useState({}); // reqId -> messages[]
   const [chatInput, setChatInput] = useState({});
   const chatEndRefs = useRef({});
+  const reqItemRefs = useRef({});
+
+  // Scroll to highlighted request when panel opens
+  useEffect(() => {
+    if (!highlightReqId) return;
+    const el = reqItemRefs.current[highlightReqId];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightReqId, received]);
   const [seenIds, setSeenIds] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("req_seen_ids") || "[]")); } catch { return new Set(); }
   });
@@ -601,7 +609,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
               const isExpanded = respondingId === req.id;
               return (
-                <div key={req.id} className="cw-req-card">
+                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
                   <div className="cw-req-card-head">
                     <ReqAvatar name={req.fromName || "?"} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -790,7 +798,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             ) : sent2.map(req => {
               const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
               return (
-                <div key={req.id} className="cw-req-card">
+                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
                   <div className="cw-req-card-head">
                     <ReqAvatar name={req.toName || "?"} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -925,6 +933,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
 
   const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
+  const [highlightReqId, setHighlightReqId] = useState(null);
 
   // Allow any page to open the request panel via custom event
   useEffect(() => {
@@ -933,6 +942,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       if (e.detail?.tab) setReqPanelInitialTab(e.detail.tab);
       if (e.detail?.taskId) setReqPanelContext({ taskId: e.detail.taskId, taskTitle: e.detail.taskTitle || e.detail.taskId });
       else setReqPanelContext(null);
+      if (e.detail?.requestId) setHighlightReqId(e.detail.requestId);
+      else setHighlightReqId(null);
     };
     window.addEventListener("openRequestPanel", handler);
     return () => window.removeEventListener("openRequestPanel", handler);
@@ -1353,15 +1364,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         @media (max-width: 768px) {
           .cw-notif-popup {
-            position: fixed;
-            top: 56px;
-            left: 0;
-            right: 0;
-            width: 100vw;
-            max-height: 75vh;
-            border-radius: 0 0 16px 16px;
-            border-left: none;
-            border-right: none;
+            width: calc(100vw - 24px);
+            right: -8px;
           }
         }
         .cw-topbar-avatar {
@@ -1581,55 +1585,16 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                       {notifications.length === 0 ? (
                         <div className="cw-notif-popup-empty">No notifications yet</div>
                       ) : (
-                        notifications.slice(0, 15).map((n, i) => {
-                          // Colour + icon per notification type
-                          const TYPE_CFG = {
-                            request: { bg: "#FEF3C7", color: "#D97706", label: "REQ" },
-                            task_assigned: { bg: "#EEF2FF", color: "#4F46E5", label: "TASK" },
-                            task_chat: { bg: "#F0FDF4", color: "#16A34A", label: "CHAT" },
-                            daily_report: { bg: "#F5F3FF", color: "#7C3AED", label: "RPT" },
-                            completion: { bg: "#ECFDF5", color: "#059669", label: "DONE" },
-                            meeting: { bg: "#EFF6FF", color: "#2563EB", label: "MTG" },
-                            dm: { bg: "#FDF4FF", color: "#9333EA", label: "DM" },
-                          };
-                          const cfg = TYPE_CFG[n.type] || { bg: "#F3F4F6", color: "#374151", label: "•" };
-                          const handleNotifClick = () => {
-                            setNotifOpen(false);
-                            if (n.type === "request") {
-                              window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received" } }));
-                            } else if (n.data?.taskId) {
-                              localStorage.setItem("selectedTaskId", n.data.taskId);
-                              window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received", taskId: n.data.taskId } }));
-                            } else if (n.type === "dm" && n.data?.conversationId) {
-                              router.push(`/coworking/direct-messages/${n.data.conversationId}`);
-                            } else {
-                              router.push("/coworking");
-                            }
-                          };
-                          return (
-                            <div key={n.id || i} className="cw-notif-popup-item"
-                              style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.04)" }}
-                              onClick={handleNotifClick}>
-                              {/* Type avatar */}
-                              <div style={{
-                                width: 34, height: 34, borderRadius: 9, background: cfg.bg,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                flexShrink: 0, fontSize: 9, fontWeight: 800, color: cfg.color,
-                                letterSpacing: "0.04em"
-                              }}>
-                                {cfg.label}
-                              </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 1 }}>
-                                  <span className="cw-notif-popup-item-title" style={{ fontWeight: n.read ? 500 : 700 }}>{n.title}</span>
-                                  {!n.read && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1A73E8", flexShrink: 0 }} />}
-                                </div>
-                                {n.body && <div className="cw-notif-popup-item-body">{n.body}</div>}
-                              </div>
-                              <span className="cw-notif-popup-item-time">{timeAgo(n.createdAt)}</span>
+                        notifications.slice(0, 15).map((n, i) => (
+                          <div key={n.id || i} className="cw-notif-popup-item" style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)" }}>
+                            <span className={`cw-notif-popup-item-dot${n.read ? " read" : ""}`} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div className="cw-notif-popup-item-title">{n.title}</div>
+                              {n.body && <div className="cw-notif-popup-item-body">{n.body}</div>}
                             </div>
-                          );
-                        })
+                            <span className="cw-notif-popup-item-time">{timeAgo(n.createdAt)}</span>
+                          </div>
+                        ))
                       )}
                     </div>
                     {notifications.length > 15 && (
@@ -1672,6 +1637,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           onClose={() => setReqPanelOpen(false)}
           initialTab={reqPanelInitialTab}
           prefilledTask={reqPanelContext}
+          highlightReqId={highlightReqId}
         />
       </div>
     </>
