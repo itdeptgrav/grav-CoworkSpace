@@ -26,6 +26,8 @@ async function fetchEmployees(excludeId) {
   return list;
 }
 
+
+
 async function uploadImageCld(file) {
   const fd = new FormData();
   fd.append("file", file);
