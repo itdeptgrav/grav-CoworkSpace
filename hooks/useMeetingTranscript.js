@@ -1,13 +1,9 @@
 // hooks/useMeetingTranscript.js
 //
-// HOW IT WORKS:
-//   - SpeechRecognition created ONCE on mount, never recreated
-//   - Polls localParticipant.getTrackPublication("microphone").isMuted every 500ms
-//   - Mic ON  → starts recognition automatically
-//   - Mic OFF → stops recognition automatically
-//   - Only THIS person's browser transcribes THIS person's voice
-//   - Broadcasts each line via LiveKit DataChannel to all participants
-//   - No duplicates — each line comes from exactly one browser
+// SENDING:  localParticipant.publishData() — LiveKit SDK directly, always stable
+// RECEIVING: useDataChannel hook — only used for receiving, not sending
+// RECOGNITION: created once with empty deps, uses refs for all callbacks
+// MUTE DETECTION: polls localParticipant.getTrackPublication every 500ms via ref
 
 import { useEffect, useRef, useState } from "react";
 import { useLocalParticipant, useDataChannel } from "@livekit/components-react";
@@ -22,33 +18,35 @@ export function useMeetingTranscript({ participantName }) {
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(true);
 
-    // Use refs so the recognition callbacks never become stale
+    // Stable refs — never cause effect re-runs
     const recognitionRef = useRef(null);
     const runningRef = useRef(false);
     const shouldRunRef = useRef(false);
-    const participantRef = useRef(participantName); // stable name ref
-    const localPartRef = useRef(localParticipant);
-    const sendRef = useRef(null);
-    const addLineRef = useRef(null);
+    const localPartRef = useRef(null);
+    const participantRef = useRef(participantName);
 
-    // Keep refs in sync
-    participantRef.current = participantName;
+    // Keep refs updated on every render
     localPartRef.current = localParticipant;
+    participantRef.current = participantName;
 
-    // ── DataChannel setup ─────────────────────────────────────────────────────
-    const { send } = useDataChannel(TOPIC, (msg) => {
+    // ── RECEIVE lines from other participants ─────────────────────────────────
+    // useDataChannel is ONLY for receiving here — we send via publishData below
+    useDataChannel(TOPIC, (msg) => {
         try {
             const data = JSON.parse(new TextDecoder().decode(msg.payload));
             if (data.type === "tx") {
-                setTranscript(prev => [...prev, { name: data.name, text: data.text, time: data.time }]);
+                setTranscript(prev => [...prev, {
+                    name: data.name,
+                    text: data.text,
+                    time: data.time,
+                }]);
             }
         } catch (e) { }
     });
-    sendRef.current = send;
 
-    // ── addLine: adds to local transcript + broadcasts ────────────────────────
-    // Stored in a ref so recognition.onresult never goes stale
-    addLineRef.current = (text) => {
+    // ── SEND a line — called from recognition.onresult ────────────────────────
+    // Uses localParticipant.publishData() directly — no stale ref problem
+    const sendLine = (text) => {
         if (!text?.trim()) return;
         const myName = participantRef.current || localPartRef.current?.name || "Participant";
         const line = {
@@ -57,13 +55,24 @@ export function useMeetingTranscript({ participantName }) {
             text: text.trim(),
             time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
         };
+
+        // Show in MY own transcript immediately
         setTranscript(prev => [...prev, line]);
-        try {
-            sendRef.current?.(new TextEncoder().encode(JSON.stringify(line)), { reliable: true });
-        } catch (e) { console.warn("DataChannel send failed:", e); }
+
+        // Publish to everyone else via LiveKit SDK directly
+        const lp = localPartRef.current;
+        if (lp) {
+            const payload = new TextEncoder().encode(JSON.stringify(line));
+            lp.publishData(payload, { reliable: true, topic: TOPIC })
+                .catch(e => console.warn("publishData failed:", e));
+        }
     };
 
-    // ── Create SpeechRecognition ONCE on mount ────────────────────────────────
+    // Store sendLine in a ref so recognition.onresult can call it without going stale
+    const sendLineRef = useRef(sendLine);
+    sendLineRef.current = sendLine;
+
+    // ── CREATE SpeechRecognition ONCE ─────────────────────────────────────────
     useEffect(() => {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) {
@@ -75,24 +84,26 @@ export function useMeetingTranscript({ participantName }) {
         r.continuous = true;
         r.interimResults = false;
         r.maxAlternatives = 1;
-        r.lang = "hi-IN"; // handles Hindi, English, Odia, Hinglish
+        r.lang = "hi-IN"; // handles Hindi + English + Odia + Hinglish
 
         r.onresult = (event) => {
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 if (event.results[i].isFinal) {
-                    // Call via ref so this never becomes stale
-                    addLineRef.current?.(event.results[i][0].transcript);
+                    sendLineRef.current(event.results[i][0].transcript);
                 }
             }
         };
 
         r.onend = () => {
             runningRef.current = false;
-            // Auto-restart if mic is still unmuted
             if (shouldRunRef.current) {
+                // Still supposed to be running, restart
                 setTimeout(() => {
-                    if (shouldRunRef.current) {
-                        try { r.start(); runningRef.current = true; } catch (e) { }
+                    if (shouldRunRef.current && recognitionRef.current) {
+                        try {
+                            recognitionRef.current.start();
+                            runningRef.current = true;
+                        } catch (e) { }
                     }
                 }, 300);
             } else {
@@ -107,7 +118,7 @@ export function useMeetingTranscript({ participantName }) {
                 shouldRunRef.current = false;
                 setIsTranscribing(false);
             }
-            // "no-speech", "network", "audio-capture" → onend fires → auto-restart
+            // other errors (no-speech, network) → onend fires → auto restart
         };
 
         recognitionRef.current = r;
@@ -118,15 +129,14 @@ export function useMeetingTranscript({ participantName }) {
             try { r.abort(); } catch (e) { }
             recognitionRef.current = null;
         };
-    }, []); // ← empty deps: created ONCE, never recreated
+    }, []); // EMPTY — created once, never recreated
 
-    // ── Poll mic mute state every 500ms ──────────────────────────────────────
+    // ── POLL mic mute state every 500ms ───────────────────────────────────────
     useEffect(() => {
         const tick = () => {
             const lp = localPartRef.current;
             if (!lp || !recognitionRef.current) return;
 
-            // getTrackPublication("microphone") — correct LiveKit SDK call
             const pub = lp.getTrackPublication(Track.Source.Microphone);
             const muted = !pub || pub.isMuted;
 
@@ -138,10 +148,12 @@ export function useMeetingTranscript({ participantName }) {
                         recognitionRef.current.start();
                         runningRef.current = true;
                         setIsTranscribing(true);
-                    } catch (e) { }
+                    } catch (e) {
+                        console.warn("recognition start failed:", e);
+                    }
                 }
             } else if (muted && shouldRunRef.current) {
-                // Mic just MUTED → stop recognition
+                // Mic muted → stop recognition
                 shouldRunRef.current = false;
                 try { recognitionRef.current.stop(); } catch (e) { }
                 setIsTranscribing(false);
@@ -149,10 +161,10 @@ export function useMeetingTranscript({ participantName }) {
         };
 
         const interval = setInterval(tick, 500);
-        tick(); // check immediately on mount too
+        tick(); // check immediately
 
         return () => clearInterval(interval);
-    }, []); // ← empty deps: poll runs forever, reads via refs
+    }, []); // EMPTY — poll runs forever, reads via refs
 
     return {
         transcript,
