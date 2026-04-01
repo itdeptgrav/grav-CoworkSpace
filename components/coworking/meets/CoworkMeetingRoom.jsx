@@ -1,7 +1,10 @@
 "use client";
 /**
  * components/coworking/meeting/CoworkMeetingRoom.jsx
- * Updated to include live transcript panel with voice-to-text.
+ *
+ * Transcript is automatic — no "Start Transcript" button.
+ * Mic ON = transcription active for that person only.
+ * Mic OFF = transcription paused for that person.
  */
 
 import { useEffect, useState, useRef } from "react";
@@ -25,7 +28,7 @@ const LK_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL;
 export default function CoworkMeetingRoom() {
     const { meetId } = useParams();
     const router = useRouter();
-    const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
+    const { user, role, employeeName, loading } = useCoworkAuth();
 
     const [meet, setMeet] = useState(null);
     const [info, setInfo] = useState(null);
@@ -35,11 +38,12 @@ export default function CoworkMeetingRoom() {
     const [busy, setBusy] = useState(false);
     const [joinCode, setJoinCode] = useState("");
     const [userChoices, setUserChoices] = useState(null);
-    const [showTranscript, setShowTranscript] = useState(false);
+    const [showTranscript, setShowTranscript] = useState(true); // open by default
 
     const intentionalLeave = useRef(false);
     const isHost = role === "ceo" || role === "tl";
 
+    // ── Load meeting data ─────────────────────────────────────────────────────
     useEffect(() => {
         if (!loading && !user) { router.push("/coworking-login"); return; }
         if (!user || !meetId) return;
@@ -99,10 +103,10 @@ export default function CoworkMeetingRoom() {
         if (intentionalLeave.current) router.push("/coworking/schedule-meet");
     };
 
+    // ── Render ────────────────────────────────────────────────────────────────
     if (loading || phase === "loading") return <FullLoader />;
     if (phase === "ended") return <EndedScreen meet={meet} onBack={() => router.push("/coworking/schedule-meet")} />;
 
-    // ── ROOM ──────────────────────────────────────────────────────────────────
     if (phase === "room" && token) {
         const meetDate = meet?.dateTime
             ? new Date(meet.dateTime).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })
@@ -111,7 +115,6 @@ export default function CoworkMeetingRoom() {
         return (
             <div style={S.roomRoot}>
                 <style>{CSS}</style>
-
                 <LiveKitRoom
                     token={token}
                     serverUrl={LK_URL}
@@ -121,6 +124,7 @@ export default function CoworkMeetingRoom() {
                     style={S.lkRoom}
                     onDisconnected={handleDisconnected}
                 >
+                    {/* Top bar — inside LiveKitRoom so useParticipants works */}
                     <TopBar
                         meet={meet}
                         isHost={isHost}
@@ -131,6 +135,7 @@ export default function CoworkMeetingRoom() {
                         onLeave={handleLeave}
                     />
 
+                    {/* Video grid + transcript panel side by side */}
                     <div style={S.mainArea}>
                         <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                             <VideoConference />
@@ -138,10 +143,9 @@ export default function CoworkMeetingRoom() {
                         {showTranscript && (
                             <div style={S.transcriptSide}>
                                 <MeetingTranscriptPanel
-                                    participantName={employeeName || "Me"}
+                                    participantName={employeeName || "Participant"}
                                     meetTitle={meet?.title}
                                     meetDate={meetDate}
-                                    isActive={true}
                                 />
                             </div>
                         )}
@@ -169,7 +173,7 @@ export default function CoworkMeetingRoom() {
     );
 }
 
-// ── Top bar (inside LiveKitRoom for useParticipants) ──────────────────────────
+// ── Top bar (inside LiveKitRoom so useParticipants works) ─────────────────────
 function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, onEnd, onLeave }) {
     const [showCode, setShowCode] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -183,12 +187,15 @@ function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, on
 
     return (
         <div style={S.topBar}>
+            {/* Left */}
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={S.livePill}><span style={S.liveDot} />LIVE</div>
                 <span style={S.meetName}>{meet?.title || "CoWork Meeting"}</span>
             </div>
 
+            {/* Right */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+                {/* Join code (host only) */}
                 {isHost && joinCode && (
                     <div style={{ position: "relative" }}>
                         <button onClick={() => setShowCode(p => !p)} style={S.topBtn}>🔑 Join Code</button>
@@ -196,27 +203,28 @@ function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, on
                             <div style={S.codeDropdown}>
                                 <p style={{ margin: "0 0 6px", fontSize: 11, color: "#5F6368" }}>Share this code:</p>
                                 <div style={S.codeBig}>{joinCode}</div>
-                                <button onClick={copyCode} style={S.copyBtn}>{copied ? "✅ Copied!" : "📋 Copy"}</button>
+                                <button onClick={copyCode} style={S.copyBtn}>
+                                    {copied ? "✅ Copied!" : "📋 Copy"}
+                                </button>
                             </div>
                         )}
                     </div>
                 )}
 
+                {/* Transcript toggle */}
                 <button
                     onClick={onToggleTranscript}
                     style={{ ...S.topBtn, ...(showTranscript ? S.topBtnActive : {}) }}
-                    title="Toggle live transcript"
                 >
-                    📝 Transcript
+                    📝 {showTranscript ? "Hide Transcript" : "Show Transcript"}
                 </button>
 
                 <span style={S.pCount}>👥 {participants.length}</span>
 
-                {isHost ? (
-                    <button onClick={onEnd} style={S.endBtn}>🛑 End for All</button>
-                ) : (
-                    <button onClick={onLeave} style={S.leaveBtn}>Leave</button>
-                )}
+                {isHost
+                    ? <button onClick={onEnd} style={S.endBtn}>🛑 End for All</button>
+                    : <button onClick={onLeave} style={S.leaveBtn}>Leave</button>
+                }
             </div>
         </div>
     );
@@ -271,6 +279,7 @@ function LobbyScreen({ meet, info, isHost, busy, error, setError, employeeName, 
             <style>{CSS}</style>
             <div style={S.lobbyCard}>
                 <button onClick={onBack} style={S.backBtn}>← Back to Meetings</button>
+
                 <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
                     <div style={S.meetIcon}>🎥</div>
                     <div>
@@ -284,14 +293,17 @@ function LobbyScreen({ meet, info, isHost, busy, error, setError, employeeName, 
                         </div>
                     </div>
                 </div>
+
                 <hr style={{ border: "none", borderTop: "1px solid #F1F3F4" }} />
                 {error && <div style={S.errBox}>⚠️ {error}</div>}
+
                 {isHost ? (
                     <div>
                         <p style={S.sectionLabel}>You are the host</p>
                         {isLive && (
                             <div style={S.liveBanner}>
-                                <span style={S.greenDot} /><span>Meeting is LIVE — {info?.participantCount || 0} inside</span>
+                                <span style={S.greenDot} />
+                                <span>Meeting is LIVE — {info?.participantCount || 0} people inside</span>
                                 {info?.joinCode && <span style={S.inlineCode}>{info.joinCode}</span>}
                             </div>
                         )}
@@ -303,19 +315,31 @@ function LobbyScreen({ meet, info, isHost, busy, error, setError, employeeName, 
                 ) : (
                     <div>
                         <p style={S.sectionLabel}>Join with meeting code</p>
+                        <p style={{ fontSize: 13, color: "#5F6368", margin: "0 0 12px", lineHeight: 1.5 }}>
+                            Ask the host for the 6-digit code.
+                        </p>
                         {!isLive && <div style={S.waitBanner}>⏳ Waiting for host to start</div>}
                         {isLive && <div style={S.liveBanner}><span style={S.greenDot} />Meeting is live</div>}
                         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                            <input value={codeInput} onChange={e => setCodeInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                            <input
+                                value={codeInput}
+                                onChange={e => setCodeInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
                                 onKeyDown={e => e.key === "Enter" && handleViewerPreview()}
-                                placeholder="000000" maxLength={6} style={S.codeInput} />
-                            <button onClick={handleViewerPreview} disabled={joining || codeInput.length !== 6}
-                                style={{ ...S.primaryBtn, width: "auto", padding: "0 24px", opacity: codeInput.length !== 6 ? 0.45 : 1 }}>
+                                placeholder="000000" maxLength={6} style={S.codeInput}
+                            />
+                            <button onClick={handleViewerPreview}
+                                disabled={joining || codeInput.length !== 6}
+                                style={{
+                                    ...S.primaryBtn, width: "auto", padding: "0 24px",
+                                    opacity: codeInput.length !== 6 ? 0.45 : 1,
+                                    cursor: codeInput.length !== 6 ? "not-allowed" : "pointer"
+                                }}>
                                 {joining ? "..." : "Join →"}
                             </button>
                         </div>
                     </div>
                 )}
+
                 <p style={{ fontSize: 11, color: "#9AA0A6", textAlign: "center", margin: "4px 0 0" }}>
                     Joining as <strong>{employeeName}</strong> · Powered by LiveKit
                 </p>
@@ -347,6 +371,7 @@ function FullLoader() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 const S = {
     roomRoot: { position: "fixed", inset: 0, zIndex: 9999, background: "#111", display: "flex", flexDirection: "column", fontFamily: "'Google Sans','Roboto',sans-serif" },
     lkRoom: { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 },
@@ -359,7 +384,7 @@ const S = {
     pCount: { fontSize: 12, color: "#9AA0A6", background: "#2A2A2A", padding: "4px 10px", borderRadius: 99 },
     topBtn: { padding: "6px 12px", background: "#2A2A2A", border: "1px solid #3C4043", borderRadius: 6, color: "#9AA0A6", fontSize: 12, fontWeight: 600, cursor: "pointer" },
     topBtnActive: { background: "#1E3A5F", color: "#60A5FA", border: "1px solid #3B82F6" },
-    codeDropdown: { position: "absolute", top: 42, right: 0, background: "#fff", border: "1px solid #E8EAED", borderRadius: 10, padding: "14px 16px", boxShadow: "0 8px 24px rgba(0,0,0,0.18)", zIndex: 200, minWidth: 220 },
+    codeDropdown: { position: "absolute", top: 44, right: 0, background: "#fff", border: "1px solid #E8EAED", borderRadius: 10, padding: "14px 16px", boxShadow: "0 8px 24px rgba(0,0,0,0.18)", zIndex: 200, minWidth: 220 },
     codeBig: { fontFamily: "monospace", fontSize: 32, fontWeight: 800, color: "#202124", letterSpacing: 7, textAlign: "center", padding: "8px 0", background: "#F8F9FA", borderRadius: 8, marginBottom: 8 },
     copyBtn: { width: "100%", padding: "8px 0", background: "#1A73E8", border: "none", borderRadius: 6, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" },
     endBtn: { padding: "7px 14px", background: "#D93025", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" },
@@ -384,8 +409,8 @@ const S = {
 };
 
 const CSS = `
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
   .lk-video-conference { height: 100% !important; width: 100% !important; }
   [data-lk-theme="default"] { --lk-bg: #111 !important; }
 `;
