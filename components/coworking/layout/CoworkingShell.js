@@ -5,6 +5,8 @@ import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../../lib/coworkUtils";
 import { useState, useEffect, useRef } from "react";
+import NotesSidebarPanel from "../notes/NotesSidebarPanel";
+
 import {
   collection, doc, setDoc, updateDoc, getDocs, getDoc,
   query, where, orderBy, onSnapshot, serverTimestamp,
@@ -116,6 +118,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const [chatInput, setChatInput] = useState({});
   const chatEndRefs = useRef({});
   const reqItemRefs = useRef({});
+  const [notesPanelOpen, setNotesPanelOpen] = useState(false);
 
   // Scroll to highlighted request when panel opens
   useEffect(() => {
@@ -933,7 +936,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
-
+  const [notesPanelOpen, setNotesPanelOpen] = useState(false);
   const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
   const [highlightReqId, setHighlightReqId] = useState(null);
 
@@ -961,6 +964,13 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   }, [notifOpen]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const handler = (e) => {
+      setNotesPanelOpen(true);
+    };
+    window.addEventListener("openNotesPanel", handler);
+    return () => window.removeEventListener("openNotesPanel", handler);
+  }, []);
 
   useEffect(() => {
     const check = () => {
@@ -1496,6 +1506,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           .cw-req-panel { width: 100vw; }
         }
 
+        
+
         @media (max-width: 768px) {
           .cw-sidebar {
             position: fixed;
@@ -1571,6 +1583,21 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               <h1 className="cw-topbar-title">{title}</h1>
             </div>
             <div className="cw-topbar-right">
+
+              <button
+                className="cw-topbar-icon-btn"
+                title="Notes"
+                onClick={() => setNotesPanelOpen(true)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+              </button>
+
               <div style={{ position: "relative" }}>
                 <button className="cw-topbar-icon-btn" title="Notifications" onClick={() => setNotifOpen(!notifOpen)}>
                   <NavIcon name="bell" size={18} />
@@ -1640,6 +1667,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           initialTab={reqPanelInitialTab}
           prefilledTask={reqPanelContext}
           highlightReqId={highlightReqId}
+        />
+      </div>
+
+      {/* ── Notes Sidebar Panel ── */}                               ← ADD FROM HERE
+      <div className={`cw-req-panel-overlay${notesPanelOpen ? " show" : ""}`} onClick={() => setNotesPanelOpen(false)} />
+      <div className={`cw-req-panel${notesPanelOpen ? " open" : ""}`}>
+        <NotesSidebarPanel
+          employeeId={employeeId}
+          employeeName={employeeName}
+          onClose={() => setNotesPanelOpen(false)}
+          initialTab="create"
         />
       </div>
     </>

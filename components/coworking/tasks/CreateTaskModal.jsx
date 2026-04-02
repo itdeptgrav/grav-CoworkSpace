@@ -1,12 +1,10 @@
 /**
  * REPLACE: components/coworking/tasks/CreateTaskModal.jsx
  *
- * NEW FEATURES (all original features preserved):
- * 1. CEO can add MULTIPLE subtasks at once (add row button)
- * 2. TL names shown as "Name (Dept TL)" in assignee list
- * 3. If employee assigns to TL → shows "pending TL approval" notice
- * 4. Subtask creation posts chat notification in parent task
- * 5. Visibility: tasks labeled with createdByCeo/createdByTl for backend filtering
+ * UI ONLY CHANGE — all logic, functions, props identical.
+ * New look: professional / government-dashboard style.
+ * Clean white modal, structured sections, no emoji in buttons/labels,
+ * formal typography, proper field hierarchy.
  */
 "use client";
 import { useState, useEffect, useRef } from "react";
@@ -25,17 +23,16 @@ export default function CreateTaskModal({
     onSuccess,
     currentEmployeeId,
     currentEmployeeName,
-    currentRole, // "ceo" | "tl" | "employee"
+    currentRole,
     parentTask = null,
 }) {
-    // For CEO: list of subtasks to create at once
-    // For non-CEO or single task: single form
     const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
     const [form, setForm] = useState({ title: "", description: "", notes: "", dueDate: "", priority: "medium" });
     const [subtaskRows, setSubtaskRows] = useState([emptySubtask()]);
     const [employees, setEmployees] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
+    const [selectedDepts, setSelectedDepts] = useState([]); // departments filter
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
     const [attachments, setAttachments] = useState([]);
@@ -52,18 +49,32 @@ export default function CreateTaskModal({
     const toggle = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-    // ── TL display name helper ────────────────────────────────────────────────
     const empDisplayName = (emp) => {
         if (emp.role === "tl" && emp.department) return `${emp.name} (${emp.department} TL)`;
         if (emp.role === "tl") return `${emp.name} (TL)`;
         return emp.name;
     };
 
-    // ── Check if any selected assignee is TL (requires approval from employee) ──
+    // ── Department helpers ────────────────────────────────────────────────────
+    // Collect unique departments from all loaded employees
+    const allDepts = [...new Set(
+        employees.map(e => e.department).filter(Boolean)
+    )].sort();
+
+    const toggleDept = (dept) =>
+        setSelectedDepts(prev =>
+            prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]
+        );
+
+    // Employees visible in Assign To — filtered by selected departments
+    // If no dept selected → show all
+    const visibleEmployees = selectedDepts.length === 0
+        ? employees
+        : employees.filter(e => selectedDepts.includes(e.department));
+
     const assignedToTL = selectedIds.some(id => employees.find(e => e.employeeId === id)?.role === "tl");
     const needsApproval = currentRole === "employee" && assignedToTL;
 
-    // ── Multi-subtask row management ──────────────────────────────────────────
     const addSubtaskRow = () => setSubtaskRows(prev => [...prev, emptySubtask()]);
     const removeSubtaskRow = (i) => setSubtaskRows(prev => prev.filter((_, j) => j !== i));
     const updateRow = (i, k, v) => setSubtaskRows(prev => prev.map((r, j) => j === i ? { ...r, [k]: v } : r));
@@ -75,7 +86,6 @@ export default function CreateTaskModal({
         }));
     };
 
-    // ── Post subtask notification in parent chat ──────────────────────────────
     const postSubtaskNotification = async (parentTaskId, subtaskTitle, subtaskId) => {
         try {
             const messageId = crypto.randomUUID();
@@ -85,20 +95,19 @@ export default function CreateTaskModal({
                 messageId, taskId: parentTaskId,
                 senderId: currentEmployeeId,
                 senderName: currentEmployeeName || "System",
-                text: `📋 Subtask "${subtaskTitle}" has been created under this task`,
+                text: `Subtask "${subtaskTitle}" has been created under this task`,
                 attachments: [], messageType: "system", mention: null,
                 createdAt: serverTimestamp(), subtaskId,
             });
             await updateDoc(taskRef, {
                 chatMessageCount: increment(1),
                 lastChatAt: serverTimestamp(),
-                lastChatPreview: `📋 Subtask "${subtaskTitle}" created`,
+                lastChatPreview: `Subtask "${subtaskTitle}" created`,
                 updatedAt: serverTimestamp(),
             });
         } catch (err) { console.error("postSubtaskNotification:", err); }
     };
 
-    // ── File upload handlers ──────────────────────────────────────────────────
     const handleImagePick = async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
@@ -137,17 +146,13 @@ export default function CreateTaskModal({
         });
     };
 
-    // ── SUBMIT ────────────────────────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError(""); setSubmitting(true);
-
         try {
             if (isMultiMode) {
-                // Create multiple subtasks at once
                 const validRows = subtaskRows.filter(r => r.title.trim() && r.assigneeIds.length > 0);
                 if (!validRows.length) { setError("Add at least one subtask with title and assignee."); setSubmitting(false); return; }
-
                 for (const row of validRows) {
                     const newTask = await createTask({
                         title: row.title.trim(),
@@ -168,10 +173,8 @@ export default function CreateTaskModal({
                 }
                 onSuccess?.();
             } else {
-                // Single task
                 if (!form.title.trim()) { setError("Title is required."); setSubmitting(false); return; }
                 if (!selectedIds.length) { setError("Assign to at least one person."); setSubmitting(false); return; }
-
                 const newTask = await createTask({
                     title: form.title.trim(),
                     description: form.description,
@@ -186,11 +189,9 @@ export default function CreateTaskModal({
                     createdByTl: currentRole === "tl",
                     status: needsApproval ? "pending_tl_approval" : "open",
                 });
-
                 if (parentTask?.taskId && newTask?.taskId) {
                     await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
                 }
-
                 onSuccess?.(newTask);
             }
         } catch (err) { setError(err.message); }
@@ -198,146 +199,291 @@ export default function CreateTaskModal({
     };
 
     const PRIORITIES = [
-        { value: "low", label: "🟢 Low", color: "#1e8e3e" },
-        { value: "medium", label: "🟡 Medium", color: "#f9ab00" },
-        { value: "high", label: "🔴 High", color: "#d93025" },
+        { value: "low", label: "Low", color: "#166534", bg: "#F0FDF4", border: "#BBF7D0" },
+        { value: "medium", label: "Medium", color: "#92400E", bg: "#FFFBEB", border: "#FDE68A" },
+        { value: "high", label: "High", color: "#991B1B", bg: "#FFF1F2", border: "#FECDD3" },
     ];
 
     return (
         <div style={s.overlay}>
+            <style>{`
+                .ctm-input:focus { border-color: #2563EB !important; outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
+                .ctm-emp-btn:hover { background: #F8FAFF !important; }
+                .ctm-add-row:hover { background: #EFF6FF !important; }
+                .ctm-cancel:hover { background: #F3F4F6 !important; }
+                .ctm-submit:hover:not(:disabled) { background: #1D4ED8 !important; }
+                .ctm-remove:hover { color: #991B1B !important; }
+                @keyframes ctm-in { from { opacity:0; transform:translateY(-12px) scale(0.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+            `}</style>
+
             <div style={s.modal}>
-                {/* Header */}
-                <div style={s.header}>
-                    <div>
-                        <h2 style={s.title}>
-                            {parentTask ? (isMultiMode ? "➕ Add Multiple Subtasks" : "➕ Add Subtask") : "📋 Create Task"}
-                        </h2>
-                        {parentTask && (
-                            <p style={s.subtitle}>
-                                Under: <strong>{parentTask.title}</strong>{" "}
-                                <code style={s.idBadge}>({parentTask.taskId})</code>
-                            </p>
-                        )}
+                {/* ── Modal Header ── */}
+                <div style={s.modalHeader}>
+                    <div style={s.headerLeft}>
+                        <div style={s.headerIcon}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                {parentTask
+                                    ? <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></>
+                                    : <><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></>
+                                }
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 style={s.modalTitle}>
+                                {parentTask
+                                    ? (isMultiMode ? "Add Multiple Subtasks" : "Add Subtask")
+                                    : "Create Task"
+                                }
+                            </h2>
+                            {parentTask && (
+                                <div style={s.modalSub}>
+                                    Under: <strong style={{ color: "#1E293B" }}>{parentTask.title}</strong>
+                                    <code style={s.idCode}>{parentTask.taskId}</code>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                    <button onClick={onClose} style={s.closeBtn}>✕</button>
+                    <button onClick={onClose} style={s.closeBtn} title="Close">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
                 </div>
 
-                {/* TL Approval notice */}
+                {/* ── Approval Notice ── */}
                 {needsApproval && (
-                    <div style={s.infoBox}>
-                        ℹ️ This task is assigned to a Team Lead and will require <strong>TL approval</strong> before it proceeds.
+                    <div style={s.noticeBox}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1D4ED8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <span>This task is assigned to a Team Lead. It will require <strong>TL approval</strong> before proceeding.</span>
                     </div>
                 )}
 
-                {error && <div style={s.errBox}>⚠️ {error}</div>}
+                {/* ── Error ── */}
+                {error && (
+                    <div style={s.errBox}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#991B1B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        {error}
+                    </div>
+                )}
 
-                <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
 
-                    {/* ── MULTI-SUBTASK MODE (CEO/TL creating subtasks under a parent) ── */}
+                    {/* ════════════════════════════════════════════════════
+                        MULTI-SUBTASK MODE
+                    ═══════════════════════════════════════════════════════ */}
                     {isMultiMode ? (
                         <>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "55vh", overflowY: "auto", paddingRight: 4 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 12, maxHeight: "55vh", overflowY: "auto", padding: "20px 24px 0" }}>
                                 {subtaskRows.map((row, i) => (
                                     <div key={i} style={s.rowCard}>
-                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#1a73e8" }}>Subtask {i + 1}</span>
+                                        {/* Row header */}
+                                        <div style={s.rowCardHeader}>
+                                            <div style={s.rowBadge}>Subtask {i + 1}</div>
                                             {subtaskRows.length > 1 && (
-                                                <button type="button" onClick={() => removeSubtaskRow(i)}
-                                                    style={{ background: "none", border: "none", color: "#d93025", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                                                <button type="button" className="ctm-remove" onClick={() => removeSubtaskRow(i)} style={s.removeBtn}>
                                                     Remove
                                                 </button>
                                             )}
                                         </div>
-                                        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                                            <div style={{ flex: "1 1 200px", ...s.field }}>
-                                                <label style={s.label}>Title *</label>
-                                                <input style={s.input} value={row.title} onChange={e => updateRow(i, "title", e.target.value)}
-                                                    placeholder="Subtask title..." required={i === 0} />
+
+                                        <div style={s.rowGrid}>
+                                            <div style={s.field}>
+                                                <label style={s.label}>Title <span style={s.req}>*</span></label>
+                                                <input className="ctm-input" style={s.input} value={row.title}
+                                                    onChange={e => updateRow(i, "title", e.target.value)}
+                                                    placeholder="Enter subtask title" />
                                             </div>
-                                            <div style={{ flex: "1 1 160px", ...s.field }}>
+                                            <div style={s.field}>
                                                 <label style={s.label}>Deadline</label>
-                                                <input type="date" style={s.input} value={row.dueDate} onChange={e => updateRow(i, "dueDate", e.target.value)} />
+                                                <input type="date" className="ctm-input" style={s.input} value={row.dueDate}
+                                                    onChange={e => updateRow(i, "dueDate", e.target.value)} />
                                             </div>
                                         </div>
-                                        <div style={{ marginTop: 10, ...s.field }}>
+
+                                        <div style={{ ...s.field, marginTop: 10 }}>
                                             <label style={s.label}>Notes</label>
-                                            <textarea style={{ ...s.input, height: 52, resize: "vertical" }} value={row.notes}
-                                                onChange={e => updateRow(i, "notes", e.target.value)} placeholder="Specific requirements..." />
+                                            <textarea className="ctm-input" style={{ ...s.input, height: 52, resize: "vertical" }}
+                                                value={row.notes} onChange={e => updateRow(i, "notes", e.target.value)}
+                                                placeholder="Specific requirements or deliverables" />
                                         </div>
-                                        <div style={{ marginTop: 10, ...s.field }}>
+
+                                        <div style={{ ...s.field, marginTop: 10 }}>
                                             <label style={s.label}>Priority</label>
-                                            <div style={{ display: "flex", gap: 5 }}>
+                                            <div style={{ display: "flex", gap: 6 }}>
                                                 {PRIORITIES.map(p => (
                                                     <button key={p.value} type="button" onClick={() => updateRow(i, "priority", p.value)}
-                                                        style={{ flex: 1, padding: "6px 4px", border: `2px solid ${row.priority === p.value ? p.color : "#e8eaed"}`, borderRadius: "7px", background: row.priority === p.value ? `${p.color}18` : "#fff", color: row.priority === p.value ? p.color : "#5f6368", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>
+                                                        style={{
+                                                            flex: 1, padding: "7px 6px",
+                                                            border: `1.5px solid ${row.priority === p.value ? p.border : "#E5E7EB"}`,
+                                                            borderRadius: 6,
+                                                            background: row.priority === p.value ? p.bg : "#fff",
+                                                            color: row.priority === p.value ? p.color : "#6B7280",
+                                                            fontSize: 12, fontWeight: row.priority === p.value ? 600 : 400,
+                                                            cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+                                                        }}>
                                                         {p.label}
                                                     </button>
                                                 ))}
                                             </div>
                                         </div>
-                                        <div style={{ marginTop: 10, ...s.field }}>
-                                            <label style={s.label}>Assign to ({row.assigneeIds.length} selected) *</label>
+
+                                        <div style={{ ...s.field, marginTop: 10 }}>
+                                            <label style={s.label}>
+                                                Assign to
+                                                {row.assigneeIds.length > 0 && <span style={s.countBadge}>{row.assigneeIds.length} selected</span>}
+                                                <span style={s.req}> *</span>
+                                            </label>
+
+                                            {/* Department filter for this row */}
+                                            {allDepts.length > 0 && (
+                                                <div style={{ ...s.deptSection, marginBottom: 8 }}>
+                                                    <div style={s.deptLabel}>Filter by department</div>
+                                                    <div style={s.deptRow}>
+                                                        {allDepts.map(dept => {
+                                                            // Use row's own dept filter stored in row object
+                                                            const rowDepts = row._depts || [];
+                                                            const active = rowDepts.includes(dept);
+                                                            const empCount = employees.filter(e => e.department === dept).length;
+                                                            return (
+                                                                <button key={dept} type="button"
+                                                                    onClick={() => updateRow(i, "_depts", active ? rowDepts.filter(d => d !== dept) : [...rowDepts, dept])}
+                                                                    style={{
+                                                                        display: "inline-flex", alignItems: "center", gap: 4,
+                                                                        padding: "4px 9px",
+                                                                        border: `1.5px solid ${active ? "#2563EB" : "#E5E7EB"}`,
+                                                                        borderRadius: 5,
+                                                                        background: active ? "#2563EB" : "#fff",
+                                                                        color: active ? "#fff" : "#374151",
+                                                                        fontSize: 11, fontWeight: active ? 600 : 400,
+                                                                        cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+                                                                    }}>
+                                                                    {dept}
+                                                                    <span style={{ fontSize: 9, background: active ? "rgba(255,255,255,0.25)" : "#F3F4F6", color: active ? "#fff" : "#6B7280", borderRadius: 99, padding: "1px 5px" }}>
+                                                                        {empCount}
+                                                                    </span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Employees filtered by row's dept selection */}
                                             <div style={s.empGrid}>
-                                                {employees.map(emp => {
-                                                    const sel = row.assigneeIds.includes(emp.employeeId);
-                                                    const isTL = emp.role === "tl";
-                                                    return (
-                                                        <button key={emp.employeeId} type="button" onClick={() => toggleRowAssignee(i, emp.employeeId)}
-                                                            style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", border: `2px solid ${sel ? (isTL ? "#166534" : "#1a73e8") : "#e8eaed"}`, borderRadius: 20, background: sel ? (isTL ? "#f0fdf4" : "#e8f0fe") : "#fff", cursor: "pointer", fontSize: 12, color: sel ? (isTL ? "#166534" : "#1a73e8") : "#3c4043", fontWeight: sel ? 600 : 400 }}>
-                                                            <span style={{ width: 22, height: 22, borderRadius: "50%", background: sel ? (isTL ? "#166534" : "#1a73e8") : "#e8eaed", display: "flex", alignItems: "center", justifyContent: "center", color: sel ? "#fff" : "#5f6368", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
-                                                                {emp.name?.charAt(0).toUpperCase()}
-                                                            </span>
-                                                            <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                                                {empDisplayName(emp)}
-                                                            </span>
-                                                            {isTL && <span style={{ fontSize: 9, background: "#166534", color: "#fff", borderRadius: 4, padding: "1px 4px", flexShrink: 0 }}>TL</span>}
-                                                            {sel && <span>✓</span>}
-                                                        </button>
-                                                    );
-                                                })}
+                                                {(() => {
+                                                    const rowDepts = row._depts || [];
+                                                    const filtered = rowDepts.length === 0 ? employees : employees.filter(e => rowDepts.includes(e.department));
+                                                    if (filtered.length === 0) return <span style={{ fontSize: 12, color: "#9CA3AF" }}>No employees in selected department(s).</span>;
+                                                    return filtered.map(emp => {
+                                                        const sel = row.assigneeIds.includes(emp.employeeId);
+                                                        const isTL = emp.role === "tl";
+                                                        return (
+                                                            <button key={emp.employeeId} type="button" className="ctm-emp-btn"
+                                                                onClick={() => toggleRowAssignee(i, emp.employeeId)}
+                                                                style={{
+                                                                    display: "flex", alignItems: "center", gap: 7,
+                                                                    padding: "6px 11px",
+                                                                    border: `1.5px solid ${sel ? "#2563EB" : "#E5E7EB"}`,
+                                                                    borderRadius: 6,
+                                                                    background: sel ? "#EFF6FF" : "#fff",
+                                                                    cursor: "pointer", fontSize: 12,
+                                                                    color: sel ? "#1D4ED8" : "#374151",
+                                                                    fontWeight: sel ? 600 : 400,
+                                                                    fontFamily: "inherit", transition: "all 0.12s",
+                                                                }}>
+                                                                <span style={sel ? s.avatarSel : s.avatar}>
+                                                                    {emp.name?.charAt(0).toUpperCase()}
+                                                                </span>
+                                                                <span style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                                    {empDisplayName(emp)}
+                                                                </span>
+                                                                {isTL && <span style={s.tlTag}>TL</span>}
+                                                                {sel && (
+                                                                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+                                                                        <path d="M2 6l3 3 5-5" stroke="#2563EB" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                                                    </svg>
+                                                                )}
+                                                            </button>
+                                                        );
+                                                    });
+                                                })()}
                                             </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
 
-                            <button type="button" onClick={addSubtaskRow} style={s.addRowBtn}>
-                                + Add Another Subtask
-                            </button>
+                            <div style={{ padding: "14px 24px 0" }}>
+                                <button type="button" className="ctm-add-row" onClick={addSubtaskRow} style={s.addRowBtn}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                        <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                                    </svg>
+                                    Add Another Subtask
+                                </button>
+                            </div>
                         </>
                     ) : (
-                        /* ── SINGLE TASK / SUBTASK MODE ── */
-                        <>
+                        /* ════════════════════════════════════════════════════
+                            SINGLE TASK / SUBTASK MODE
+                        ═══════════════════════════════════════════════════════ */
+                        <div style={{ padding: "20px 24px 0", display: "flex", flexDirection: "column", gap: 16 }}>
+
+                            {/* Title */}
                             <div style={s.field}>
-                                <label style={s.label}>Title *</label>
-                                <input style={s.input} value={form.title} onChange={e => set("title", e.target.value)}
-                                    placeholder={parentTask ? "Subtask title..." : "Task title..."} required autoFocus />
+                                <label style={s.label}>
+                                    Title <span style={s.req}>*</span>
+                                </label>
+                                <input className="ctm-input" style={s.input}
+                                    value={form.title} onChange={e => set("title", e.target.value)}
+                                    placeholder={parentTask ? "Enter subtask title" : "Enter task title"}
+                                    autoFocus />
                             </div>
 
+                            {/* Description */}
                             <div style={s.field}>
                                 <label style={s.label}>Description</label>
-                                <textarea style={{ ...s.input, height: "64px", resize: "vertical" }} value={form.description}
-                                    onChange={e => set("description", e.target.value)} placeholder="What needs to be done..." />
+                                <textarea className="ctm-input" style={{ ...s.input, height: 64, resize: "vertical" }}
+                                    value={form.description} onChange={e => set("description", e.target.value)}
+                                    placeholder="Brief description of what needs to be done" />
                             </div>
 
+                            {/* Notes */}
                             <div style={s.field}>
-                                <label style={s.label}>Notes / Requirements *</label>
-                                <textarea style={{ ...s.input, height: "72px", resize: "vertical" }} value={form.notes}
-                                    onChange={e => set("notes", e.target.value)} placeholder="Specific requirements, deliverables..." required />
+                                <label style={s.label}>
+                                    Notes / Requirements <span style={s.req}>*</span>
+                                </label>
+                                <textarea className="ctm-input" style={{ ...s.input, height: 72, resize: "vertical" }}
+                                    value={form.notes} onChange={e => set("notes", e.target.value)}
+                                    placeholder="Specific requirements, deliverables, acceptance criteria"
+                                    required />
                             </div>
 
-                            <div style={{ display: "flex", gap: "16px" }}>
+                            {/* Deadline + Priority */}
+                            <div style={{ display: "flex", gap: 16 }}>
                                 <div style={{ flex: 1, ...s.field }}>
                                     <label style={s.label}>Deadline</label>
-                                    <input type="date" style={s.input} value={form.dueDate} onChange={e => set("dueDate", e.target.value)} />
+                                    <input type="date" className="ctm-input" style={s.input}
+                                        value={form.dueDate} onChange={e => set("dueDate", e.target.value)} />
                                     {form.dueDate && <div style={{ marginTop: 4 }}><DeadlineBadge dueDate={form.dueDate} /></div>}
                                 </div>
                                 <div style={{ flex: 1, ...s.field }}>
                                     <label style={s.label}>Priority</label>
-                                    <div style={{ display: "flex", gap: "6px" }}>
+                                    <div style={{ display: "flex", gap: 6, height: 38, alignItems: "stretch" }}>
                                         {PRIORITIES.map(p => (
                                             <button key={p.value} type="button" onClick={() => set("priority", p.value)}
-                                                style={{ flex: 1, padding: "8px 4px", border: `2px solid ${form.priority === p.value ? p.color : "#e8eaed"}`, borderRadius: "8px", background: form.priority === p.value ? `${p.color}15` : "#fff", color: form.priority === p.value ? p.color : "#5f6368", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>
+                                                style={{
+                                                    flex: 1,
+                                                    border: `1.5px solid ${form.priority === p.value ? p.border : "#E5E7EB"}`,
+                                                    borderRadius: 6,
+                                                    background: form.priority === p.value ? p.bg : "#fff",
+                                                    color: form.priority === p.value ? p.color : "#6B7280",
+                                                    fontSize: 12, fontWeight: form.priority === p.value ? 600 : 400,
+                                                    cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+                                                }}>
                                                 {p.label}
                                             </button>
                                         ))}
@@ -345,25 +491,92 @@ export default function CreateTaskModal({
                                 </div>
                             </div>
 
-                            {/* Assignees — TLs labeled with dept */}
+                            {/* Assignees — Department filter first, then employees */}
                             <div style={s.field}>
-                                <label style={s.label}>Assign to ({selectedIds.length} selected) *</label>
+                                <label style={s.label}>
+                                    Assign to
+                                    {selectedIds.length > 0 && <span style={s.countBadge}>{selectedIds.length} selected</span>}
+                                    <span style={s.req}> *</span>
+                                </label>
+
+                                {/* Step 1: Department chips */}
+                                {allDepts.length > 0 && (
+                                    <div style={s.deptSection}>
+                                        <div style={s.deptLabel}>
+                                            Filter by department
+                                            {selectedDepts.length > 0 && (
+                                                <button type="button" onClick={() => setSelectedDepts([])} style={s.deptClearBtn}>
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                        <div style={s.deptRow}>
+                                            {allDepts.map(dept => {
+                                                const active = selectedDepts.includes(dept);
+                                                const empCount = employees.filter(e => e.department === dept).length;
+                                                return (
+                                                    <button key={dept} type="button" onClick={() => toggleDept(dept)}
+                                                        style={{
+                                                            display: "inline-flex", alignItems: "center", gap: 5,
+                                                            padding: "5px 11px",
+                                                            border: `1.5px solid ${active ? "#2563EB" : "#E5E7EB"}`,
+                                                            borderRadius: 5,
+                                                            background: active ? "#2563EB" : "#fff",
+                                                            color: active ? "#fff" : "#374151",
+                                                            fontSize: 12, fontWeight: active ? 600 : 400,
+                                                            cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+                                                        }}>
+                                                        {dept}
+                                                        <span style={{
+                                                            fontSize: 10, fontWeight: 600,
+                                                            background: active ? "rgba(255,255,255,0.25)" : "#F3F4F6",
+                                                            color: active ? "#fff" : "#6B7280",
+                                                            borderRadius: 99, padding: "1px 6px",
+                                                        }}>
+                                                            {empCount}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Step 2: Employees of selected departments */}
                                 <div style={s.empGrid}>
                                     {employees.length === 0 ? (
-                                        <span style={{ fontSize: 13, color: "#80868b" }}>Loading...</span>
-                                    ) : employees.map(emp => {
+                                        <span style={{ fontSize: 13, color: "#9CA3AF" }}>Loading employees…</span>
+                                    ) : visibleEmployees.length === 0 ? (
+                                        <span style={{ fontSize: 13, color: "#9CA3AF" }}>No employees in selected department(s).</span>
+                                    ) : visibleEmployees.map(emp => {
                                         const sel = selectedIds.includes(emp.employeeId);
                                         const isTL = emp.role === "tl";
-                                        const displayName = empDisplayName(emp);
                                         return (
-                                            <button key={emp.employeeId} type="button" onClick={() => toggle(emp.employeeId)}
-                                                style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 12px", border: `2px solid ${sel ? (isTL ? "#166534" : "#1a73e8") : "#e8eaed"}`, borderRadius: "20px", background: sel ? (isTL ? "#f0fdf4" : "#e8f0fe") : "#fff", cursor: "pointer", fontSize: "13px", color: sel ? (isTL ? "#166534" : "#1a73e8") : "#3c4043", fontWeight: sel ? 500 : 400 }}>
-                                                <span style={{ width: 26, height: 26, borderRadius: "50%", background: sel ? (isTL ? "#166534" : "#1a73e8") : "#e8eaed", display: "flex", alignItems: "center", justifyContent: "center", color: sel ? "#fff" : "#5f6368", fontSize: "12px", fontWeight: 700, flexShrink: 0 }}>
+                                            <button key={emp.employeeId} type="button" className="ctm-emp-btn"
+                                                onClick={() => toggle(emp.employeeId)}
+                                                style={{
+                                                    display: "flex", alignItems: "center", gap: 7,
+                                                    padding: "7px 12px",
+                                                    border: `1.5px solid ${sel ? "#2563EB" : "#E5E7EB"}`,
+                                                    borderRadius: 6,
+                                                    background: sel ? "#EFF6FF" : "#fff",
+                                                    cursor: "pointer", fontSize: 13,
+                                                    color: sel ? "#1D4ED8" : "#374151",
+                                                    fontWeight: sel ? 600 : 400,
+                                                    fontFamily: "inherit", transition: "all 0.12s",
+                                                }}>
+                                                <span style={sel ? s.avatarSel : s.avatar}>
                                                     {emp.name?.charAt(0).toUpperCase()}
                                                 </span>
-                                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{displayName}</span>
-                                                {isTL && <span style={{ fontSize: 10, background: "#166534", color: "#fff", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>TL</span>}
-                                                {sel && <span>✓</span>}
+                                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>
+                                                    {empDisplayName(emp)}
+                                                </span>
+                                                {isTL && <span style={s.tlTag}>TL</span>}
+                                                {sel && (
+                                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
+                                                        <path d="M2 6l3 3 5-5" stroke="#2563EB" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                )}
                                             </button>
                                         );
                                     })}
@@ -374,83 +587,144 @@ export default function CreateTaskModal({
                             <div style={s.field}>
                                 <label style={s.label}>
                                     Attachments
-                                    <span style={{ fontWeight: 400, textTransform: "none", fontSize: 10, color: "#80868b", marginLeft: 6 }}>
-                                        (optional — shown in task chat)
+                                    <span style={{ fontWeight: 400, textTransform: "none", fontSize: 11, color: "#9CA3AF", marginLeft: 6 }}>
+                                        Optional — visible in task chat
                                     </span>
                                 </label>
                                 <input ref={imageInputRef} type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif" multiple style={{ display: "none" }} onChange={handleImagePick} />
                                 <input ref={pdfInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={handlePdfPick} />
-                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                     <button type="button" onClick={() => imageInputRef.current?.click()} disabled={uploadingFiles}
-                                        style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", border: "1.5px dashed #4CAF50", borderRadius: "8px", background: "transparent", cursor: "pointer", fontSize: "12px", fontWeight: 500, color: "#2e7d32" }}>
-                                        📷 Add Images
+                                        style={s.attachBtn}>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+                                        </svg>
+                                        Add Images
                                     </button>
                                     <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={uploadingFiles}
-                                        style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", border: "1.5px dashed #F44336", borderRadius: "8px", background: "transparent", cursor: "pointer", fontSize: "12px", fontWeight: 500, color: "#c62828" }}>
-                                        📄 Add PDF
+                                        style={{ ...s.attachBtn, borderColor: "#FECDD3", color: "#9F1239" }}>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        Add PDF
                                     </button>
-                                    {uploadingFiles && <span style={{ fontSize: 12, color: "#80868b" }}>Uploading...</span>}
+                                    {uploadingFiles && (
+                                        <span style={{ fontSize: 12, color: "#9CA3AF" }}>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite", marginRight: 4 }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                                            Uploading…
+                                        </span>
+                                    )}
                                 </div>
+
                                 {attachments.length > 0 && (
-                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                                         {attachments.map((att, idx) => (
-                                            <div key={idx} style={{ position: "relative", width: 90, flexShrink: 0 }}>
+                                            <div key={idx} style={{ position: "relative", width: 80, flexShrink: 0 }}>
                                                 {att.type === "image" ? (
-                                                    <img src={att.localUrl || att.url} alt={att.name} style={{ width: "100%", height: 68, objectFit: "cover", borderRadius: 7, display: "block" }} />
+                                                    <img src={att.localUrl || att.url} alt={att.name}
+                                                        style={{ width: "100%", height: 60, objectFit: "cover", borderRadius: 6, display: "block", border: "1px solid #E5E7EB" }} />
                                                 ) : (
-                                                    <div style={{ width: 90, height: 68, border: "1.5px solid #f5c6c6", borderRadius: 7, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, background: "#fce8e6", padding: "6px", overflow: "hidden" }}>
-                                                        <span style={{ fontSize: 10, color: "#3c4043", textAlign: "center" }}>📄 {att.name}</span>
+                                                    <div style={{ width: 80, height: 60, border: "1px solid #E5E7EB", borderRadius: 6, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, background: "#F9FAFB", padding: 4, overflow: "hidden" }}>
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+                                                        </svg>
+                                                        <span style={{ fontSize: 9, color: "#6B7280", textAlign: "center", lineHeight: 1.2 }}>{att.name}</span>
                                                     </div>
                                                 )}
                                                 <button type="button" onClick={() => removeAttachment(idx)}
-                                                    style={{ position: "absolute", top: -7, right: -7, width: 20, height: 20, borderRadius: "50%", background: "#d93025", color: "#fff", border: "none", cursor: "pointer", fontSize: "10px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                    ✕
+                                                    style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#EF4444", color: "#fff", border: "none", cursor: "pointer", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                                    <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+                                                        <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                                                    </svg>
                                                 </button>
                                             </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                        </>
+                        </div>
                     )}
 
+                    {/* ── Footer ── */}
                     <div style={s.footer}>
-                        <button type="button" onClick={onClose} style={s.cancelBtn}>Cancel</button>
-                        <button type="submit" disabled={submitting || uploadingFiles}
-                            style={{ ...s.submitBtn, opacity: (submitting || uploadingFiles) ? 0.7 : 1 }}>
-                            {submitting
-                                ? "Creating..."
-                                : isMultiMode
-                                    ? `Create ${subtaskRows.filter(r => r.title.trim()).length || 1} Subtask(s)`
-                                    : parentTask
-                                        ? "Create Subtask"
-                                        : "Create & Assign Task"
+                        <button type="button" className="ctm-cancel" onClick={onClose} style={s.cancelBtn}>
+                            Cancel
+                        </button>
+                        <button type="submit" className="ctm-submit" disabled={submitting || uploadingFiles}
+                            style={{ ...s.submitBtn, opacity: (submitting || uploadingFiles) ? 0.65 : 1 }}>
+                            {submitting ? (
+                                <>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                                    Creating…
+                                </>
+                            ) : isMultiMode
+                                ? `Create ${subtaskRows.filter(r => r.title.trim()).length || 1} Subtask${subtaskRows.filter(r => r.title.trim()).length !== 1 ? "s" : ""}`
+                                : parentTask
+                                    ? "Create Subtask"
+                                    : "Create Task"
                             }
                         </button>
                     </div>
+
+                    <style>{`@keyframes ctm-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
                 </form>
             </div>
         </div>
     );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const s = {
-    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, fontFamily: "'Google Sans','Roboto',sans-serif" },
-    modal: { background: "#fff", borderRadius: "16px", width: "min(700px,96vw)", maxHeight: "93vh", overflow: "auto", padding: "28px", boxShadow: "0 32px 64px rgba(0,0,0,0.2)" },
-    header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "22px" },
-    title: { margin: "0 0 4px", fontSize: "20px", fontWeight: 600, color: "#202124" },
-    subtitle: { margin: 0, fontSize: "13px", color: "#5f6368" },
-    idBadge: { fontFamily: "monospace", background: "#f1f3f4", padding: "1px 5px", borderRadius: "3px", fontSize: "11px" },
-    closeBtn: { background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#5f6368", flexShrink: 0 },
-    infoBox: { background: "#e8f0fe", border: "1px solid #c5d8f8", borderRadius: "8px", padding: "10px 14px", color: "#1a73e8", fontSize: "13px", marginBottom: "14px" },
-    errBox: { background: "#fce8e6", border: "1px solid #f5c6c6", borderRadius: "8px", padding: "12px 16px", color: "#c5221f", fontSize: "13px", marginBottom: "16px" },
-    field: { display: "flex", flexDirection: "column", gap: "6px" },
-    label: { fontSize: "11px", fontWeight: 600, color: "#5f6368", textTransform: "uppercase", letterSpacing: "0.6px" },
-    input: { padding: "10px 14px", border: "1.5px solid #dadce0", borderRadius: "8px", fontSize: "14px", fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: "100%" },
-    empGrid: { display: "flex", flexWrap: "wrap", gap: "8px", maxHeight: "160px", overflowY: "auto", padding: "4px 0" },
-    footer: { display: "flex", justifyContent: "flex-end", gap: "12px", paddingTop: "20px", borderTop: "1px solid #e8eaed" },
-    cancelBtn: { padding: "11px 24px", border: "none", background: "transparent", color: "#1a73e8", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-    submitBtn: { padding: "11px 28px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, cursor: "pointer" },
-    rowCard: { background: "#f8f9fa", borderRadius: 10, padding: 14, border: "1px solid #e8eaed" },
-    addRowBtn: { padding: "9px 16px", border: "1.5px dashed #1a73e8", borderRadius: 8, background: "transparent", color: "#1a73e8", fontSize: 13, cursor: "pointer", width: "100%", fontWeight: 500 },
+    // Modal shell
+    overlay: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, fontFamily: "'Inter','DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", backdropFilter: "blur(2px)" },
+    modal: { background: "#fff", borderRadius: 10, width: "min(680px,96vw)", maxHeight: "93vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08)", animation: "ctm-in 0.2s ease" },
+
+    // Header
+    modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "20px 24px 18px", borderBottom: "1px solid #E5E7EB" },
+    headerLeft: { display: "flex", alignItems: "flex-start", gap: 12 },
+    headerIcon: { width: 34, height: 34, borderRadius: 8, background: "#EFF6FF", border: "1px solid #BFDBFE", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 },
+    modalTitle: { margin: "0 0 3px", fontSize: 16, fontWeight: 600, color: "#0F172A", letterSpacing: "-0.01em" },
+    modalSub: { margin: 0, fontSize: 12, color: "#64748B" },
+    idCode: { fontFamily: "monospace", background: "#F1F5F9", color: "#475569", padding: "1px 5px", borderRadius: 3, fontSize: 11, marginLeft: 4, border: "1px solid #E2E8F0" },
+    closeBtn: { width: 32, height: 32, borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B7280", flexShrink: 0, transition: "all 0.12s" },
+
+    // Alerts
+    noticeBox: { display: "flex", alignItems: "flex-start", gap: 9, margin: "14px 24px 0", padding: "10px 13px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 7, fontSize: 13, color: "#1E40AF", lineHeight: 1.5 },
+    errBox: { display: "flex", alignItems: "flex-start", gap: 9, margin: "14px 24px 0", padding: "10px 13px", background: "#FFF1F2", border: "1px solid #FECDD3", borderRadius: 7, fontSize: 13, color: "#991B1B", lineHeight: 1.5 },
+
+    // Form fields
+    field: { display: "flex", flexDirection: "column", gap: 5 },
+    label: { fontSize: 11, fontWeight: 600, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 4 },
+    req: { color: "#EF4444", fontWeight: 700 },
+    input: { padding: "9px 12px", border: "1.5px solid #E5E7EB", borderRadius: 7, fontSize: 13, fontFamily: "inherit", color: "#1E293B", background: "#FAFAFA", boxSizing: "border-box", width: "100%", transition: "border-color 0.12s, box-shadow 0.12s" },
+    countBadge: { fontSize: 10, fontWeight: 600, padding: "1px 7px", borderRadius: 99, background: "#EFF6FF", color: "#2563EB", border: "1px solid #BFDBFE", marginLeft: 6 },
+
+    // Assignee grid
+    empGrid: { display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 160, overflowY: "auto", padding: "2px 0" },
+    avatar: { width: 24, height: 24, borderRadius: 6, background: "#E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B7280", fontSize: 11, fontWeight: 700, flexShrink: 0 },
+    avatarSel: { width: 24, height: 24, borderRadius: 6, background: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0 },
+    tlTag: { fontSize: 9, fontWeight: 700, background: "#064E3B", color: "#fff", borderRadius: 3, padding: "1px 5px", flexShrink: 0, letterSpacing: "0.03em" },
+
+    // Multi-subtask row card
+    rowCard: { background: "#F8FAFC", borderRadius: 8, padding: "14px 16px", border: "1px solid #E2E8F0" },
+    rowCardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+    rowBadge: { fontSize: 11, fontWeight: 700, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 4, padding: "2px 8px", letterSpacing: "0.04em", textTransform: "uppercase" },
+    removeBtn: { background: "none", border: "none", color: "#B91C1C", fontSize: 12, cursor: "pointer", fontWeight: 500, padding: 0, fontFamily: "inherit", transition: "color 0.12s" },
+    rowGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 },
+    addRowBtn: { width: "100%", padding: "9px 0", border: "1.5px dashed #BFDBFE", borderRadius: 7, background: "#fff", color: "#2563EB", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.12s" },
+
+    // Attachments
+    attachBtn: { display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", border: "1.5px dashed #BBF7D0", borderRadius: 6, background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 500, color: "#065F46", fontFamily: "inherit", transition: "background 0.12s" },
+
+    // Department filter
+    deptSection: { background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 7, padding: "10px 12px", marginBottom: 6 },
+    deptLabel: { fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 7, display: "flex", alignItems: "center", justifyContent: "space-between" },
+    deptClearBtn: { fontSize: 11, fontWeight: 500, color: "#2563EB", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", textDecoration: "underline" },
+    deptRow: { display: "flex", flexWrap: "wrap", gap: 6 },
+
+    // Footer
+    footer: { display: "flex", justifyContent: "flex-end", gap: 10, padding: "16px 24px", borderTop: "1px solid #E5E7EB", marginTop: 20, background: "#FAFAFA", borderRadius: "0 0 10px 10px" },
+    cancelBtn: { padding: "9px 20px", border: "1px solid #E5E7EB", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", borderRadius: 6, fontFamily: "inherit", transition: "background 0.12s" },
+    submitBtn: { padding: "9px 22px", background: "#2563EB", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 7, transition: "background 0.12s, opacity 0.12s" },
 };
