@@ -1670,7 +1670,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         />
       </div>
 
-      {/* ── Notes Sidebar Panel ── */}                               ← ADD FROM HERE
+      {/* ── Notes Sidebar Panel ── */}
       <div className={`cw-req-panel-overlay${notesPanelOpen ? " show" : ""}`} onClick={() => setNotesPanelOpen(false)} />
       <div className={`cw-req-panel${notesPanelOpen ? " open" : ""}`}>
         <NotesSidebarPanel

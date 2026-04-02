@@ -478,7 +478,7 @@ export default function DirectMessagesPage() {
   }, [messages]);
 
   useEffect(() => {
-    if (!loading && !user) router.push("/");
+    if (!loading && !user) router.push("/coworking-login");
   }, [user, loading, router]);
 
   const downloadImage = (url) => {

@@ -14,6 +14,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { useRouter } from "next/navigation";
 import { taskForwardApi } from "../../../lib/taskForwardApi";
+import { firebaseDb } from "../../../lib/coworkFirebase";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 // ─── Constants ────────────────────────────────────────────
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -58,8 +60,9 @@ export default function CalendarPage() {
     const [today] = useState(todayDate);
     const [cursor, setCursor] = useState(todayDate()); // currently navigated date
     const [events, setEvents] = useState([]);
-    const [taskItems, setTaskItems] = useState([]);        // tasks as calendar items
-    const [modal, setModal] = useState(null);      // { mode:"create"|"view", ... }
+    const [taskItems, setTaskItems] = useState([]);  // tasks as calendar items
+    const [meetingItems, setMeetingItems] = useState([]);  // scheduled meetings
+    const [noteItems, setNoteItems] = useState([]);  // note reminders
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [miniMonth, setMiniMonth] = useState(() => { const d = todayDate(); return { y: d.getFullYear(), m: d.getMonth() }; });
     const [searchOpen, setSearchOpen] = useState(false);
@@ -113,6 +116,61 @@ export default function CalendarPage() {
         }).catch(() => { });
     }, [user]);
 
+    // Load scheduled meetings from Firestore
+    useEffect(() => {
+        if (!user) return;
+        getDocs(collection(firebaseDb, "cowork_meets"))
+            .then(snap => {
+                const items = [];
+                snap.forEach(d => {
+                    const m = d.data();
+                    if (!m.dateTime) return;
+                    const dt = new Date(m.dateTime);
+                    items.push({
+                        id: `meet_${m.meetId || d.id}`,
+                        title: m.title || "Meeting",
+                        date: dt.toISOString().slice(0, 10),
+                        time: m.dateTime,   // full ISO for hour placement
+                        type: "meeting",
+                        meetId: m.meetId || d.id,
+                        color: "#1a73e8",
+                        description: m.description || "",
+                        participants: m.participants || [],
+                    });
+                });
+                setMeetingItems(items);
+            }).catch(() => { });
+    }, [user]);
+
+    // Load notes with reminders from Firestore
+    useEffect(() => {
+        if (!employeeId) return;
+        getDocs(query(
+            collection(firebaseDb, "cowork_notes"),
+            where("ownerId", "==", employeeId)
+        )).then(snap => {
+            const items = [];
+            snap.forEach(d => {
+                const n = d.data();
+                if (!n.reminder) return;
+                const dt = new Date(n.reminder);
+                items.push({
+                    id: `note_${d.id}`,
+                    title: n.title || "Note reminder",
+                    date: dt.toISOString().slice(0, 10),
+                    time: n.reminder,  // full ISO datetime
+                    type: "note",
+                    noteId: d.id,
+                    color: "#9334e9",
+                    description: n.description || "",
+                    keypoints: n.keypoints || [],
+                    pinned: n.pinned || false,
+                });
+            });
+            setNoteItems(items);
+        }).catch(() => { });
+    }, [user, employeeId]);
+
     if (loading || !user) return null;
 
     // ── Event CRUD ──────────────────────────────────────────
@@ -152,7 +210,15 @@ export default function CalendarPage() {
             const d = parseLocalISO(t.date + "T00:00");
             return d && isSameDay(d, date);
         });
-        return { evts, tasks };
+        const meetings = meetingItems.filter(m => {
+            const d = parseLocalISO(m.time || m.date + "T00:00");
+            return d && isSameDay(d, date);
+        });
+        const notes = noteItems.filter(n => {
+            const d = parseLocalISO(n.time || n.date + "T00:00");
+            return d && isSameDay(d, date);
+        });
+        return { evts, tasks, meetings, notes };
     };
 
     // ── Header label ────────────────────────────────────────
@@ -172,6 +238,8 @@ export default function CalendarPage() {
     const allItems = [
         ...events.map(e => ({ ...e, _type: "event" })),
         ...taskItems.map(t => ({ ...t, _type: "task" })),
+        ...meetingItems.map(m => ({ ...m, _type: "meeting" })),
+        ...noteItems.map(n => ({ ...n, _type: "note" })),
     ].filter(e => !searchQ || e.title?.toLowerCase().includes(searchQ.toLowerCase()));
 
     return (
@@ -249,12 +317,7 @@ export default function CalendarPage() {
             <div style={s.body}>
                 {/* ── LEFT SIDEBAR ── */}
                 <aside style={{ ...s.sidebar, ...(sidebarOpen ? {} : { display: "none" }) }} className={sidebarOpen ? "sidebar-open" : ""}>
-                    {/* Create button */}
-                    <button style={s.createBtn}
-                        onClick={() => setModal({ mode: "create", start: toLocalISO(new Date()), end: toLocalISO(new Date(new Date().getTime() + 3600000)) })}>
-                        <span style={{ fontSize: 22, marginRight: 10, color: "#5f6368" }}>+</span>
-                        Create
-                    </button>
+
 
                     {/* Mini calendar */}
                     <MiniCalendar
@@ -263,7 +326,11 @@ export default function CalendarPage() {
                         onSelect={d => { setCursor(d); if (view === "month" || view === "week") setCursor(d); }}
                         onPrev={() => setMiniMonth(m => { const nm = m.m - 1 < 0 ? { y: m.y - 1, m: 11 } : { y: m.y, m: m.m - 1 }; return nm; })}
                         onNext={() => setMiniMonth(m => { const nm = m.m + 1 > 11 ? { y: m.y + 1, m: 0 } : { y: m.y, m: m.m + 1 }; return nm; })}
-                        taskDates={taskItems.map(t => t.date)}
+                        taskDates={[
+                            ...taskItems.map(t => t.date),
+                            ...meetingItems.map(m => m.date),
+                            ...noteItems.map(n => n.date),
+                        ]}
                     />
 
                     {/* My calendars */}
@@ -289,57 +356,47 @@ export default function CalendarPage() {
                         <span style={{ fontSize: 13, color: "#202124" }}>Holidays in India</span>
                     </div>
 
-                    {/* Task deadlines summary */}
-                    {taskItems.length > 0 && (
+                    {/* Upcoming items summary — tasks + meetings + notes */}
+                    {(taskItems.length > 0 || meetingItems.length > 0 || noteItems.length > 0) && (
                         <div style={{ marginTop: 16, padding: "0 12px" }}>
                             <p style={{ fontSize: 11, fontWeight: 500, color: "#5f6368", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
-                                Upcoming deadlines
+                                Upcoming
                             </p>
-                            {taskItems.filter(t => t.date >= new Date().toISOString().slice(0, 10)).slice(0, 5).map(t => (
-                                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, cursor: "pointer" }}
-                                    onClick={() => setModal({ mode: "viewTask", task: t })}>
-                                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
-                                    <div style={{ overflow: "hidden" }}>
-                                        <p style={{ fontSize: 11, color: "#202124", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0 }}>{t.title}</p>
-                                        <p style={{ fontSize: 10, color: "#80868b", margin: 0 }}>{t.date}</p>
+                            {[
+                                ...taskItems.map(t => ({ ...t, _src: "task" })),
+                                ...meetingItems.map(m => ({ ...m, _src: "meeting" })),
+                                ...noteItems.map(n => ({ ...n, _src: "note" })),
+                            ]
+                                .filter(t => (t.time || t.date) >= new Date().toISOString().slice(0, 10))
+                                .sort((a, b) => (a.time || a.date).localeCompare(b.time || b.date))
+                                .slice(0, 6)
+                                .map(t => (
+                                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, cursor: "pointer" }}
+                                        onClick={() => setModal({ mode: t._src === "task" || t._src === "subtask" ? "viewTask" : t._src === "meeting" ? "viewMeeting" : t._src === "note" ? "viewNote" : "viewEvent", item: t, task: t })}>
+                                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
+                                        <div style={{ overflow: "hidden", flex: 1 }}>
+                                            <p style={{ fontSize: 11, color: "#202124", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0 }}>{t.title}</p>
+                                            <p style={{ fontSize: 10, color: "#80868b", margin: 0 }}>
+                                                {t._src === "meeting" ? "📹 Meeting · " : t._src === "note" ? "📝 Reminder · " : "⏰ Task · "}
+                                                {t.date}
+                                            </p>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
                         </div>
                     )}
                 </aside>
 
                 {/* ── MAIN CALENDAR AREA ── */}
                 <main style={s.main}>
-                    {view === "week" && <WeekView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onSlotClick={(dt) => setModal({ mode: "create", start: toLocalISO(dt), end: toLocalISO(new Date(dt.getTime() + 3600000)) })} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : "viewEvent", item, task: item })} />}
-                    {view === "day" && <DayView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onSlotClick={(dt) => setModal({ mode: "create", start: toLocalISO(dt), end: toLocalISO(new Date(dt.getTime() + 3600000)) })} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : "viewEvent", item, task: item })} />}
-                    {view === "month" && <MonthView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onDayClick={(d) => { setCursor(d); setView("day"); }} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : "viewEvent", item, task: item })} />}
-                    {view === "agenda" && <AgendaView cursor={cursor} events={events} taskItems={taskItems} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : "viewEvent", item, task: item })} />}
+                    {view === "week" && <WeekView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onSlotClick={(dt) => setModal({ mode: "create", start: toLocalISO(dt), end: toLocalISO(new Date(dt.getTime() + 3600000)) })} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : item.type === "meeting" ? "viewMeeting" : item.type === "note" ? "viewNote" : "viewEvent", item, task: item })} />}
+                    {view === "day" && <DayView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onSlotClick={(dt) => setModal({ mode: "create", start: toLocalISO(dt), end: toLocalISO(new Date(dt.getTime() + 3600000)) })} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : item.type === "meeting" ? "viewMeeting" : item.type === "note" ? "viewNote" : "viewEvent", item, task: item })} />}
+                    {view === "month" && <MonthView cursor={cursor} today={today} getItemsForDate={getItemsForDate} onDayClick={(d) => { setCursor(d); setView("day"); }} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : item.type === "meeting" ? "viewMeeting" : item.type === "note" ? "viewNote" : "viewEvent", item, task: item })} />}
+                    {view === "agenda" && <AgendaView cursor={cursor} events={events} taskItems={taskItems} meetingItems={meetingItems} noteItems={noteItems} onItemClick={(item) => setModal({ mode: item.type === "task" || item.type === "subtask" ? "viewTask" : item.type === "meeting" ? "viewMeeting" : item.type === "note" ? "viewNote" : "viewEvent", item, task: item })} />}
                 </main>
             </div>
 
-            {/* ── MODALS ── */}
-            {modal?.mode === "create" && (
-                <CreateEventModal
-                    start={modal.start} end={modal.end}
-                    onClose={() => setModal(null)}
-                    onSave={(evt) => { addEvent(evt); setModal(null); }}
-                />
-            )}
-            {modal?.mode === "viewEvent" && (
-                <ViewEventModal
-                    event={modal.item}
-                    onClose={() => setModal(null)}
-                    onDelete={(id) => { deleteEvent(id); setModal(null); }}
-                />
-            )}
-            {modal?.mode === "viewTask" && (
-                <ViewTaskModal
-                    task={modal.task}
-                    onClose={() => setModal(null)}
-                    onNavigate={(taskId) => { setModal(null); router.push(`/coworking/tasks/${taskId}`); }}
-                />
-            )}
+
         </div>
     );
 }
@@ -463,8 +520,8 @@ function WeekView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) 
     })();
 
     const columns = days.map(d => {
-        const { evts, tasks } = getItemsForDate(d);
-        return { date: d, evts, tasks };
+        const { evts, tasks, meetings, notes } = getItemsForDate(d);
+        return { date: d, evts, tasks: [...tasks, ...meetings.map(m => ({ ...m, color: "#1e8e3e" })), ...notes.map(n => ({ ...n, color: "#9334e9" }))] };
     });
 
     return (
@@ -474,7 +531,12 @@ function WeekView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) 
                 <div style={{ height: 56 }} />
                 {days.map((d, i) => {
                     const isToday = isSameDay(d, today);
-                    const { tasks } = getItemsForDate(d);
+                    const { tasks, meetings, notes } = getItemsForDate(d);
+                    const allChips = [
+                        ...tasks.map(t => ({ ...t, _t: "task" })),
+                        ...meetings.map(m => ({ ...m, _t: "meeting", color: "#1e8e3e" })),
+                        ...notes.map(n => ({ ...n, _t: "note", color: "#9334e9" })),
+                    ];
                     return (
                         <div key={i} style={{ textAlign: "center", padding: "4px 0", borderLeft: "1px solid #f1f3f4" }}>
                             <div className="week-header-day" style={{ fontSize: 11, color: isToday ? "#1a73e8" : "#70757a", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>
@@ -491,15 +553,15 @@ function WeekView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) 
                                 onClick={() => onSlotClick(new Date(d.setHours(9)))}>
                                 {d.getDate()}
                             </div>
-                            {/* Task deadline chips */}
+                            {/* All-day chips: tasks, meetings, notes */}
                             <div style={{ padding: "0 2px", minHeight: 20 }}>
-                                {tasks.slice(0, 2).map(t => (
+                                {allChips.slice(0, 2).map(t => (
                                     <div key={t.id} style={{ background: t.color, color: "#fff", borderRadius: 3, fontSize: 10, padding: "1px 4px", margin: "1px 0", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", cursor: "pointer" }}
                                         onClick={e => { e.stopPropagation(); onItemClick(t); }}>
-                                        {t.title}
+                                        {t._t === "meeting" ? "📹 " : t._t === "note" ? "📝 " : "⏰ "}{t.title}
                                     </div>
                                 ))}
-                                {tasks.length > 2 && <div style={{ fontSize: 10, color: "#5f6368" }}>{tasks.length - 2} more</div>}
+                                {allChips.length > 2 && <div style={{ fontSize: 10, color: "#5f6368" }}>{allChips.length - 2} more</div>}
                             </div>
                         </div>
                     );
@@ -514,8 +576,13 @@ function WeekView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) 
 //  DAY VIEW
 // ─────────────────────────────────────────────────────────
 function DayView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) {
-    const { evts, tasks } = getItemsForDate(cursor);
+    const { evts, tasks, meetings, notes } = getItemsForDate(cursor);
     const isToday = isSameDay(cursor, today);
+    const allDayChips = [
+        ...tasks.map(t => ({ ...t, _t: "task" })),
+        ...meetings.map(m => ({ ...m, _t: "meeting", color: "#1e8e3e" })),
+        ...notes.map(n => ({ ...n, _t: "note", color: "#9334e9" })),
+    ];
 
     return (
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -529,10 +596,10 @@ function DayView({ cursor, today, getItemsForDate, onSlotClick, onItemClick }) {
                         {cursor.getDate()}
                     </div>
                     <div style={{ padding: "0 4px", minHeight: 20 }}>
-                        {tasks.map(t => (
+                        {allDayChips.map(t => (
                             <div key={t.id} style={{ background: t.color, color: "#fff", borderRadius: 3, fontSize: 10, padding: "1px 4px", margin: "1px 0", cursor: "pointer" }}
                                 onClick={e => { e.stopPropagation(); onItemClick(t); }}>
-                                {t.title}
+                                {t._t === "meeting" ? "📹 " : t._t === "note" ? "📝 " : "⏰ "}{t.title}
                             </div>
                         ))}
                     </div>
@@ -572,7 +639,8 @@ function MonthView({ cursor, today, getItemsForDate, onDayClick, onItemClick }) 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gridTemplateRows: `repeat(${cells.length / 7},1fr)`, flex: 1 }}>
                 {cells.map((cell, i) => {
                     const isToday = isSameDay(cell.date, today);
-                    const { evts, tasks } = getItemsForDate(cell.date);
+                    const { evts, tasks, meetings, notes } = getItemsForDate(cell.date);
+                    const allChips = [...evts.slice(0, 2).map(e => ({ ...e, _t: "event" })), ...tasks.slice(0, 1).map(t => ({ ...t, _t: "task" })), ...meetings.slice(0, 1).map(m => ({ ...m, _t: "meeting", color: "#1e8e3e" })), ...notes.slice(0, 1).map(n => ({ ...n, _t: "note", color: "#9334e9" }))].slice(0, 3);
                     return (
                         <div key={i} style={{ border: "1px solid #f1f3f4", padding: "4px", minHeight: 80, cursor: "pointer", background: "#fff" }}
                             onClick={() => onDayClick(cell.date)}>
@@ -587,13 +655,15 @@ function MonthView({ cursor, today, getItemsForDate, onDayClick, onItemClick }) 
                                     {cell.date.getDate()}
                                 </div>
                             </div>
-                            {[...evts.slice(0, 2).map(e => ({ ...e, _t: "event" })), ...tasks.slice(0, 2).map(t => ({ ...t, _t: "task" }))].slice(0, 3).map(item => (
+                            {allChips.map(item => (
                                 <div key={item.id} style={{ background: item.color || "#1a73e8", color: "#fff", borderRadius: 3, fontSize: 10, padding: "1px 4px", marginBottom: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", cursor: "pointer" }}
                                     onClick={e => { e.stopPropagation(); onItemClick(item); }}>
-                                    {item._t === "task" ? "⏰ " : ""}{item.title}
+                                    {item._t === "task" ? "⏰ " : item._t === "meeting" ? "📹 " : item._t === "note" ? "📝 " : ""}{item.title}
                                 </div>
                             ))}
-                            {(evts.length + tasks.length) > 3 && <div style={{ fontSize: 10, color: "#5f6368" }}>{evts.length + tasks.length - 3} more</div>}
+                            {(evts.length + tasks.length + meetings.length + notes.length) > 3 && (
+                                <div style={{ fontSize: 10, color: "#5f6368" }}>{evts.length + tasks.length + meetings.length + notes.length - 3} more</div>
+                            )}
                         </div>
                     );
                 })}
@@ -603,178 +673,171 @@ function MonthView({ cursor, today, getItemsForDate, onDayClick, onItemClick }) 
 }
 
 // ─────────────────────────────────────────────────────────
-//  AGENDA VIEW
+//  AGENDA VIEW — shows tasks + meetings + notes + events grouped by date+time
 // ─────────────────────────────────────────────────────────
-function AgendaView({ cursor, events, taskItems, onItemClick }) {
-    const days = Array.from({ length: 30 }, (_, i) => {
+function AgendaView({ cursor, events, taskItems, meetingItems = [], noteItems = [], onItemClick }) {
+    const days = Array.from({ length: 60 }, (_, i) => {
         const d = new Date(cursor); d.setDate(d.getDate() + i); return d;
     });
 
+    // Type config: icon, label, color
+    const typeConfig = {
+        event: { icon: "🗓️", label: "Event", bg: "#E8F0FE", txt: "#1a73e8" },
+        task: { icon: "✅", label: "Task", bg: "#FCE8E6", txt: "#d93025" },
+        subtask: { icon: "↳", label: "Subtask", bg: "#FEF7E0", txt: "#f9ab00" },
+        meeting: { icon: "📹", label: "Meeting", bg: "#E6F4EA", txt: "#1e8e3e" },
+        note: { icon: "📝", label: "Reminder", bg: "#F3E8FD", txt: "#9334e9" },
+    };
+
     const allByDay = days.map(d => {
-        const evts = events.filter(e => { const s = parseLocalISO(e.start); return s && isSameDay(s, d); });
-        const tasks = taskItems.filter(t => { const td = parseLocalISO(t.date + "T00:00"); return td && isSameDay(td, d); });
-        return { date: d, items: [...evts.map(e => ({ ...e, _t: "event" })), ...tasks.map(t => ({ ...t, _t: "task" }))] };
+        // Collect all items for this day with their time for sorting
+        const dayItems = [
+            ...events.map(e => ({ ...e, _t: "event", _sortTime: e.start || (e.date + "T00:00") })),
+            ...taskItems.map(t => ({ ...t, _t: t.type || "task", _sortTime: t.time || (t.date + "T00:00") })),
+            ...meetingItems.map(m => ({ ...m, _t: "meeting", _sortTime: m.time || (m.date + "T09:00") })),
+            ...noteItems.map(n => ({ ...n, _t: "note", _sortTime: n.time || (n.date + "T00:00") })),
+        ].filter(item => {
+            const itemDate = parseLocalISO(item._sortTime);
+            return itemDate && isSameDay(itemDate, d);
+        }).sort((a, b) => a._sortTime.localeCompare(b._sortTime));
+
+        return { date: d, items: dayItems };
     }).filter(day => day.items.length > 0);
 
     if (!allByDay.length) return (
         <div style={{ padding: 60, textAlign: "center", color: "#80868b" }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📅</div>
-            No events or deadlines in the next 30 days
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📅</div>
+            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 6 }}>No upcoming events</div>
+            <div style={{ fontSize: 13 }}>No tasks, meetings or reminders in the next 60 days</div>
         </div>
     );
 
     return (
         <div style={{ overflow: "auto", height: "100%" }}>
-            {allByDay.map(({ date, items }) => (
-                <div key={date.toDateString()} style={{ display: "grid", gridTemplateColumns: "80px 1fr", borderBottom: "1px solid #f1f3f4" }}>
-                    <div style={{ padding: "16px 8px 16px 16px", textAlign: "right" }}>
-                        <div style={{ fontSize: 12, color: "#70757a", fontWeight: 500 }}>{DAYS[date.getDay()]}</div>
-                        <div style={{ fontSize: 26, color: "#202124", fontWeight: 400 }}>{date.getDate()}</div>
-                        <div style={{ fontSize: 11, color: "#70757a" }}>{MONTHS[date.getMonth()].slice(0, 3)}</div>
-                    </div>
-                    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
-                        {items.map(item => (
-                            <div key={item.id} onClick={() => onItemClick(item)}
-                                style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 8, background: "#f8f9fa", cursor: "pointer", border: `1px solid #e8eaed` }}>
-                                <div style={{ width: 10, height: 10, borderRadius: "50%", background: item.color || item._t === "task" ? "#d93025" : "#1a73e8", flexShrink: 0 }} />
-                                <div style={{ flex: 1 }}>
-                                    <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: "#202124" }}>{item.title}</p>
-                                    <p style={{ margin: 0, fontSize: 12, color: "#5f6368" }}>
-                                        {item._t === "task" ? `⏰ Deadline · ${item.status}` : item.start ? parseLocalISO(item.start)?.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "All day"}
-                                    </p>
+            {allByDay.map(({ date, items }) => {
+                const isToday = isSameDay(date, new Date());
+                // Group items by hour for time-collision display
+                const byHour = {};
+                items.forEach(item => {
+                    const dt = parseLocalISO(item._sortTime);
+                    const key = dt ? `${dt.getHours()}:${String(dt.getMinutes()).padStart(2, "0")}` : "all-day";
+                    if (!byHour[key]) byHour[key] = [];
+                    byHour[key].push(item);
+                });
+
+                return (
+                    <div key={date.toDateString()} style={{ display: "grid", gridTemplateColumns: "72px 1fr", borderBottom: "2px solid #f1f3f4" }}>
+                        {/* Date column */}
+                        <div style={{ padding: "16px 8px 16px 16px", textAlign: "right", borderRight: "2px solid #e0e0e0", background: isToday ? "#EBF3FE" : "#fff" }}>
+                            <div style={{ fontSize: 11, color: isToday ? "#1a73e8" : "#70757a", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                {DAYS[date.getDay()]}
+                            </div>
+                            <div style={{ fontSize: 28, color: isToday ? "#1a73e8" : "#202124", fontWeight: isToday ? 700 : 400, lineHeight: 1.2 }}>
+                                {date.getDate()}
+                            </div>
+                            <div style={{ fontSize: 11, color: isToday ? "#1a73e8" : "#70757a" }}>
+                                {MONTHS[date.getMonth()].slice(0, 3)}
+                            </div>
+                            <div style={{ fontSize: 10, color: "#9aa0a6", marginTop: 4 }}>
+                                {items.length} item{items.length !== 1 ? "s" : ""}
+                            </div>
+                        </div>
+
+                        {/* Items column */}
+                        <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
+                            {Object.entries(byHour).map(([timeKey, timeItems]) => (
+                                <div key={timeKey}>
+                                    {/* Time header — shown once for all items at this time */}
+                                    {timeKey !== "all-day" && (
+                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, marginTop: 6 }}>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: "#70757a", minWidth: 40, textAlign: "right" }}>
+                                                {timeKey}
+                                            </span>
+                                            <div style={{ flex: 1, height: 1, background: "#f1f3f4" }} />
+                                            {timeItems.length > 1 && (
+                                                <span style={{ fontSize: 10, color: "#9aa0a6", background: "#f1f3f4", padding: "1px 6px", borderRadius: 99 }}>
+                                                    {timeItems.length} at same time
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                    {/* Items at this time */}
+                                    {timeItems.map(item => {
+                                        const cfg = typeConfig[item._t] || typeConfig.event;
+                                        const dt = parseLocalISO(item._sortTime);
+                                        const timeStr = dt ? dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "All day";
+                                        return (
+                                            <div key={item.id}
+                                                onClick={() => onItemClick(item)}
+                                                style={{
+                                                    display: "flex", alignItems: "center", gap: 12,
+                                                    padding: "9px 12px", borderRadius: 8,
+                                                    background: "#fff", cursor: "pointer",
+                                                    border: "1px solid #e8eaed",
+                                                    borderLeft: `4px solid ${item.color || "#1a73e8"}`,
+                                                    marginLeft: timeKey !== "all-day" ? 48 : 0,
+                                                    transition: "box-shadow 0.1s",
+                                                }}
+                                                onMouseEnter={e => e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.09)"}
+                                                onMouseLeave={e => e.currentTarget.style.boxShadow = "none"}
+                                            >
+                                                {/* Type badge */}
+                                                <span style={{
+                                                    fontSize: 11, fontWeight: 700, padding: "3px 8px",
+                                                    borderRadius: 20, background: cfg.bg, color: cfg.txt,
+                                                    white: "nowrap", flexShrink: 0,
+                                                    display: "flex", alignItems: "center", gap: 4,
+                                                }}>
+                                                    {cfg.icon} {cfg.label}
+                                                </span>
+
+                                                {/* Content */}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "#202124", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                        {item.title}
+                                                    </p>
+                                                    {item.description && (
+                                                        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#80868b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                            {item.description}
+                                                        </p>
+                                                    )}
+                                                    {/* Meeting: show participant count */}
+                                                    {item._t === "meeting" && item.participants?.length > 0 && (
+                                                        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#80868b" }}>
+                                                            👥 {item.participants.length} participant{item.participants.length !== 1 ? "s" : ""}
+                                                        </p>
+                                                    )}
+                                                    {/* Note: show keypoints count */}
+                                                    {item._t === "note" && item.keypoints?.length > 0 && (
+                                                        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#80868b" }}>
+                                                            {item.keypoints.length} key point{item.keypoints.length !== 1 ? "s" : ""}
+                                                        </p>
+                                                    )}
+                                                </div>
+
+                                                {/* Time + status */}
+                                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
+                                                    <span style={{ fontSize: 11, color: "#70757a", fontWeight: 500 }}>{timeStr}</span>
+                                                    {item.status && (
+                                                        <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 99, background: `${item.color}20`, color: item.color, fontWeight: 600 }}>
+                                                            {item.status.replace("_", " ")}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                                {item._t === "task" && <span style={{ fontSize: 11, background: item.color, color: "#fff", padding: "2px 8px", borderRadius: 10, fontWeight: 500 }}>{item.type}</span>}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-}
-
-// ─────────────────────────────────────────────────────────
-//  CREATE EVENT MODAL
-// ─────────────────────────────────────────────────────────
-function CreateEventModal({ start, end, onClose, onSave }) {
-    const [tab, setTab] = useState("event");  // event|task|appointment
-    const [title, setTitle] = useState("");
-    const [sTime, setSTime] = useState(start);
-    const [eTime, setETime] = useState(end);
-    const [color, setColor] = useState("#1a73e8");
-    const [desc, setDesc] = useState("");
-    const [location, setLoc] = useState("");
-    const [guests, setGuests] = useState("");
-
-    const handleSave = () => {
-        if (!title.trim()) return;
-        onSave({ title: title.trim(), start: sTime, end: eTime, color, description: desc, location, type: tab });
-    };
-
-    return (
-        <div style={ms.overlay} onClick={onClose}>
-            <div style={ms.modal} onClick={e => e.stopPropagation()}>
-                {/* Header */}
-                <div style={ms.modalHeader}>
-                    <span style={{ color: "#5f6368", fontSize: 18, cursor: "pointer" }}>☰</span>
-                    <button style={ms.closeBtn} onClick={onClose}>✕</button>
-                </div>
-
-                {/* Title input */}
-                <input style={ms.titleInput} value={title} onChange={e => setTitle(e.target.value)}
-                    placeholder="Add title" autoFocus onKeyDown={e => e.key === "Enter" && handleSave()} />
-
-                {/* Tabs: Event / Task / Appointment */}
-                <div style={ms.tabs}>
-                    {["event", "task", "appointment"].map(t => (
-                        <button key={t} onClick={() => setTab(t)}
-                            style={{ ...ms.tab, ...(tab === t ? ms.tabActive : {}) }}>
-                            {t === "appointment" ? "Appointment schedule" : t.charAt(0).toUpperCase() + t.slice(1)}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Body */}
-                <div style={ms.modalBody}>
-                    {/* Date/time */}
-                    <div style={ms.row}>
-                        <span style={ms.icon}>🕐</span>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <input type="datetime-local" style={ms.dtInput} value={sTime} onChange={e => setSTime(e.target.value)} />
-                                <span style={{ alignSelf: "center", color: "#5f6368" }}>–</span>
-                                <input type="datetime-local" style={ms.dtInput} value={eTime} onChange={e => setETime(e.target.value)} />
-                            </div>
-                            <div style={{ fontSize: 12, color: "#5f6368", marginTop: 4 }}>
-                                Time zone · Doesn't repeat
-                            </div>
-                        </div>
-                    </div>
-
-                    {tab === "event" && <>
-                        {/* Guests */}
-                        <div style={ms.row}>
-                            <span style={ms.icon}>👥</span>
-                            <input style={ms.textInput} value={guests} onChange={e => setGuests(e.target.value)} placeholder="Add guests" />
-                        </div>
-                        {/* Google Meet */}
-                        <div style={ms.row}>
-                            <span style={ms.icon}>🎥</span>
-                            <span style={{ fontSize: 14, color: "#202124", cursor: "pointer", color: "#1a73e8" }}>Add Google Meet video conferencing</span>
-                        </div>
-                        {/* Location */}
-                        <div style={ms.row}>
-                            <span style={ms.icon}>📍</span>
-                            <input style={ms.textInput} value={location} onChange={e => setLoc(e.target.value)} placeholder="Add location" />
-                        </div>
-                    </>}
-
-                    {tab === "task" && (
-                        <div style={ms.row}>
-                            <span style={ms.icon}>🎯</span>
-                            <input style={ms.textInput} placeholder="Add deadline" />
-                        </div>
-                    )}
-
-                    {/* Description */}
-                    <div style={ms.row}>
-                        <span style={ms.icon}>≡</span>
-                        <textarea style={{ ...ms.textInput, height: 60, resize: "none" }} value={desc} onChange={e => setDesc(e.target.value)}
-                            placeholder={tab === "event" ? "Add description or a Google Drive attachment" : "Add description"} />
-                    </div>
-
-                    {/* Color picker */}
-                    <div style={ms.row}>
-                        <span style={ms.icon}>🎨</span>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {COLORS.map(c => (
-                                <div key={c} onClick={() => setColor(c)}
-                                    style={{ width: 20, height: 20, borderRadius: "50%", background: c, cursor: "pointer", border: `2px solid ${color === c ? "#202124" : "transparent"}`, transition: "transform 0.1s" }} />
                             ))}
                         </div>
                     </div>
-
-                    {/* Calendar selector */}
-                    <div style={ms.row}>
-                        <span style={ms.icon}>📅</span>
-                        <div>
-                            <div style={{ fontSize: 14, color: "#202124", fontWeight: 500 }}>Grav It dept</div>
-                            <div style={{ fontSize: 12, color: "#5f6368" }}>
-                                {tab === "event" ? "Busy · Default visibility · Notify 30 minutes before" : "Free · Private"}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Footer */}
-                <div style={ms.modalFooter}>
-                    <button style={ms.moreBtn}>More options</button>
-                    <button style={ms.saveBtn} onClick={handleSave} disabled={!title.trim()}>Save</button>
-                </div>
-            </div>
+                );
+            })}
         </div>
     );
 }
+
+
 
 // ─────────────────────────────────────────────────────────
 //  VIEW EVENT MODAL
@@ -863,6 +926,118 @@ function ViewTaskModal({ task, onClose, onNavigate }) {
                             Open Task →
                         </button>
                     )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────
+//  VIEW MEETING MODAL
+// ─────────────────────────────────────────────────────────
+function ViewMeetingModal({ item, onClose, onNavigate }) {
+    const dt = item.time ? new Date(item.time) : item.date ? new Date(item.date) : null;
+    return (
+        <div style={ms.overlay} onClick={onClose}>
+            <div style={{ ...ms.modal, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+                <div style={ms.modalHeader}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: 3, background: "#1e8e3e" }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#1e8e3e", textTransform: "uppercase", letterSpacing: "0.5px" }}>Meeting</span>
+                    </div>
+                    <button style={ms.closeBtn} onClick={onClose}>✕</button>
+                </div>
+                <div style={{ padding: "4px 16px 20px" }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 500, color: "#202124", margin: "8px 0 16px" }}>{item.title}</h2>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {dt && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 14 }}>
+                                <span>📅</span>
+                                <span style={{ color: "#202124" }}>
+                                    {dt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                                    {" at "}
+                                    {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                            </div>
+                        )}
+                        {item.description && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", fontSize: 14 }}>
+                                <span>📝</span>
+                                <span style={{ color: "#5f6368" }}>{item.description}</span>
+                            </div>
+                        )}
+                        {item.participants?.length > 0 && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 14 }}>
+                                <span>👥</span>
+                                <span style={{ color: "#202124" }}>{item.participants.length} participant{item.participants.length !== 1 ? "s" : ""}</span>
+                            </div>
+                        )}
+                        {item.meetId && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 14 }}>
+                                <span>🆔</span>
+                                <span style={{ fontFamily: "monospace", color: "#5f6368", fontSize: 12 }}>{item.meetId}</span>
+                            </div>
+                        )}
+                    </div>
+                    {item.meetId && (
+                        <button onClick={() => onNavigate(item.meetId)}
+                            style={{ marginTop: 20, width: "100%", padding: 10, background: "#1e8e3e", color: "#fff", border: "none", borderRadius: 4, fontSize: 14, fontWeight: 500, cursor: "pointer" }}>
+                            Join Meeting →
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────
+//  VIEW NOTE REMINDER MODAL
+// ─────────────────────────────────────────────────────────
+function ViewNoteModal({ item, onClose }) {
+    const dt = item.time ? new Date(item.time) : null;
+    const isOverdue = dt && dt < new Date();
+    return (
+        <div style={ms.overlay} onClick={onClose}>
+            <div style={{ ...ms.modal, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+                <div style={ms.modalHeader}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 12, height: 12, borderRadius: 3, background: "#9334e9" }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#9334e9", textTransform: "uppercase", letterSpacing: "0.5px" }}>Note Reminder</span>
+                        {isOverdue && <span style={{ fontSize: 11, background: "#fce8e6", color: "#d93025", padding: "1px 7px", borderRadius: 10 }}>Overdue</span>}
+                    </div>
+                    <button style={ms.closeBtn} onClick={onClose}>✕</button>
+                </div>
+                <div style={{ padding: "4px 16px 20px" }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 500, color: "#202124", margin: "8px 0 16px" }}>{item.title}</h2>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {dt && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 14 }}>
+                                <span>⏰</span>
+                                <span style={{ color: isOverdue ? "#d93025" : "#202124", fontWeight: 500 }}>
+                                    {dt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                                    {" at "}
+                                    {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                            </div>
+                        )}
+                        {item.description && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", fontSize: 14 }}>
+                                <span>📝</span>
+                                <span style={{ color: "#5f6368", lineHeight: 1.5 }}>{item.description}</span>
+                            </div>
+                        )}
+                        {item.keypoints?.length > 0 && (
+                            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", fontSize: 14 }}>
+                                <span>•</span>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {item.keypoints.map((kp, i) => (
+                                        <span key={i} style={{ color: "#202124", fontSize: 13 }}>{i + 1}. {kp}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
