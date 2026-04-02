@@ -1,60 +1,136 @@
 // hooks/useMeetingTranscript.js
+//
+// MERGED VERSION:
+// - Firebase real-time persistence (save every line, load on mount, 24h TTL)
+// - Panel stays mounted via CSS display:none (no data loss on hide/show)
+// - Odia mode = en-IN recognition → prints English words (no Odia script issues)
+// - Hindi mode = hi-IN (Hindi + English auto-detect)
+// - English mode = en-IN
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRoomContext, useLocalParticipant } from "@livekit/components-react";
-import { RoomEvent, ParticipantEvent, Track } from "livekit-client";
+import { RoomEvent, Track } from "livekit-client";
+import { firebaseDb } from "../lib/coworkFirebase";
+import {
+    collection, doc, setDoc, getDocs, query, orderBy, serverTimestamp,
+} from "firebase/firestore";
 
 const TOPIC = "meeting-transcript";
 
-// WHY ONE INSTANCE ONLY (not 3 parallel):
-// Running 3 recognition instances simultaneously causes Chrome to throttle/block them.
-// That was the "not detecting voice" bug — Chrome only allows ONE SpeechRecognition
-// instance to use the mic at a time. The others silently fail.
-//
-// SOLUTION:
-// - Hindi + English auto-detect: use lang="hi-IN" which handles BOTH Hindi script
-//   AND English words in the same utterance (Google's Indian language model is bilingual)
-// - Odia: user clicks "Odia" button → switch lang to "or-IN"
-//   or-IN may not work on all devices; if it fails, falls back to "hi-IN"
-//
-// WHY speakingRef GATE WAS BREAKING DETECTION:
-// IsSpeakingChanged fires based on LiveKit audio levels, but there's a delay.
-// If the gate was checked BEFORE LiveKit detected speaking, results were ignored.
-// FIX: removed the speakingRef gate entirely. Instead we rely on ONLY the mic mute gate.
-// The duplicate issue is solved differently: each browser only sends its OWN name.
+// ── Language config ───────────────────────────────────────────────────────────
+export const SUPPORTED_LANGS = {
+    HINDI: { code: "hi-IN", label: "हि/En", recognitionLang: "hi-IN", hint: "Hindi + English auto-detect" },
+    ENGLISH: { code: "en-IN", label: "English", recognitionLang: "en-IN", hint: "English only" },
+    ODIA: { code: "odia", label: "ଓଡ଼ିଆ", recognitionLang: "en-IN", hint: "Speak Odia — prints English words" },
+};
 
-export function useMeetingTranscript({ participantName }) {
+// ── Firestore helpers ─────────────────────────────────────────────────────────
+
+async function saveLineToFirestore(meetId, line) {
+    if (!meetId || !line) return;
+    try {
+        const lineId = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const deleteAtMs = Date.now() + 24 * 60 * 60 * 1000; // 24h TTL
+        await setDoc(
+            doc(firebaseDb, "meeting_transcripts", meetId, "lines", lineId),
+            {
+                lineId, meetId,
+                name: line.name, text: line.text, time: line.time,
+                language: line.language || "hi-IN",
+                createdAt: serverTimestamp(),
+                deleteAtMs,
+            }
+        );
+        // Ensure parent doc exists with TTL
+        await setDoc(
+            doc(firebaseDb, "meeting_transcripts", meetId),
+            { meetId, deleteAtMs, updatedAt: serverTimestamp() },
+            { merge: true }
+        );
+    } catch (e) {
+        console.warn("saveLineToFirestore:", e.message);
+    }
+}
+
+async function loadLinesFromFirestore(meetId) {
+    if (!meetId) return [];
+    try {
+        const snap = await getDocs(
+            query(
+                collection(firebaseDb, "meeting_transcripts", meetId, "lines"),
+                orderBy("createdAt", "asc")
+            )
+        );
+        return snap.docs.map(d => ({
+            name: d.data().name,
+            text: d.data().text,
+            time: d.data().time,
+            language: d.data().language || "hi-IN",
+        }));
+    } catch (e) {
+        console.warn("loadLinesFromFirestore:", e.message);
+        return [];
+    }
+}
+
+// ── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useMeetingTranscript({ participantName, meetId }) {
     const room = useRoomContext();
     const { localParticipant } = useLocalParticipant();
 
     const [transcript, setTranscript] = useState([]);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(true);
-    const [activeLang, setActiveLang] = useState("hi-IN"); // hi-IN = Hindi+English auto
+    const [activeLang, setActiveLang] = useState(SUPPORTED_LANGS.HINDI.code);
+    const [activeRecognitionLang, setActiveRecognitionLang] = useState(SUPPORTED_LANGS.HINDI.recognitionLang);
 
+    // Refs — mirror state for use in callbacks without stale closures
+    const transcriptRef = useRef([]);
     const recognitionRef = useRef(null);
     const runningRef = useRef(false);
     const micOnRef = useRef(false);
     const localPartRef = useRef(null);
     const nameRef = useRef(participantName);
-    const activeLangRef = useRef("hi-IN");
+    const activeLangRef = useRef(SUPPORTED_LANGS.HINDI.code);
+    const activeRecognitionLangRef = useRef(SUPPORTED_LANGS.HINDI.recognitionLang);
+    const meetIdRef = useRef(meetId);
+    const loadedRef = useRef(false);
 
+    // Keep refs fresh every render
     localPartRef.current = localParticipant;
     nameRef.current = participantName;
     activeLangRef.current = activeLang;
+    activeRecognitionLangRef.current = activeRecognitionLang;
+    meetIdRef.current = meetId;
 
-    // ── RECEIVE lines from other participants via DataChannel ─────────────────
+    // ── Load existing lines from Firestore on first mount ─────────────────────
+    useEffect(() => {
+        if (!meetId || loadedRef.current) return;
+        loadedRef.current = true;
+        loadLinesFromFirestore(meetId).then(lines => {
+            if (lines.length > 0) {
+                transcriptRef.current = lines;
+                setTranscript([...lines]);
+            }
+        });
+    }, [meetId]);
+
+    // ── Add line: update ref + state + save to Firestore ─────────────────────
+    const addLine = useCallback((line) => {
+        transcriptRef.current = [...transcriptRef.current, line];
+        setTranscript([...transcriptRef.current]);
+        saveLineToFirestore(meetIdRef.current, line);
+    }, []);
+
+    // ── Receive lines from other participants via DataChannel ─────────────────
     const onDataRef = useRef(null);
     onDataRef.current = (payload, participant, kind, topic) => {
         if (topic !== TOPIC) return;
         try {
             const data = JSON.parse(new TextDecoder().decode(payload));
             if (data.type === "tx") {
-                setTranscript(prev => [...prev, {
-                    name: data.name,
-                    text: data.text,
-                    time: data.time,
-                }]);
+                addLine({ name: data.name, text: data.text, time: data.time, language: data.language });
             }
         } catch (e) { }
     };
@@ -66,7 +142,7 @@ export function useMeetingTranscript({ participantName }) {
         return () => room.off(RoomEvent.DataReceived, h);
     }, [room]);
 
-    // ── SEND my own transcript line ───────────────────────────────────────────
+    // ── Send my own transcript line ───────────────────────────────────────────
     const sendLineRef = useRef(null);
     sendLineRef.current = (text) => {
         if (!text?.trim()) return;
@@ -76,10 +152,11 @@ export function useMeetingTranscript({ participantName }) {
             name: myName,
             text: text.trim(),
             time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+            language: activeLangRef.current, // "hi-IN", "en-IN", or "odia"
         };
-        // Add to own transcript immediately
-        setTranscript(prev => [...prev, line]);
-        // Broadcast to all other participants
+        // Add locally + persist
+        addLine({ name: line.name, text: line.text, time: line.time, language: line.language });
+        // Broadcast to others
         const lp = localPartRef.current;
         if (lp) {
             const payload = new TextEncoder().encode(JSON.stringify(line));
@@ -88,16 +165,16 @@ export function useMeetingTranscript({ participantName }) {
         }
     };
 
-    // ── Build a fresh SpeechRecognition instance ──────────────────────────────
-    const buildRecognition = useCallback((langCode) => {
+    // ── Build SpeechRecognition instance ─────────────────────────────────────
+    const buildRecognition = useCallback((recognitionLangCode) => {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) { setSpeechSupported(false); return null; }
 
         const r = new SR();
-        r.continuous = true;   // keeps listening, handles long sentences
-        r.interimResults = false;  // only final results — cleaner output, no partials
+        r.continuous = true;
+        r.interimResults = false;
         r.maxAlternatives = 1;
-        r.lang = langCode;
+        r.lang = recognitionLangCode;
 
         r.onresult = (event) => {
             for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -110,8 +187,7 @@ export function useMeetingTranscript({ participantName }) {
 
         r.onend = () => {
             runningRef.current = false;
-            // Auto-restart only if mic is still ON
-            // This handles: silence timeout, network blip, etc.
+            // Auto-restart if mic still ON — handles silence timeout, network blip
             if (micOnRef.current) {
                 setTimeout(() => {
                     const rec = recognitionRef.current;
@@ -130,19 +206,6 @@ export function useMeetingTranscript({ participantName }) {
                 setSpeechSupported(false);
                 micOnRef.current = false;
                 setIsTranscribing(false);
-                return;
-            }
-            if (event.error === "language-not-supported") {
-                // or-IN not available on this device → fall back to hi-IN
-                console.warn(`Language ${langCode} not supported, falling back to hi-IN`);
-                if (langCode === "or-IN") {
-                    const fallback = buildRecognition("hi-IN");
-                    if (fallback) {
-                        recognitionRef.current = fallback;
-                        try { fallback.start(); runningRef.current = true; } catch (e) { }
-                    }
-                }
-                return;
             }
             // "no-speech", "network", "aborted" → onend fires → auto-restart handles it
         };
@@ -151,25 +214,17 @@ export function useMeetingTranscript({ participantName }) {
     }, []);
 
     // ── Start recognition ─────────────────────────────────────────────────────
-    const startRecognition = useCallback((langCode) => {
-        // Stop any existing instance first
+    const startRecognition = useCallback((recognitionLangCode) => {
         if (recognitionRef.current) {
             runningRef.current = false;
             try { recognitionRef.current.abort(); } catch (e) { }
             recognitionRef.current = null;
         }
-
-        const r = buildRecognition(langCode);
+        const r = buildRecognition(recognitionLangCode);
         if (!r) return;
-
         recognitionRef.current = r;
-        try {
-            r.start();
-            runningRef.current = true;
-            setIsTranscribing(true);
-        } catch (e) {
-            console.warn("recognition.start() failed:", e.message);
-        }
+        try { r.start(); runningRef.current = true; setIsTranscribing(true); }
+        catch (e) { console.warn("recognition.start():", e.message); }
     }, [buildRecognition]);
 
     // ── Stop recognition ──────────────────────────────────────────────────────
@@ -182,51 +237,56 @@ export function useMeetingTranscript({ participantName }) {
         setIsTranscribing(false);
     }, []);
 
-    // ── GATE: watch mic mute state every 500ms ────────────────────────────────
+    // ── Watch mic mute every 500ms — runs in background regardless of sidebar ─
     useEffect(() => {
         if (!localParticipant) return;
-
         const checkMute = () => {
             const pub = localParticipant.getTrackPublication(Track.Source.Microphone);
             const muted = !pub || pub.isMuted;
             const was = micOnRef.current;
             micOnRef.current = !muted;
-
-            if (!muted && !was) {
-                // Mic just turned ON → start
-                startRecognition(activeLangRef.current);
-            } else if (muted && was) {
-                // Mic just turned OFF → stop
-                stopRecognition();
-            }
+            if (!muted && !was) startRecognition(activeRecognitionLangRef.current);
+            else if (muted && was) stopRecognition();
         };
-
         const interval = setInterval(checkMute, 500);
-        checkMute(); // immediate check on mount
-
-        return () => {
-            clearInterval(interval);
-            micOnRef.current = false;
-            stopRecognition();
-        };
+        checkMute();
+        return () => { clearInterval(interval); micOnRef.current = false; stopRecognition(); };
     }, [localParticipant, startRecognition, stopRecognition]);
 
-    // ── Language switch (called when user clicks Odia/Hindi/English button) ───
+    // ── Switch language ───────────────────────────────────────────────────────
     const switchLanguage = useCallback((langCode) => {
-        setActiveLang(langCode);
-        activeLangRef.current = langCode;
-        // If mic is currently ON, restart recognition with new language immediately
-        if (micOnRef.current) {
-            startRecognition(langCode);
+        let recognitionLang;
+        let displayLang = langCode;
+
+        if (langCode === SUPPORTED_LANGS.HINDI.code) {
+            recognitionLang = SUPPORTED_LANGS.HINDI.recognitionLang;   // "hi-IN"
+        } else if (langCode === SUPPORTED_LANGS.ENGLISH.code) {
+            recognitionLang = SUPPORTED_LANGS.ENGLISH.recognitionLang; // "en-IN"
+        } else if (langCode === SUPPORTED_LANGS.ODIA.code) {
+            // Odia = use en-IN recognition → prints English words of what user said
+            // Simple, reliable, works in all browsers — no or-IN dependency
+            recognitionLang = SUPPORTED_LANGS.ODIA.recognitionLang;    // "en-IN"
+            displayLang = SUPPORTED_LANGS.ODIA.code;               // "odia"
+        } else {
+            console.warn(`Unknown lang ${langCode}, defaulting to Hindi`);
+            recognitionLang = SUPPORTED_LANGS.HINDI.recognitionLang;
+            displayLang = SUPPORTED_LANGS.HINDI.code;
         }
+
+        setActiveLang(displayLang);
+        setActiveRecognitionLang(recognitionLang);
+        activeLangRef.current = displayLang;
+        activeRecognitionLangRef.current = recognitionLang;
+
+        if (micOnRef.current) startRecognition(recognitionLang);
     }, [startRecognition]);
 
     return {
         transcript,
         isTranscribing,
         speechSupported,
-        activeLang,
+        activeLang,      // "hi-IN" | "en-IN" | "odia"
         switchLanguage,
-        clearTranscript: () => setTranscript([]),
+        clearTranscript: () => { transcriptRef.current = []; setTranscript([]); },
     };
 }

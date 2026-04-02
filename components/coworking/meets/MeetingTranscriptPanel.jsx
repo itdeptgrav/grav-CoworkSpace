@@ -2,7 +2,7 @@
 // components/coworking/meeting/MeetingTranscriptPanel.jsx
 
 import { useEffect, useRef, useState } from "react";
-import { useMeetingTranscript } from "../../../hooks/useMeetingTranscript";
+import { useMeetingTranscript, SUPPORTED_LANGS } from "../../../hooks/useMeetingTranscript";
 import { downloadTranscriptDocx } from "../../../lib/generateTranscriptDocx";
 import { saveTranscript } from "../../../lib/transcriptApi";
 
@@ -18,11 +18,11 @@ function speakerColor(name) {
     return colorMap[name];
 }
 
-// Language options
-// hi-IN auto-detects both Hindi and English — no button needed for those two
-const LANGS = [
-    { code: "hi-IN", label: "हि/En", title: "Hindi + English (auto-detect)" },
-    { code: "or-IN", label: "ଓଡ଼ିଆ", title: "Odia — click before speaking Odia" },
+// Language buttons shown in panel
+const LANG_BUTTONS = [
+    { code: SUPPORTED_LANGS.HINDI.code, label: "हि/En", title: "Hindi + English (auto-detect)" },
+    { code: SUPPORTED_LANGS.ENGLISH.code, label: "English", title: "English only" },
+    { code: SUPPORTED_LANGS.ODIA.code, label: "ଓଡ଼ିଆ", title: "Odia mode — prints English words of what you say" },
 ];
 
 export default function MeetingTranscriptPanel({
@@ -40,7 +40,7 @@ export default function MeetingTranscriptPanel({
         activeLang,
         switchLanguage,
         clearTranscript,
-    } = useMeetingTranscript({ participantName });
+    } = useMeetingTranscript({ participantName, meetId });
 
     const [saving, setSaving] = useState(false);
     const [savedMsg, setSavedMsg] = useState("");
@@ -75,6 +75,18 @@ export default function MeetingTranscriptPanel({
         }
     };
 
+    // Status text based on mode
+    const statusText = () => {
+        if (!speechSupported) return { icon: "⚠️", text: "Use Chrome or Edge", style: S.warn };
+        if (!isTranscribing) return { icon: "🔇", text: "Unmute mic to start", style: S.gray };
+        if (activeLang === SUPPORTED_LANGS.ODIA.code)
+            return { icon: "🎙️", text: "Odia mode — printing English words", style: S.green };
+        if (activeLang === SUPPORTED_LANGS.ENGLISH.code)
+            return { icon: "🎙️", text: "Listening — English", style: S.green };
+        return { icon: "🎙️", text: "Listening — Hindi/English auto", style: S.green };
+    };
+    const status = statusText();
+
     return (
         <div style={S.panel}>
 
@@ -89,34 +101,30 @@ export default function MeetingTranscriptPanel({
 
             {/* Status */}
             <div style={S.statusBar}>
-                {!speechSupported
-                    ? <span style={S.warn}>⚠️ Use Chrome or Edge</span>
-                    : isTranscribing
-                        ? <span style={S.green}>🎙️ Listening — {activeLang === "or-IN" ? "Odia mode" : "Hindi/English auto"}</span>
-                        : <span style={S.gray}>🔇 Unmute mic to start</span>
-                }
+                <span style={status.style}>{status.icon} {status.text}</span>
             </div>
 
             {/* Language selector */}
             <div style={S.langRow}>
                 <span style={S.langLabel}>Language:</span>
-                {LANGS.map(l => (
+                {LANG_BUTTONS.map(l => (
                     <button
                         key={l.code}
                         onClick={() => switchLanguage(l.code)}
                         title={l.title}
-                        style={{
-                            ...S.langBtn,
-                            ...(activeLang === l.code ? S.langActive : {}),
-                        }}
+                        style={{ ...S.langBtn, ...(activeLang === l.code ? S.langActive : {}) }}
                     >
                         {l.label}
                     </button>
                 ))}
-                <span style={S.langHint}>
-                    {activeLang === "or-IN" ? "← Odia active" : "← Auto"}
-                </span>
             </div>
+
+            {/* Odia info banner */}
+            {activeLang === SUPPORTED_LANGS.ODIA.code && (
+                <div style={S.odiaBanner}>
+                    ℹ️ Odia mode — speak normally. Your words will be printed in English.
+                </div>
+            )}
 
             {/* Saved message */}
             {savedMsg && (
@@ -136,17 +144,24 @@ export default function MeetingTranscriptPanel({
                         <div style={{ fontWeight: 600, marginBottom: 6 }}>No transcript yet</div>
                         <div style={{ fontSize: 11, color: "#5F6368", lineHeight: 1.7 }}>
                             • Unmute mic → Hindi &amp; English auto-detected<br />
-                            • For Odia: click <strong style={{ color: "#60A5FA" }}>ଓଡ଼ିଆ</strong> button first, then speak
+                            • For English only: click <strong style={{ color: "#60A5FA" }}>English</strong><br />
+                            • For Odia: click <strong style={{ color: "#60A5FA" }}>ଓଡ଼ିଆ</strong> — your speech prints as English words
                         </div>
                     </div>
                 ) : (
                     <>
                         {transcript.map((line, i) => {
                             const color = speakerColor(line.name);
+                            const isOdia = line.language === SUPPORTED_LANGS.ODIA.code;
                             return (
                                 <div key={i} style={{ ...S.line, borderLeftColor: color }}>
                                     <div style={S.lineTop}>
-                                        <span style={{ ...S.speaker, color }}>{line.name}</span>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                            <span style={{ ...S.speaker, color }}>{line.name}</span>
+                                            {isOdia && (
+                                                <span style={S.odiaBadge}>Odia→En</span>
+                                            )}
+                                        </div>
                                         <span style={S.time}>{line.time}</span>
                                     </div>
                                     <div style={S.text}>{line.text}</div>
@@ -168,7 +183,7 @@ export default function MeetingTranscriptPanel({
                     {saving ? "⏳ Saving..." : "💾 Save & Download"}
                 </button>
                 {transcript.length > 0 && (
-                    <button onClick={() => confirm("Clear?") && clearTranscript()} style={S.clearBtn} title="Clear">🗑️</button>
+                    <button onClick={() => confirm("Clear transcript?") && clearTranscript()} style={S.clearBtn} title="Clear">🗑️</button>
                 )}
             </div>
 
@@ -188,13 +203,12 @@ const S = {
     green: { fontSize: 12, color: "#4ADE80" },
     gray: { fontSize: 12, color: "#6B7280" },
     warn: { fontSize: 12, color: "#F59E0B" },
-    // Language row
     langRow: { display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderBottom: "1px solid #2A2A2A", flexShrink: 0, flexWrap: "wrap" },
     langLabel: { fontSize: 11, color: "#5F6368", fontWeight: 600, marginRight: 2 },
     langBtn: { padding: "5px 12px", border: "1px solid #3C4043", borderRadius: 99, background: "#2A2A2A", color: "#9AA0A6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" },
     langActive: { background: "#1E3A5F", color: "#60A5FA", border: "1px solid #3B82F6" },
-    langHint: { fontSize: 10, color: "#4B5563", marginLeft: 2 },
-    // Body
+    odiaBanner: { padding: "7px 14px", background: "rgba(251,191,36,0.08)", border: "none", borderBottom: "1px solid #2A2A2A", fontSize: 11, color: "#FCD34D", flexShrink: 0 },
+    odiaBadge: { fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, background: "rgba(251,191,36,0.15)", color: "#FCD34D", border: "1px solid rgba(251,191,36,0.3)" },
     body: { flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 },
     empty: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9AA0A6", fontSize: 13, textAlign: "center", paddingTop: 30 },
     line: { background: "#242424", borderRadius: 8, padding: "8px 10px", borderLeft: "3px solid #1A73E8", flexShrink: 0 },
