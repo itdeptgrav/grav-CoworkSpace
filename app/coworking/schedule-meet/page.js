@@ -11,7 +11,7 @@ export default function MeetsPage() {
   const router = useRouter();
   const { meets, loading: ml } = useCoworkMeets();
   const [tab, setTab] = useState("upcoming");
-  useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading]);
+  useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading]);
   if (loading || !user) return null;
   const now = new Date();
   const upcoming = meets.filter(m => new Date(m.dateTime) >= now && !m.isCancelled);

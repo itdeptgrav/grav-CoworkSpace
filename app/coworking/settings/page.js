@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
 
-  useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading]);
+  useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading]);
   if (loading || !user) return null;
 
   const handleChange = async (e) => {

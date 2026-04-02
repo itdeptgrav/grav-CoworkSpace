@@ -1,29 +1,27 @@
 // hooks/useMeetingTranscript.js
-//
-// THE FIX FOR DUPLICATE / WRONG-NAME TRANSCRIPTION:
-//
-// WRONG approach (causes duplicates):
-//   new SpeechRecognition()  ← uses system default mic
-//   The system mic picks up room audio through speakers too.
-//   So CEO's browser hears OMM speaking through speakers → transcribes as "CEO: [OMM's words]"
-//
-// CORRECT approach (this file):
-//   Get the LocalAudioTrack's MediaStreamTrack from LiveKit SDK.
-//   Create a NEW MediaStream containing ONLY that isolated track.
-//   Feed it directly into SpeechRecognition via audioTrack property.
-//   This stream contains ONLY this person's own microphone input.
-//   It CANNOT pick up room audio — it is a direct capture of their mic only.
-//   Result: each person only ever transcribes their own voice. Zero duplicates.
-//
-// BROWSER INDEPENDENCE:
-//   Works in Chrome AND Edge (both support webkitSpeechRecognition + audioTrack).
-//   Firefox does not support SpeechRecognition — users see a clear message.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRoomContext, useLocalParticipant } from "@livekit/components-react";
-import { RoomEvent, Track } from "livekit-client";
+import { RoomEvent, ParticipantEvent, Track } from "livekit-client";
 
 const TOPIC = "meeting-transcript";
+
+// WHY ONE INSTANCE ONLY (not 3 parallel):
+// Running 3 recognition instances simultaneously causes Chrome to throttle/block them.
+// That was the "not detecting voice" bug — Chrome only allows ONE SpeechRecognition
+// instance to use the mic at a time. The others silently fail.
+//
+// SOLUTION:
+// - Hindi + English auto-detect: use lang="hi-IN" which handles BOTH Hindi script
+//   AND English words in the same utterance (Google's Indian language model is bilingual)
+// - Odia: user clicks "Odia" button → switch lang to "or-IN"
+//   or-IN may not work on all devices; if it fails, falls back to "hi-IN"
+//
+// WHY speakingRef GATE WAS BREAKING DETECTION:
+// IsSpeakingChanged fires based on LiveKit audio levels, but there's a delay.
+// If the gate was checked BEFORE LiveKit detected speaking, results were ignored.
+// FIX: removed the speakingRef gate entirely. Instead we rely on ONLY the mic mute gate.
+// The duplicate issue is solved differently: each browser only sends its OWN name.
 
 export function useMeetingTranscript({ participantName }) {
     const room = useRoomContext();
@@ -32,20 +30,20 @@ export function useMeetingTranscript({ participantName }) {
     const [transcript, setTranscript] = useState([]);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(true);
+    const [activeLang, setActiveLang] = useState("hi-IN"); // hi-IN = Hindi+English auto
 
-    // Stable refs
     const recognitionRef = useRef(null);
     const runningRef = useRef(false);
-    const shouldRunRef = useRef(false);
-    const roomRef = useRef(null);
+    const micOnRef = useRef(false);
     const localPartRef = useRef(null);
     const nameRef = useRef(participantName);
+    const activeLangRef = useRef("hi-IN");
 
-    roomRef.current = room;
     localPartRef.current = localParticipant;
     nameRef.current = participantName;
+    activeLangRef.current = activeLang;
 
-    // ── RECEIVE: other participants' transcript lines via DataChannel ──────────
+    // ── RECEIVE lines from other participants via DataChannel ─────────────────
     const onDataRef = useRef(null);
     onDataRef.current = (payload, participant, kind, topic) => {
         if (topic !== TOPIC) return;
@@ -63,99 +61,62 @@ export function useMeetingTranscript({ participantName }) {
 
     useEffect(() => {
         if (!room) return;
-        const handler = (...args) => onDataRef.current?.(...args);
-        room.on(RoomEvent.DataReceived, handler);
-        return () => { room.off(RoomEvent.DataReceived, handler); };
+        const h = (...args) => onDataRef.current?.(...args);
+        room.on(RoomEvent.DataReceived, h);
+        return () => room.off(RoomEvent.DataReceived, h);
     }, [room]);
 
-    // ── SEND: publish my transcript line to all other participants ────────────
+    // ── SEND my own transcript line ───────────────────────────────────────────
     const sendLineRef = useRef(null);
     sendLineRef.current = (text) => {
         if (!text?.trim()) return;
-
-        const myName = nameRef.current
-            || localPartRef.current?.name
-            || "Participant";
-
+        const myName = nameRef.current || localPartRef.current?.name || "Participant";
         const line = {
             type: "tx",
             name: myName,
             text: text.trim(),
-            time: new Date().toLocaleTimeString("en-IN", {
-                hour: "2-digit", minute: "2-digit",
-            }),
+            time: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
         };
-
-        // Add to my own local transcript immediately
+        // Add to own transcript immediately
         setTranscript(prev => [...prev, line]);
-
-        // Broadcast to everyone else in the room
+        // Broadcast to all other participants
         const lp = localPartRef.current;
         if (lp) {
             const payload = new TextEncoder().encode(JSON.stringify(line));
             lp.publishData(payload, { reliable: true, topic: TOPIC })
-                .catch(e => console.warn("publishData error:", e));
+                .catch(e => console.warn("publishData:", e));
         }
     };
 
-    // ── Core: create SpeechRecognition bound to the LOCAL MIC TRACK only ──────
-    //
-    // Called every time the local mic track changes (new track published, etc.)
-    // The key: recognition.audioTrack = new MediaStream([localMicTrack])
-    // This makes speech recognition read ONLY the local mic — not system audio.
-    //
-    const buildRecognition = (mediaStreamTrack) => {
+    // ── Build a fresh SpeechRecognition instance ──────────────────────────────
+    const buildRecognition = useCallback((langCode) => {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) {
-            setSpeechSupported(false);
-            return null;
-        }
-
-        // Abort any previous recognition instance
-        if (recognitionRef.current) {
-            shouldRunRef.current = false;
-            runningRef.current = false;
-            try { recognitionRef.current.abort(); } catch (e) { }
-            recognitionRef.current = null;
-        }
+        if (!SR) { setSpeechSupported(false); return null; }
 
         const r = new SR();
-        r.continuous = true;
-        r.interimResults = false;
+        r.continuous = true;   // keeps listening, handles long sentences
+        r.interimResults = false;  // only final results — cleaner output, no partials
         r.maxAlternatives = 1;
-        r.lang = "hi-IN"; // handles Hindi, English, and Hinglish
-
-        // ── THE KEY FIX ──
-        // Feed ONLY the isolated local microphone track into speech recognition.
-        // This stream has zero room audio — purely this person's own mic input.
-        if (mediaStreamTrack) {
-            try {
-                r.audioTrack = new MediaStream([mediaStreamTrack]);
-            } catch (e) {
-                // Some browsers don't support audioTrack — fall back to default mic
-                // In this case accuracy is slightly less but still works
-                console.warn("audioTrack not supported, using default mic:", e.message);
-            }
-        }
+        r.lang = langCode;
 
         r.onresult = (event) => {
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 if (event.results[i].isFinal) {
-                    sendLineRef.current?.(event.results[i][0].transcript);
+                    const text = event.results[i][0].transcript;
+                    if (text?.trim()) sendLineRef.current?.(text);
                 }
             }
         };
 
         r.onend = () => {
             runningRef.current = false;
-            if (shouldRunRef.current) {
-                // Silence timeout — restart automatically
+            // Auto-restart only if mic is still ON
+            // This handles: silence timeout, network blip, etc.
+            if (micOnRef.current) {
                 setTimeout(() => {
-                    if (shouldRunRef.current && recognitionRef.current) {
-                        try {
-                            recognitionRef.current.start();
-                            runningRef.current = true;
-                        } catch (e) { }
+                    const rec = recognitionRef.current;
+                    if (rec && micOnRef.current && !runningRef.current) {
+                        try { rec.start(); runningRef.current = true; } catch (e) { }
                     }
                 }, 300);
             } else {
@@ -167,66 +128,105 @@ export function useMeetingTranscript({ participantName }) {
             runningRef.current = false;
             if (event.error === "not-allowed" || event.error === "service-not-allowed") {
                 setSpeechSupported(false);
-                shouldRunRef.current = false;
+                micOnRef.current = false;
                 setIsTranscribing(false);
+                return;
             }
-            // Other errors (no-speech, network) → onend fires → auto-restart
+            if (event.error === "language-not-supported") {
+                // or-IN not available on this device → fall back to hi-IN
+                console.warn(`Language ${langCode} not supported, falling back to hi-IN`);
+                if (langCode === "or-IN") {
+                    const fallback = buildRecognition("hi-IN");
+                    if (fallback) {
+                        recognitionRef.current = fallback;
+                        try { fallback.start(); runningRef.current = true; } catch (e) { }
+                    }
+                }
+                return;
+            }
+            // "no-speech", "network", "aborted" → onend fires → auto-restart handles it
         };
 
         return r;
-    };
+    }, []);
 
-    // ── Watch local mic track and rebuild recognition when it changes ─────────
+    // ── Start recognition ─────────────────────────────────────────────────────
+    const startRecognition = useCallback((langCode) => {
+        // Stop any existing instance first
+        if (recognitionRef.current) {
+            runningRef.current = false;
+            try { recognitionRef.current.abort(); } catch (e) { }
+            recognitionRef.current = null;
+        }
+
+        const r = buildRecognition(langCode);
+        if (!r) return;
+
+        recognitionRef.current = r;
+        try {
+            r.start();
+            runningRef.current = true;
+            setIsTranscribing(true);
+        } catch (e) {
+            console.warn("recognition.start() failed:", e.message);
+        }
+    }, [buildRecognition]);
+
+    // ── Stop recognition ──────────────────────────────────────────────────────
+    const stopRecognition = useCallback(() => {
+        runningRef.current = false;
+        if (recognitionRef.current) {
+            try { recognitionRef.current.abort(); } catch (e) { }
+            recognitionRef.current = null;
+        }
+        setIsTranscribing(false);
+    }, []);
+
+    // ── GATE: watch mic mute state every 500ms ────────────────────────────────
     useEffect(() => {
         if (!localParticipant) return;
 
-        const syncRecognition = () => {
+        const checkMute = () => {
             const pub = localParticipant.getTrackPublication(Track.Source.Microphone);
-            const track = pub?.track;        // LiveKit LocalAudioTrack
-            const mst = track?.mediaStreamTrack; // The actual MediaStreamTrack
+            const muted = !pub || pub.isMuted;
+            const was = micOnRef.current;
+            micOnRef.current = !muted;
 
-            const isMuted = !pub || pub.isMuted || !mst;
-
-            if (!isMuted) {
-                // Mic is live — build/rebuild recognition with this exact track
-                if (!recognitionRef.current || !runningRef.current) {
-                    const r = buildRecognition(mst);
-                    if (!r) return;
-                    recognitionRef.current = r;
-                    shouldRunRef.current = true;
-                    try {
-                        r.start();
-                        runningRef.current = true;
-                        setIsTranscribing(true);
-                    } catch (e) { }
-                }
-            } else {
-                // Mic is muted — stop recognition
-                if (shouldRunRef.current) {
-                    shouldRunRef.current = false;
-                    try { recognitionRef.current?.stop(); } catch (e) { }
-                    setIsTranscribing(false);
-                }
+            if (!muted && !was) {
+                // Mic just turned ON → start
+                startRecognition(activeLangRef.current);
+            } else if (muted && was) {
+                // Mic just turned OFF → stop
+                stopRecognition();
             }
         };
 
-        // Poll every 500ms — catches mute/unmute from LiveKit ControlBar
-        const interval = setInterval(syncRecognition, 500);
-        syncRecognition(); // immediate check
+        const interval = setInterval(checkMute, 500);
+        checkMute(); // immediate check on mount
 
         return () => {
             clearInterval(interval);
-            shouldRunRef.current = false;
-            runningRef.current = false;
-            try { recognitionRef.current?.abort(); } catch (e) { }
-            recognitionRef.current = null;
+            micOnRef.current = false;
+            stopRecognition();
         };
-    }, [localParticipant]); // re-run if participant object changes
+    }, [localParticipant, startRecognition, stopRecognition]);
+
+    // ── Language switch (called when user clicks Odia/Hindi/English button) ───
+    const switchLanguage = useCallback((langCode) => {
+        setActiveLang(langCode);
+        activeLangRef.current = langCode;
+        // If mic is currently ON, restart recognition with new language immediately
+        if (micOnRef.current) {
+            startRecognition(langCode);
+        }
+    }, [startRecognition]);
 
     return {
         transcript,
         isTranscribing,
         speechSupported,
+        activeLang,
+        switchLanguage,
         clearTranscript: () => setTranscript([]),
     };
 }

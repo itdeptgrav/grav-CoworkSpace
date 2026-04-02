@@ -1000,7 +1000,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const handleSignOut = async () => {
     try {
       await signOut(firebaseAuth);
-      router.push("/coworking-login");
+      router.push("/");
     } catch (e) {
       console.error("Sign out error:", e);
     }

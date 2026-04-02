@@ -30,7 +30,7 @@ export default function GroupsPage() {
 
     useEffect(() => {
         if (!loading && !user) {
-            router.push("/coworking-login");
+            router.push("/");
             return;
         }
         if (user) fetchGroups();

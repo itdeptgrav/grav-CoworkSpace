@@ -102,7 +102,7 @@ export default function TaskDetailPage() {
         finally { setReportsLoading(false); }
     }, [taskId]);
 
-    useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading]);
+    useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading]);
     useEffect(() => { loadTask(); }, [loadTask]);
     useEffect(() => { if (tab === "reports") loadReports(); }, [tab, loadReports]);
 

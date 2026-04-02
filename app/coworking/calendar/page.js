@@ -66,7 +66,7 @@ export default function CalendarPage() {
     const [searchQ, setSearchQ] = useState("");
 
     useEffect(() => {
-        if (!loading && !user) router.push("/coworking-login");
+        if (!loading && !user) router.push("/");
     }, [user, loading]);
 
     // Load events from localStorage

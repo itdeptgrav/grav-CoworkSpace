@@ -543,7 +543,7 @@ export default function CreateGroupPage() {
   const unsubRef = useRef(null);
 
   useEffect(() => {
-    if (!loading && !user) router.push("/coworking-login");
+    if (!loading && !user) router.push("/");
   }, [user, loading, router]);
 
   // ── Real-time groups from Firestore ──────────────────────

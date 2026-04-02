@@ -129,7 +129,7 @@ export default function GroupChatPage() {
     return unsub;
   }, [groupId]);
 
-  useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading, router]);
+  useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
 
   useEffect(() => {
     if (!user || !employeeId || !groupId) return;

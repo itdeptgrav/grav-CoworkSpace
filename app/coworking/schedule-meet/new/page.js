@@ -24,7 +24,7 @@ export default function NewMeetPage() {
 
   useEffect(() => {
     if (!loading && (!user || role !== "ceo"))
-      router.push(user ? "/coworking/schedule-meet" : "/coworking-login");
+      router.push(user ? "/coworking/schedule-meet" : "/");
   }, [user, role, loading]);
 
   useEffect(() => {

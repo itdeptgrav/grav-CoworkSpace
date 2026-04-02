@@ -1,17 +1,11 @@
 "use client";
 // components/coworking/meeting/MeetingTranscriptPanel.jsx
-//
-// No "Start Transcript" button — transcription is FULLY AUTOMATIC:
-//   • Starts the moment this user's mic is unmuted in LiveKit
-//   • Stops the moment this user mutes their mic
-//   • Each person's browser only transcribes THEIR OWN voice (no duplicates)
-//   • Other participants' lines arrive via LiveKit DataChannel
 
 import { useEffect, useRef, useState } from "react";
 import { useMeetingTranscript } from "../../../hooks/useMeetingTranscript";
 import { downloadTranscriptDocx } from "../../../lib/generateTranscriptDocx";
+import { saveTranscript } from "../../../lib/transcriptApi";
 
-// Each speaker gets a consistent color throughout the meeting
 const SPEAKER_COLORS = [
     "#60A5FA", "#F87171", "#34D399", "#FBBF24",
     "#A78BFA", "#FB923C", "#38BDF8", "#F472B6",
@@ -24,24 +18,61 @@ function speakerColor(name) {
     return colorMap[name];
 }
 
-export default function MeetingTranscriptPanel({ participantName, meetTitle, meetDate }) {
-    const { transcript, isTranscribing, speechSupported, clearTranscript } =
-        useMeetingTranscript({ participantName });
+// Language options
+// hi-IN auto-detects both Hindi and English — no button needed for those two
+const LANGS = [
+    { code: "hi-IN", label: "हि/En", title: "Hindi + English (auto-detect)" },
+    { code: "or-IN", label: "ଓଡ଼ିଆ", title: "Odia — click before speaking Odia" },
+];
 
-    const [downloading, setDownloading] = useState(false);
+export default function MeetingTranscriptPanel({
+    participantName,
+    meetId,
+    meetTitle,
+    meetDate,
+    coworkToken,
+    onTranscriptChange,
+}) {
+    const {
+        transcript,
+        isTranscribing,
+        speechSupported,
+        activeLang,
+        switchLanguage,
+        clearTranscript,
+    } = useMeetingTranscript({ participantName });
+
+    const [saving, setSaving] = useState(false);
+    const [savedMsg, setSavedMsg] = useState("");
     const bottomRef = useRef(null);
+
+    // Keep parent's transcriptRef in sync
+    useEffect(() => {
+        onTranscriptChange?.(transcript);
+    }, [transcript]);
 
     // Auto-scroll to latest line
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [transcript.length]);
 
-    const handleDownload = async () => {
-        if (!transcript.length) { alert("No transcript yet. Unmute your mic to start."); return; }
-        setDownloading(true);
-        try { await downloadTranscriptDocx(transcript, meetTitle, meetDate); }
-        catch (e) { alert("Download failed: " + e.message); }
-        finally { setDownloading(false); }
+    const handleSaveAndDownload = async () => {
+        if (!transcript.length) { alert("No transcript yet. Unmute your mic to start speaking."); return; }
+        setSaving(true); setSavedMsg("");
+        try {
+            if (meetId && coworkToken) {
+                const result = await saveTranscript(meetId, meetTitle, meetDate, transcript, coworkToken);
+                setSavedMsg(result.success
+                    ? `✅ Saved. Auto-deletes: ${new Date(result.deleteAt).toLocaleDateString("en-IN")}`
+                    : `⚠️ ${result.error}`
+                );
+            }
+            await downloadTranscriptDocx(transcript, meetTitle, meetDate);
+        } catch (e) { setSavedMsg(`❌ ${e.message}`); }
+        finally {
+            setSaving(false);
+            setTimeout(() => setSavedMsg(""), 5000);
+        }
     };
 
     return (
@@ -51,35 +82,61 @@ export default function MeetingTranscriptPanel({ participantName, meetTitle, mee
             <div style={S.header}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={S.title}>📝 Transcript</span>
-                    {isTranscribing && (
-                        <div style={S.livePill}>
-                            <span style={S.recDot} />LIVE
-                        </div>
-                    )}
+                    {isTranscribing && <div style={S.livePill}><span style={S.recDot} />LIVE</div>}
                 </div>
-                <span style={S.count}>{transcript.length} lines</span>
+                <span style={S.count}>{transcript.length}</span>
             </div>
 
-            {/* Status — no button, just info */}
+            {/* Status */}
             <div style={S.statusBar}>
-                {!speechSupported ? (
-                    <span style={S.warn}>⚠️ Use Chrome or Edge for auto-transcription</span>
-                ) : isTranscribing ? (
-                    <span style={S.green}>🎙️ Your mic is ON — transcribing your voice</span>
-                ) : (
-                    <span style={S.gray}>🔇 Unmute your mic to start transcribing</span>
-                )}
+                {!speechSupported
+                    ? <span style={S.warn}>⚠️ Use Chrome or Edge</span>
+                    : isTranscribing
+                        ? <span style={S.green}>🎙️ Listening — {activeLang === "or-IN" ? "Odia mode" : "Hindi/English auto"}</span>
+                        : <span style={S.gray}>🔇 Unmute mic to start</span>
+                }
             </div>
 
-            {/* Transcript lines — auto-scroll */}
+            {/* Language selector */}
+            <div style={S.langRow}>
+                <span style={S.langLabel}>Language:</span>
+                {LANGS.map(l => (
+                    <button
+                        key={l.code}
+                        onClick={() => switchLanguage(l.code)}
+                        title={l.title}
+                        style={{
+                            ...S.langBtn,
+                            ...(activeLang === l.code ? S.langActive : {}),
+                        }}
+                    >
+                        {l.label}
+                    </button>
+                ))}
+                <span style={S.langHint}>
+                    {activeLang === "or-IN" ? "← Odia active" : "← Auto"}
+                </span>
+            </div>
+
+            {/* Saved message */}
+            {savedMsg && (
+                <div style={{
+                    padding: "8px 14px", fontSize: 11, flexShrink: 0, borderBottom: "1px solid #2A2A2A",
+                    color: savedMsg.startsWith("✅") ? "#4ADE80" : "#F87171", background: "#1A1A1A"
+                }}>
+                    {savedMsg}
+                </div>
+            )}
+
+            {/* Transcript lines */}
             <div style={S.body}>
                 {transcript.length === 0 ? (
                     <div style={S.empty}>
                         <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>No transcript yet</div>
-                        <div style={{ fontSize: 11, color: "#5F6368", lineHeight: 1.6 }}>
-                            Unmute your mic to start.<br />
-                            Others' words will appear here automatically.
+                        <div style={{ fontWeight: 600, marginBottom: 6 }}>No transcript yet</div>
+                        <div style={{ fontSize: 11, color: "#5F6368", lineHeight: 1.7 }}>
+                            • Unmute mic → Hindi &amp; English auto-detected<br />
+                            • For Odia: click <strong style={{ color: "#60A5FA" }}>ଓଡ଼ିଆ</strong> button first, then speak
                         </div>
                     </div>
                 ) : (
@@ -89,10 +146,10 @@ export default function MeetingTranscriptPanel({ participantName, meetTitle, mee
                             return (
                                 <div key={i} style={{ ...S.line, borderLeftColor: color }}>
                                     <div style={S.lineTop}>
-                                        <span style={{ ...S.speakerName, color }}>{line.name}</span>
+                                        <span style={{ ...S.speaker, color }}>{line.name}</span>
                                         <span style={S.time}>{line.time}</span>
                                     </div>
-                                    <div style={S.lineText}>{line.text}</div>
+                                    <div style={S.text}>{line.text}</div>
                                 </div>
                             );
                         })}
@@ -101,29 +158,21 @@ export default function MeetingTranscriptPanel({ participantName, meetTitle, mee
                 )}
             </div>
 
-            {/* Footer: download + clear */}
+            {/* Footer */}
             <div style={S.footer}>
                 <button
-                    onClick={handleDownload}
-                    disabled={downloading || !transcript.length}
-                    style={{
-                        ...S.dlBtn,
-                        opacity: !transcript.length ? 0.4 : 1,
-                        cursor: !transcript.length ? "not-allowed" : "pointer",
-                    }}
+                    onClick={handleSaveAndDownload}
+                    disabled={saving || !transcript.length}
+                    style={{ ...S.saveBtn, opacity: !transcript.length ? 0.4 : 1, cursor: !transcript.length ? "not-allowed" : "pointer" }}
                 >
-                    {downloading ? "⏳ Generating..." : "⬇️ Download .docx"}
+                    {saving ? "⏳ Saving..." : "💾 Save & Download"}
                 </button>
                 {transcript.length > 0 && (
-                    <button
-                        onClick={() => confirm("Clear transcript?") && clearTranscript()}
-                        style={S.clearBtn}
-                        title="Clear transcript"
-                    >🗑️</button>
+                    <button onClick={() => confirm("Clear?") && clearTranscript()} style={S.clearBtn} title="Clear">🗑️</button>
                 )}
             </div>
 
-            <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+            <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
         </div>
     );
 }
@@ -139,14 +188,21 @@ const S = {
     green: { fontSize: 12, color: "#4ADE80" },
     gray: { fontSize: 12, color: "#6B7280" },
     warn: { fontSize: 12, color: "#F59E0B" },
+    // Language row
+    langRow: { display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderBottom: "1px solid #2A2A2A", flexShrink: 0, flexWrap: "wrap" },
+    langLabel: { fontSize: 11, color: "#5F6368", fontWeight: 600, marginRight: 2 },
+    langBtn: { padding: "5px 12px", border: "1px solid #3C4043", borderRadius: 99, background: "#2A2A2A", color: "#9AA0A6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" },
+    langActive: { background: "#1E3A5F", color: "#60A5FA", border: "1px solid #3B82F6" },
+    langHint: { fontSize: 10, color: "#4B5563", marginLeft: 2 },
+    // Body
     body: { flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 },
-    empty: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9AA0A6", fontSize: 13, textAlign: "center", paddingTop: 40 },
+    empty: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9AA0A6", fontSize: 13, textAlign: "center", paddingTop: 30 },
     line: { background: "#242424", borderRadius: 8, padding: "8px 10px", borderLeft: "3px solid #1A73E8", flexShrink: 0 },
     lineTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 },
-    speakerName: { fontSize: 12, fontWeight: 700 },
+    speaker: { fontSize: 12, fontWeight: 700 },
     time: { fontSize: 10, color: "#5F6368" },
-    lineText: { fontSize: 13, color: "#E8EAED", lineHeight: 1.5 },
+    text: { fontSize: 13, color: "#E8EAED", lineHeight: 1.5 },
     footer: { padding: "10px 12px", borderTop: "1px solid #2A2A2A", display: "flex", gap: 8, flexShrink: 0 },
-    dlBtn: { flex: 1, padding: "9px 0", background: "linear-gradient(135deg,#1A73E8,#0D47A1)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+    saveBtn: { flex: 1, padding: "9px 0", background: "linear-gradient(135deg,#1A73E8,#0D47A1)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
     clearBtn: { padding: "9px 12px", background: "#2A2A2A", border: "1px solid #3C4043", borderRadius: 8, color: "#9AA0A6", fontSize: 13, cursor: "pointer" },
 };

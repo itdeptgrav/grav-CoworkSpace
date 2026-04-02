@@ -131,7 +131,7 @@ export default function ConversationPage() {
     return unsub;
   }, [conversationId]);
 
-  useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading, router]);
+  useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
 
   useEffect(() => {
     if (!user || !employeeId || !conversationId) return;

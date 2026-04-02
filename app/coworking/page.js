@@ -871,7 +871,7 @@ export default function Dashboard() {
     } catch (e) { console.error(e); } finally { setTLoad(false); }
   }, [employeeId]);
 
-  useEffect(() => { if (!loading && !user) router.push("/coworking-login"); }, [user, loading, router]);
+  useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
   useEffect(() => { if (user && employeeId) loadTasks(); }, [user, employeeId, loadTasks]);
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 60000); return () => clearInterval(t); }, []);
   useEffect(() => { if (employeeId) getCoworkSocket(employeeId); }, [employeeId]);

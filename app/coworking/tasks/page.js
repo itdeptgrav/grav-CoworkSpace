@@ -1012,6 +1012,13 @@ export default function TasksPage() {
   const [rowMenuPos, setRowMenuPos] = useState({ x: 0, y: 0 });
   const [sheetTask, setSheetTask] = useState(null); // mobile bottom sheet task
   const [rightPanel, setRightPanel] = useState("info"); // "info" | "reports" | "requests" | null
+  // ── Filter + Export state ──
+  const [filterDept, setFilterDept] = useState("");
+  const [filterEmployee, setFilterEmployee] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [employeeMapFull, setEmployeeMapFull] = useState(new Map());
 
   // ── Resizable split panel state ──
   const [sidebarWidth, setSidebarWidth] = useState(38); // percentage
@@ -1128,14 +1135,17 @@ export default function TasksPage() {
     try {
       const snap = await getDocs(collection(firebaseDb, "cowork_employees"));
       const map = new Map();
+      const fullMap = new Map();
       snap.forEach(docSnap => {
         const emp = docSnap.data();
         const id = emp.employeeId || docSnap.id;
         if (id) {
           map.set(id, emp.name || "Unknown");
+          fullMap.set(id, emp); // full record including department
         }
       });
       setEmployeeMap(map);
+      setEmployeeMapFull(fullMap);
     } catch (e) {
       console.error("loadEmployees (Firestore):", e);
     } finally {
@@ -1764,7 +1774,7 @@ export default function TasksPage() {
 
   // Effects
   useEffect(() => {
-    if (!loading && !user) router.push("/coworking-login");
+    if (!loading && !user) router.push("/");
   }, [user, loading, router]);
 
   useEffect(() => {
@@ -2377,7 +2387,35 @@ export default function TasksPage() {
               : (activeStatTab === "open" && t.status === "open")
               || (activeStatTab === "in_progress" && (t.status === "in_progress" || t.status === "confirmed"))
               || (activeStatTab === "done" && t.status === "done");
-            return matchQ && matchSt;
+            // Department filter — checks assignee's dept from full employee record
+            const matchDept = !filterDept || (() => {
+              const dl = filterDept.toLowerCase();
+              if (t.department?.toLowerCase().includes(dl)) return true;
+              return (t.assigneeIds || []).some(aid => {
+                const emp = employeeMapFull.get(aid);
+                return emp?.department?.toLowerCase().includes(dl);
+              });
+            })();
+            // Employee name filter
+            const matchEmp = !filterEmployee || (() => {
+              const el = filterEmployee.toLowerCase();
+              return (t.assigneeIds || []).some(aid => {
+                const name = employeeMap.get(aid) || t.assigneeNameMap?.[aid] || "";
+                return name.toLowerCase().includes(el);
+              });
+            })();
+            // Date range filter (dueDate or startDate)
+            const matchDate = (() => {
+              if (!filterDateFrom && !filterDateTo) return true;
+              const td = t.dueDate || t.startDate;
+              if (!td) return false;
+              const tMs = new Date(td).getTime();
+              if (isNaN(tMs)) return false;
+              if (filterDateFrom && tMs < new Date(filterDateFrom).getTime()) return false;
+              if (filterDateTo && tMs > new Date(filterDateTo + "T23:59:59").getTime()) return false;
+              return true;
+            })();
+            return matchQ && matchSt && matchDept && matchEmp && matchDate;
           });
 
           const AvatarStack = ({ t }) => {
@@ -2581,6 +2619,91 @@ export default function TasksPage() {
                   {(isCEO || isTL) && <button className="gv-new-btn" style={{ padding: "4px 10px", fontSize: 10 }} onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="8" height="8" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add</button>}
                 </div>
               )}
+              {/* ── FILTER BAR (new — sits between project info and stats tabs) ── */}
+              {(() => {
+                const hasFilter = !!(filterDept || filterEmployee || filterDateFrom || filterDateTo);
+                const clearAll = () => { setFilterDept(""); setFilterEmployee(""); setFilterDateFrom(""); setFilterDateTo(""); };
+                // ── CSV Export ──
+                const doExport = () => {
+                  const allRows = [];
+                  const esc = v => {
+                    if (v == null) return "";
+                    const s = String(v).trim();
+                    return (s.includes(",") || s.includes('"') || s.includes("\n")) ? `"${s.replace(/"/g, '""')}"` : s;
+                  };
+                  const fmtDate = d => { try { const dt = new Date(d); return isNaN(dt) ? "" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); } catch { return ""; } };
+                  const stLabel = s => ({ open: "Not Started", confirmed: "Confirmed", in_progress: "In Progress", done: "Done", pending_tl_approval: "Pending TL Approval" }[s] || s || "");
+                  const prLabel = p => ({ high: "Urgent", medium: "Normal", low: "Lowest" }[p] || p || "Normal");
+                  const cpLabel = s => ({ submitted: "Awaiting TL Review", tl_approved: "TL Approved", tl_rejected: "TL Rejected", ceo_approved: "CEO Approved", ceo_rejected: "CEO Rejected" }[s] || s || "");
+                  const addRow = (t, depth) => {
+                    const ids = t.assigneeIds || [];
+                    const names = ids.map(id => employeeMap.get(id) || t.assigneeNameMap?.[id] || id).join("; ") || "Unassigned";
+                    const depts = [...new Set(ids.map(id => employeeMapFull.get(id)?.department || "").filter(Boolean))].join("; ") || t.department || "";
+                    allRows.push([t.taskId || "", depth === 0 ? "Task" : `Subtask(L${depth})`, "  ".repeat(depth) + (t.title || ""), t.description || "", stLabel(t.status), prLabel(t.priority), names, depts, fmtDate(t.startDate), fmtDate(t.dueDate), (t.progressPercent ?? 0) + "%", cpLabel(t.completionStatus), t.createdByName || t.createdBy || "", t.parentTaskId || "", (t.subtaskIds || []).length]);
+                    (t.subtaskIds || []).forEach(sid => { const sub = allTaskMap.get(sid); if (sub) addRow(sub, depth + 1); });
+                  };
+                  allTasks.filter(t => !t.parentTaskId).forEach(t => addRow(t, 0));
+                  if (!allRows.length) { alert("No tasks to export."); return; }
+                  const HEADERS = ["Task ID", "Type", "Title", "Description", "Status", "Priority", "Assigned To", "Department", "Start Date", "Due Date", "Progress", "Completion Status", "Created By", "Parent Task ID", "Subtask Count"];
+                  const csv = [HEADERS, ...allRows].map(r => r.map(esc).join(",")).join("\n");
+                  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const now = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "-");
+                  const a = document.createElement("a"); a.href = url; a.download = `Tasks_Export_${now}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                };
+                return (
+                  <div style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
+                    {/* Row 1: Filter toggle + active chips + Export button */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => setFilterOpen(p => !p)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: 6, background: hasFilter ? "var(--p-lt)" : "var(--bg)", color: hasFilter ? "var(--p)" : "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", position: "relative", whiteSpace: "nowrap" }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+                        Filters
+                        {hasFilter && <span style={{ position: "absolute", top: 3, right: 3, width: 6, height: 6, borderRadius: "50%", background: "var(--p)" }} />}
+                      </button>
+                      {/* Active filter chips */}
+                      <div style={{ display: "flex", gap: 4, flex: 1, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
+                        {filterDept && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Dept: {filterDept}<button onClick={() => setFilterDept("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
+                        {filterEmployee && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Person: {filterEmployee}<button onClick={() => setFilterEmployee("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
+                        {(filterDateFrom || filterDateTo) && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Date: {filterDateFrom || "…"} → {filterDateTo || "…"}<button onClick={() => { setFilterDateFrom(""); setFilterDateTo(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
+                        {hasFilter && <button onClick={clearAll} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: 10, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0 }}>Clear all</button>}
+                      </div>
+                      {/* Export CSV — always visible */}
+                      <button
+                        onClick={doExport}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface)", color: "var(--text-2)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0, whiteSpace: "nowrap" }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                        Export CSV
+                      </button>
+                    </div>
+                    {/* Row 2: Expanded filter inputs */}
+                    {filterOpen && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, padding: "6px 10px 10px" }}>
+                        {[
+                          { label: "Department", val: filterDept, set: setFilterDept, ph: "e.g. Engineering", type: "text" },
+                          { label: "Person Name", val: filterEmployee, set: setFilterEmployee, ph: "e.g. Ramesh", type: "text" },
+                          { label: "Date From", val: filterDateFrom, set: setFilterDateFrom, ph: "", type: "date" },
+                          { label: "Date To", val: filterDateTo, set: setFilterDateTo, ph: "", type: "date" },
+                        ].map(f => (
+                          <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                            <label style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)" }}>{f.label}</label>
+                            <input
+                              type={f.type}
+                              value={f.val}
+                              onChange={e => f.set(e.target.value)}
+                              placeholder={f.ph}
+                              style={{ padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, color: "var(--text-1)", fontFamily: "var(--font)", outline: "none", background: "#fff" }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="gv-stats">
                 {[{ key: "all", l: "ALL", v: stats.total, c: "#5B5EF4" }, { key: "open", l: "OPEN", v: stats.open, c: "#EF4444" }, { key: "in_progress", l: "ACTIVE", v: stats.active, c: "#8B5CF6" }, { key: "done", l: "DONE", v: stats.done, c: "#16A34A" }].map(s => (
                   <div key={s.key} className={`gv-stat${activeStatTab === s.key ? " active-tab" : ""}`} onClick={() => setActiveStatTab(s.key)}>
@@ -2595,7 +2718,7 @@ export default function TasksPage() {
                     {[1, 2, 3, 4].map(i => (<div key={i} className="gv-skel-row"><div className="gv-skeleton gv-skel-circle" /><div className="gv-skel-lines"><div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} /><div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} /></div></div>))}
                   </div>
                 ) : filteredRoots.length === 0 ? (
-                  <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch ? "Click + Add Task to start" : "No tasks assigned"}</p></div>
+                  <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch || filterDept || filterEmployee || filterDateFrom || filterDateTo ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch && !filterDept && !filterEmployee ? "Click + Add Task to start" : "Try adjusting search or filters"}</p></div>
                 ) : (
                   STATUS_GROUPS_TABLE.map(grp => {
                     const grpTasks = filteredRoots.filter(t => t.status === grp.key);
