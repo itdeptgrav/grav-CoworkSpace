@@ -53,21 +53,54 @@ export default function CoworkingLoginPage() {
     setLoading(true);
     try {
       const { role } = await coworkSignIn(email, password);
-      // Accept any role except "none" or undefined
-      if (role && role !== "none") {  // ← Changed this line
-        router.push("/coworking");
-      } else {
-        setError("No workspace access. Contact your admin.");
+
+      // Role check — must have a valid workspace role
+      if (!role || role === "none") {
+        setError("No workspace access assigned. Contact your administrator.");
+        return;
       }
+
+      router.push("/coworking");
+
     } catch (err) {
-      const msg =
-        err.code === "auth/invalid-credential" || err.code === "auth/wrong-password"
-          ? "Wrong email or password."
-          : err.code === "auth/user-not-found"
-            ? "No account found."
-            : err.code === "auth/too-many-requests"
-              ? "Too many attempts. Try later."
-              : err.message;
+      // ── Map every possible error to a clear, user-friendly message ──────────
+      const code = err.code || "";
+      let msg;
+
+      if (code === "cowork/employee-not-found") {
+        // User exists in Firebase Auth but was deleted from Firestore database
+        msg = "Account not found. Your account may have been removed. Contact your administrator.";
+
+      } else if (code === "cowork/account-inactive") {
+        // User exists but is deactivated
+        msg = "Your account has been deactivated. Please contact your administrator.";
+
+      } else if (
+        code === "auth/invalid-credential" ||
+        code === "auth/wrong-password" ||
+        code === "auth/invalid-email"
+      ) {
+        msg = "Incorrect email or password. Please try again.";
+
+      } else if (code === "auth/user-not-found") {
+        // Firebase Auth itself has no record (completely deleted from Auth too)
+        msg = "No account found with this email. Contact your administrator.";
+
+      } else if (code === "auth/user-disabled") {
+        // Disabled in Firebase Auth console
+        msg = "Your account has been disabled. Contact your administrator.";
+
+      } else if (code === "auth/too-many-requests") {
+        msg = "Too many failed attempts. Please wait a few minutes and try again.";
+
+      } else if (code === "auth/network-request-failed") {
+        msg = "Network error. Check your connection and try again.";
+
+      } else {
+        // Fallback — show raw message but strip technical Firebase prefix
+        msg = err.message?.replace("Firebase: ", "").replace(/ \(auth\/.*\)\.?$/, "") || "Login failed. Please try again.";
+      }
+
       setError(msg);
     } finally {
       setLoading(false);

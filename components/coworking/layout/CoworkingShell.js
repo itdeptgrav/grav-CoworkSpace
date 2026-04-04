@@ -1,5 +1,4 @@
 "use client";
-import TopLoadingBar from "../shared/TopLoadingBar";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
@@ -1022,7 +1021,6 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
-      <TopLoadingBar />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
@@ -1378,9 +1376,26 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         @media (max-width: 768px) {
           .cw-notif-popup {
-            width: calc(100vw - 24px);
-            right: -8px;
+            /* On mobile: fixed overlay anchored to top of screen, full-width with margin */
+            position: fixed;
+            top: 60px;
+            left: 12px;
+            right: 12px;
+            width: auto;
+            max-height: 70vh;
+            border-radius: 16px;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.1);
           }
+        }
+        @media (max-width: 400px) {
+          .cw-notif-popup {
+            top: 54px;
+            left: 8px;
+            right: 8px;
+            max-height: 75vh;
+          }
+          .cw-notif-popup-item-title { font-size: 13px; }
+          .cw-notif-popup-head { padding: 12px 14px; }
         }
         .cw-topbar-avatar {
           width: 34px; height: 34px;
