@@ -532,6 +532,7 @@ export default function CreateGroupPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
   const router = useRouter();
   const isCEO = role === "ceo";
+  const isCeoOrTL = role === "ceo" || role === "tl";
 
   const [groups, setGroups] = useState([]);
   const [groupsLoading, setGroupsLoading] = useState(true);
@@ -551,7 +552,7 @@ export default function CreateGroupPage() {
     if (!employeeId) return;
     setGroupsLoading(true);
     let q;
-    if (isCEO) {
+    if (isCeoOrTL) {
       q = query(collection(firebaseDb, "cowork_groups"), where("deleted", "==", false));
     } else {
       q = query(
@@ -575,17 +576,17 @@ export default function CreateGroupPage() {
     });
     unsubRef.current = unsub;
     return () => unsub();
-  }, [employeeId, isCEO]);
+  }, [employeeId, isCeoOrTL]);
 
   // ── Load all employees (CEO needs for add/create) ────────
   useEffect(() => {
-    if (!isCEO || !user) return;
+    if (!isCeoOrTL || !user) return;
     getDocs(collection(firebaseDb, "cowork_employees"))
       .then(snap => {
         setAllEmployees(snap.docs.map(d => ({ employeeId: d.id, ...d.data() })));
       })
       .catch(console.error);
-  }, [isCEO, user]);
+  }, [isCeoOrTL, user]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -638,7 +639,7 @@ export default function CreateGroupPage() {
               {groupsLoading ? "Loading…" : `${groups.length} group${groups.length !== 1 ? "s" : ""}${totalUnread > 0 ? ` · ${totalUnread} unread` : ""}`}
             </p>
           </div>
-          {isCEO && (
+          {isCeoOrTL && (
             <button
               onClick={() => setModal("create")}
               style={pg.createBtn}
@@ -679,13 +680,13 @@ export default function CreateGroupPage() {
               {groups.length === 0 ? "No groups yet" : "No groups match your search"}
             </div>
             <div style={pg.emptySub}>
-              {groups.length === 0 && isCEO
+              {groups.length === 0 && isCeoOrTL
                 ? "Create a group to start collaborating with your team."
                 : groups.length === 0
                   ? "You haven't been added to any groups yet."
                   : "Try a different search term."}
             </div>
-            {groups.length === 0 && isCEO && (
+            {groups.length === 0 && isCeoOrTL && (
               <button onClick={() => setModal("create")} style={{ ...pg.createBtn, marginTop: 16 }}>
                 + Create First Group
               </button>
@@ -698,7 +699,7 @@ export default function CreateGroupPage() {
                 key={g.groupId || g.id}
                 group={g}
                 currentEmployeeId={employeeId}
-                isCEO={isCEO}
+                isCEO={isCeoOrTL}
                 allEmployees={allEmployees}
                 onOpenChat={id => router.push(`/coworking/create-group/group-chat/${id}`)}
                 onEdit={g => setModal({ type: "edit", group: g })}

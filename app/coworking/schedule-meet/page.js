@@ -219,7 +219,7 @@ export default function MeetingsPage() {
   const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
 
   const isCEO = role === "ceo";
-  const isHost = role === "ceo" || role === "tl";
+  const isHost = role === "ceo" || role === "tl"; // CEO + TL can see Summary, New Meeting
 
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 30000);
@@ -369,7 +369,8 @@ export default function MeetingsPage() {
             </div>
             <span className="sm-hdr-title">Meetings</span>
           </div>
-          {isCEO && (
+          {/* CHANGED: isCEO → isHost so TL also sees New Meeting button */}
+          {isHost && (
             <button className="sm-new-btn" onClick={() => router.push("/coworking/schedule-meet/new")}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
               <span className="sm-btn-label">New Meeting</span>
@@ -423,7 +424,8 @@ export default function MeetingsPage() {
                 <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>No meetings yet</div>
-              {isCEO && <div style={{ fontSize: 13, color: "#9AA0A6" }}>Click "New Meeting" to schedule one.</div>}
+              {/* CHANGED: isCEO → isHost so TL also sees the hint text */}
+              {isHost && <div style={{ fontSize: 13, color: "#9AA0A6" }}>Click "New Meeting" to schedule one.</div>}
             </div>
           ) : (
             <>
