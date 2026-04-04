@@ -1,9 +1,19 @@
 "use client";
 /**
  * hooks/useMeetingRecording.js
- * 
- * KEY FIX: Socket is initialized synchronously (not via useEffect ref),
- * so all employees immediately receive recording_started/recording_stopped.
+ *
+ * RELOAD / LEAVE SAFETY:
+ *   beforeunload  → shows browser warning dialog (synchronous only)
+ *   pagehide      → fires when page actually unloads (after user confirms)
+ *                   uses sendBeacon (survives unload, no auth header needed)
+ *                   token is pre-cached and passed in FormData body
+ *
+ * REJOIN:
+ *   localStorage session key tells backend this is a rejoin
+ *   backend adds (1), (2) suffix to filename so old file is not overwritten
+ *
+ * SOCKET:
+ *   getCoworkSocket() called directly in useEffect — never null
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -11,9 +21,9 @@ import { firebaseAuth } from "../lib/coworkFirebase";
 import { getCoworkSocket } from "../lib/coworkSocket";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-const CHUNK_MS = 30_000;
+const CHUNK_MS = 30_000; // upload buffered audio every 30 seconds
 
-// ── Detect best supported MIME type per browser ───────────────────────────────
+// ── MIME type detection ───────────────────────────────────────────────────────
 function getSupportedMimeType() {
     const types = [
         "audio/webm;codecs=opus",
@@ -28,20 +38,65 @@ function getSupportedMimeType() {
     return "audio/webm";
 }
 
+// ── Auth token — cached and pre-fetched so it is available synchronously ──────
+// Tokens last 60 min. We refresh every 50 min.
+let cachedToken = null;
+let tokenRefreshAt = 0;
+const TOKEN_TTL_MS = 50 * 60 * 1000;
+
 async function getAuthToken() {
     const user = firebaseAuth.currentUser;
     if (!user) throw new Error("Not authenticated");
-    return user.getIdToken(false);
+    if (!cachedToken || Date.now() > tokenRefreshAt) {
+        cachedToken = await user.getIdToken(true);
+        tokenRefreshAt = Date.now() + TOKEN_TTL_MS;
+    }
+    return cachedToken;
 }
 
-// ── Upload one 30s chunk to backend ──────────────────────────────────────────
+// Pre-warm the cache proactively (called when recording starts)
+async function warmTokenCache() {
+    try { await getAuthToken(); } catch (_) { }
+}
+
+// ── Session persistence (localStorage) ───────────────────────────────────────
+// Tracks whether this user was actively recording so backend knows it is a rejoin
+function sessionKey(meetId, employeeId) { return `rec_${meetId}_${employeeId}`; }
+
+function saveSession(meetId, employeeId, mimeType) {
+    try {
+        localStorage.setItem(sessionKey(meetId, employeeId), JSON.stringify({
+            meetId, employeeId, mimeType, startedAt: Date.now(),
+        }));
+    } catch (_) { }
+}
+
+function getSession(meetId, employeeId) {
+    try {
+        const raw = localStorage.getItem(sessionKey(meetId, employeeId));
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        // Ignore sessions older than 4 hours
+        if (Date.now() - s.startedAt > 4 * 60 * 60 * 1000) {
+            localStorage.removeItem(sessionKey(meetId, employeeId));
+            return null;
+        }
+        return s;
+    } catch (_) { return null; }
+}
+
+function clearSession(meetId, employeeId) {
+    try { localStorage.removeItem(sessionKey(meetId, employeeId)); } catch (_) { }
+}
+
+// ── Normal chunk upload (during active recording every 30s) ───────────────────
 async function uploadChunk({ blob, meetId, chunkIndex, mimeType }) {
     try {
         const token = await getAuthToken();
         const fd = new FormData();
         fd.append("chunk", blob, `chunk_${chunkIndex}.bin`);
         fd.append("meetId", meetId);
-        fd.append("chunkIndex", String(chunkIndex)); // explicit string, never falsy
+        fd.append("chunkIndex", String(chunkIndex));
         fd.append("mimeType", mimeType);
         const res = await fetch(`${BASE}/cowork/audio/chunk`, {
             method: "POST",
@@ -57,8 +112,41 @@ async function uploadChunk({ blob, meetId, chunkIndex, mimeType }) {
     }
 }
 
-// ── Call backend to merge chunks → Drive → Firebase ──────────────────────────
-async function finalizeRecording({ meetId, firstName, mimeType }) {
+// ── Emergency chunk upload via sendBeacon (survives page unload) ──────────────
+// sendBeacon cannot set headers — token goes in FormData body field
+function sendBeaconChunk({ blob, meetId, chunkIndex, mimeType, token }) {
+    try {
+        const fd = new FormData();
+        fd.append("chunk", blob, `chunk_emergency.bin`);
+        fd.append("meetId", meetId);
+        fd.append("chunkIndex", String(chunkIndex));
+        fd.append("mimeType", mimeType);
+        fd.append("token", token); // auth via body since headers not supported
+        fd.append("emergency", "true");
+        return navigator.sendBeacon(`${BASE}/cowork/audio/beacon-chunk`, fd);
+    } catch (e) {
+        console.error("[BeaconChunk] Failed:", e.message);
+        return false;
+    }
+}
+
+// ── Emergency finalize via fetch keepalive (survives page unload, small JSON) ──
+function sendKeepaliveFinalize({ meetId, firstName, mimeType, token, isRejoin }) {
+    try {
+        fetch(`${BASE}/cowork/audio/finalize`, {
+            method: "POST",
+            keepalive: true,   // key: request survives page unload
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ meetId, firstName, mimeType, isRejoin }),
+        }).catch(() => { });    // fire and forget — no await possible during unload
+    } catch (_) { }
+}
+
+// ── Normal finalize (awaited, during normal stop flow) ────────────────────────
+async function finalizeRecording({ meetId, firstName, mimeType, isRejoin }) {
     const token = await getAuthToken();
     const res = await fetch(`${BASE}/cowork/audio/finalize`, {
         method: "POST",
@@ -66,7 +154,7 @@ async function finalizeRecording({ meetId, firstName, mimeType }) {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ meetId, firstName, mimeType }),
+        body: JSON.stringify({ meetId, firstName, mimeType, isRejoin }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Finalize failed");
@@ -75,6 +163,7 @@ async function finalizeRecording({ meetId, firstName, mimeType }) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
+
     // ── State ─────────────────────────────────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
@@ -90,11 +179,11 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     const isRecordingRef = useRef(false);
     const isMutedRef = useRef(false);
     const chunkTimerRef = useRef(null);
+    const isRejoinRef = useRef(false); // true when user rejoined after reload
     const meetIdRef = useRef(meetId);
     const firstNameRef = useRef(firstName);
     const employeeIdRef = useRef(employeeId);
 
-    // Keep refs in sync every render
     meetIdRef.current = meetId;
     firstNameRef.current = firstName;
     employeeIdRef.current = employeeId;
@@ -104,31 +193,17 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         isMutedRef.current = muted;
     }, []);
 
-    // ── Warn user before closing tab while recording ─────────────────────────
-    useEffect(() => {
-        const handler = (e) => {
-            if (!isRecordingRef.current) return;
-            e.preventDefault();
-            e.returnValue = "Recording is active. Leaving will lose your audio. Are you sure?";
-            return e.returnValue;
-        };
-        window.addEventListener("beforeunload", handler);
-        return () => window.removeEventListener("beforeunload", handler);
-    }, []);
-
-    // ── Flush buffered audio chunks to server ─────────────────────────────────
+    // ── Flush buffered chunks to server ───────────────────────────────────────
     const flushChunks = useCallback(async () => {
         if (chunksRef.current.length === 0) return;
         const blobs = [...chunksRef.current];
         chunksRef.current = [];
         const combined = new Blob(blobs, { type: mimeTypeRef.current });
-        if (combined.size < 100) return; // skip near-empty blobs
+        if (combined.size < 100) return;
         const idx = chunkIndexRef.current++;
         await uploadChunk({
-            blob: combined,
-            meetId: meetIdRef.current,
-            chunkIndex: idx,
-            mimeType: mimeTypeRef.current,
+            blob: combined, meetId: meetIdRef.current,
+            chunkIndex: idx, mimeType: mimeTypeRef.current,
         });
     }, []);
 
@@ -144,28 +219,28 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         }
     }, []);
 
-    // ── Start MediaRecorder (this user's own mic only) ────────────────────────
-    const startRecording = useCallback(async () => {
-        if (isRecordingRef.current) return; // already running, ignore duplicate signals
+    // ── Start recording ───────────────────────────────────────────────────────
+    const startRecording = useCallback(async (rejoin = false) => {
+        if (isRecordingRef.current) return;
         if (typeof window === "undefined") return;
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             const mimeType = getSupportedMimeType();
+
             mimeTypeRef.current = mimeType;
             isRecordingRef.current = true;
+            isRejoinRef.current = rejoin;
             chunkIndexRef.current = 0;
             chunksRef.current = [];
 
             const recorder = new MediaRecorder(stream, { mimeType });
-
             recorder.ondataavailable = (e) => {
-                // Discard frames only when user is muted in LiveKit
                 if (e.data && e.data.size > 0 && !isMutedRef.current) {
                     chunksRef.current.push(e.data);
                 }
             };
             recorder.onerror = (e) => console.error("[MediaRecorder] Error:", e.error);
-            recorder.start(1000); // slice every 1s for accurate mute gating
+            recorder.start(1000);
 
             mediaRecorderRef.current = recorder;
             setIsRecording(true);
@@ -173,7 +248,14 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             setUploadError("");
             setUploadResult(null);
             startChunkTimer();
-            console.log(`[Recording] ✅ Started for ${employeeIdRef.current} — format: ${mimeType}`);
+
+            // Save session to localStorage so we detect rejoin after reload
+            saveSession(meetIdRef.current, employeeIdRef.current, mimeType);
+
+            // Pre-warm token cache so it is ready when pagehide fires
+            warmTokenCache();
+
+            console.log(`[Recording] ✅ Started for ${employeeIdRef.current}${rejoin ? " (REJOIN)" : ""} — ${mimeType}`);
         } catch (e) {
             isRecordingRef.current = false;
             console.error("[Recording] Could not start:", e.message);
@@ -181,7 +263,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         }
     }, [startChunkTimer]);
 
-    // ── Stop recording and finalize ───────────────────────────────────────────
+    // ── Stop and finalize ─────────────────────────────────────────────────────
     const stopRecording = useCallback(async () => {
         if (!isRecordingRef.current) return;
         isRecordingRef.current = false;
@@ -195,20 +277,22 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         }
         mediaRecorderRef.current = null;
 
-        // Flush any remaining buffered audio
         await flushChunks();
 
-        // Ask backend to merge all chunks → upload to Drive → save to Firebase
+        // Clear localStorage session — this was a clean stop, not a crash
+        clearSession(meetIdRef.current, employeeIdRef.current);
+
         setIsUploading(true);
         try {
             const result = await finalizeRecording({
                 meetId: meetIdRef.current,
                 firstName: firstNameRef.current,
                 mimeType: mimeTypeRef.current,
+                isRejoin: isRejoinRef.current,
             });
             setUploadResult(result);
             setUploadDone(true);
-            console.log(`[Recording] ✅ Finalized for ${employeeIdRef.current}:`, result.fileName);
+            console.log(`[Recording] ✅ Finalized:`, result.fileName);
         } catch (e) {
             console.error("[Recording] Finalize error:", e.message);
             setUploadError("Upload failed: " + e.message);
@@ -217,31 +301,104 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         }
     }, [stopChunkTimer, flushChunks]);
 
-    // ── Socket: EVERY user listens for CEO/TL start/stop signals ─────────────
-    // FIX: getCoworkSocket() is called directly here (not via a ref) so the
-    // socket is ready immediately when this effect runs — not null.
+    // ── beforeunload — show warning dialog (SYNCHRONOUS only) ────────────────
+    // Cannot do async here — just show the prompt.
+    // Actual save happens in pagehide below.
+    useEffect(() => {
+        const handler = (e) => {
+            if (!isRecordingRef.current) return;
+            e.preventDefault();
+            e.returnValue = "Recording is active. Your audio will be saved automatically before you leave.";
+            return e.returnValue;
+        };
+        window.addEventListener("beforeunload", handler);
+        return () => window.removeEventListener("beforeunload", handler);
+    }, []);
+
+    // ── pagehide — fires when user actually leaves (after confirming dialog) ──
+    // This is the correct event for cleanup. Works on mobile + desktop + iOS.
+    // sendBeacon and fetch(keepalive) both work here.
+    useEffect(() => {
+        const handler = async () => {
+            if (!isRecordingRef.current) return;
+            isRecordingRef.current = false;
+            stopChunkTimer();
+
+            // Stop MediaRecorder to get final frames
+            const recorder = mediaRecorderRef.current;
+            if (recorder && recorder.state !== "inactive") {
+                try { recorder.stop(); } catch (_) { }
+            }
+            mediaRecorderRef.current = null;
+
+            // Get cached token (sync — token was pre-warmed when recording started)
+            const token = cachedToken;
+            if (!token) return; // no token = nothing we can do
+
+            // Send remaining buffered chunks via sendBeacon (survives page unload)
+            if (chunksRef.current.length > 0 && mimeTypeRef.current) {
+                const combined = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+                if (combined.size >= 100) {
+                    sendBeaconChunk({
+                        blob: combined,
+                        meetId: meetIdRef.current,
+                        chunkIndex: chunkIndexRef.current,
+                        mimeType: mimeTypeRef.current,
+                        token,
+                    });
+                }
+                chunksRef.current = [];
+            }
+
+            // Trigger finalize via fetch(keepalive) — survives page unload
+            // Backend merges all saved chunks → Drive → Firebase
+            sendKeepaliveFinalize({
+                meetId: meetIdRef.current,
+                firstName: firstNameRef.current,
+                mimeType: mimeTypeRef.current,
+                token,
+                isRejoin: isRejoinRef.current,
+            });
+
+            // Keep localStorage session so on rejoin we know to add suffix to filename
+            // (clearSession is NOT called here — that only happens on clean stop)
+        };
+
+        window.addEventListener("pagehide", handler);
+        return () => window.removeEventListener("pagehide", handler);
+    }, [stopChunkTimer]);
+
+    // ── Auto-detect rejoin after reload ───────────────────────────────────────
+    // If user had an active session and reloads, auto-start recording again
+    // so their audio continues into the same meeting (with suffix on filename)
     useEffect(() => {
         if (!meetId || !employeeId) return;
+        const session = getSession(meetId, employeeId);
+        if (!session) return;
+        console.log(`[Recording] 🔄 Rejoin detected for ${employeeId} in meeting ${meetId}`);
+        // Wait 2.5s for LiveKit room to connect before grabbing mic
+        const t = setTimeout(() => startRecording(true), 2500);
+        return () => clearTimeout(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [meetId, employeeId]); // run once on mount only
 
-        // Get (or create) the singleton socket for this employee
+    // ── Socket: every user listens for CEO/TL start/stop signals ─────────────
+    useEffect(() => {
+        if (!meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
-
-        // Join the meeting-specific room so broadcasts reach this browser
         socket.emit("join_meeting_room", meetId);
-        console.log(`[Recording] Joined meeting room: meeting_${meetId}`);
 
         const onStarted = (data) => {
-            console.log(`[Recording] Signal: START received (from ${data?.startedByName})`);
-            startRecording();
+            console.log(`[Recording] Signal START from ${data?.startedByName}`);
+            startRecording(false);
         };
         const onStopped = (data) => {
-            console.log(`[Recording] Signal: STOP received (from ${data?.stoppedByName})`);
+            console.log(`[Recording] Signal STOP from ${data?.stoppedByName}`);
             stopRecording();
         };
 
         socket.on("recording_started", onStarted);
         socket.on("recording_stopped", onStopped);
-
         return () => {
             socket.off("recording_started", onStarted);
             socket.off("recording_stopped", onStopped);
@@ -249,28 +406,18 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         };
     }, [meetId, employeeId, startRecording, stopRecording]);
 
-    // ── Host controls (CEO/TL only) ───────────────────────────────────────────
+    // ── Host controls ─────────────────────────────────────────────────────────
     const hostStartRecording = useCallback(() => {
         if (!isHost || !meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
-        // Emit to all OTHER participants in the meeting room
-        socket.emit("recording_start", {
-            meetId,
-            startedBy: employeeId,
-            startedByName: firstName,
-        });
-        // Start own recording immediately
-        startRecording();
+        socket.emit("recording_start", { meetId, startedBy: employeeId, startedByName: firstName });
+        startRecording(false);
     }, [isHost, meetId, employeeId, firstName, startRecording]);
 
     const hostStopRecording = useCallback(() => {
         if (!isHost || !meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
-        socket.emit("recording_stop", {
-            meetId,
-            stoppedBy: employeeId,
-            stoppedByName: firstName,
-        });
+        socket.emit("recording_stop", { meetId, stoppedBy: employeeId, stoppedByName: firstName });
         stopRecording();
     }, [isHost, meetId, employeeId, firstName, stopRecording]);
 
@@ -287,12 +434,8 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     }, [stopChunkTimer]);
 
     return {
-        isRecording,
-        isUploading,
-        uploadDone,
-        uploadError,
-        uploadResult,
-        setMuted,            // → passed to <MuteWatcher> inside LiveKitRoom
+        isRecording, isUploading, uploadDone, uploadError, uploadResult,
+        setMuted,
         hostStartRecording,
         hostStopRecording,
     };
