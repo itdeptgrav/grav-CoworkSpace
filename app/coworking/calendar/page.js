@@ -9,7 +9,6 @@
  * - All calendar events stored in localStorage (no backend needed)
  * - Reads tasks from taskForwardApi to show deadlines on calendar
  */
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { useRouter } from "next/navigation";
@@ -243,7 +242,10 @@ export default function CalendarPage() {
     ].filter(e => !searchQ || e.title?.toLowerCase().includes(searchQ.toLowerCase()));
 
     return (
+
         <div style={s.root}>
+
+
             <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }

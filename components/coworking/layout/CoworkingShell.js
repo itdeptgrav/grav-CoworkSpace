@@ -1,4 +1,5 @@
 "use client";
+import TopLoadingBar from "../shared/TopLoadingBar";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
@@ -1021,6 +1022,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
+      <TopLoadingBar />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
@@ -1615,7 +1617,25 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                         <div className="cw-notif-popup-empty">No notifications yet</div>
                       ) : (
                         notifications.slice(0, 15).map((n, i) => (
-                          <div key={n.id || i} className="cw-notif-popup-item" style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)" }}>
+                          <div key={n.id || i} className="cw-notif-popup-item"
+                            style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)", cursor: "pointer" }}
+                            onClick={() => {
+                              setNotifOpen(false);
+                              const d = n.data || {};
+                              const t = n.type || "";
+                              if (["task_assigned", "task_confirmed", "task_started", "task_update", "task_forwarded",
+                                "task_chat", "daily_report", "deadline_changed"].includes(t) || t.startsWith("completion")) {
+                                if (d.taskId) localStorage.setItem("selectedTaskId", d.taskId);
+                                router.push("/coworking/tasks");
+                              } else if (t === "group_message" || t === "group_added") {
+                                router.push(d.groupId ? `/coworking/create-group/group-chat/${d.groupId}` : "/coworking/create-group");
+                              } else if (t === "direct_message") {
+                                router.push("/coworking/direct-messages");
+                              } else if (t === "meet_scheduled") {
+                                router.push("/coworking/schedule-meet");
+                              }
+                            }}
+                          >
                             <span className={`cw-notif-popup-item-dot${n.read ? " read" : ""}`} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div className="cw-notif-popup-item-title">{n.title}</div>

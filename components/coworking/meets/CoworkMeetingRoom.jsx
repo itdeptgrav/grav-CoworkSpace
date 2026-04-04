@@ -14,12 +14,15 @@ import { getMeet } from "../../../lib/coworkApi";
 import { startMeeting, joinByCode, getMeetingInfo, endMeeting } from "../../../lib/livekitApi";
 import { saveTranscript } from "../../../lib/transcriptApi";
 import MeetingTranscriptPanel from "./MeetingTranscriptPanel";
+import RecordingControls from "./RecordingControls";
+import { useMeetingRecording } from "../../../hooks/useMeetingRecording";
 
 import {
     LiveKitRoom,
     VideoConference,
     RoomAudioRenderer,
     useParticipants,
+    useLocalParticipant,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 
@@ -28,7 +31,7 @@ const LK_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL;
 export default function CoworkMeetingRoom() {
     const { meetId } = useParams();
     const router = useRouter();
-    const { user, role, employeeName, loading } = useCoworkAuth();
+    const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
 
     const [meet, setMeet] = useState(null);
     const [info, setInfo] = useState(null);
@@ -38,11 +41,19 @@ export default function CoworkMeetingRoom() {
     const [busy, setBusy] = useState(false);
     const [joinCode, setJoinCode] = useState("");
     const [userChoices, setUserChoices] = useState(null);
-    const [showTranscript, setShowTranscript] = useState(true); // open by default
+    const [showTranscript, setShowTranscript] = useState(true);
+
+    // ── Audio recording (socket handled internally by hook) ───────────────────
+    const isHost = role === "ceo" || role === "tl";
+    const recording = useMeetingRecording({
+        meetId,
+        employeeId,
+        firstName: (employeeName || "").split(" ")[0],
+        isHost,
+    });
 
     const intentionalLeave = useRef(false);
     const transcriptRef = useRef([]);   // kept in sync by transcript panel via onTranscriptChange
-    const isHost = role === "ceo" || role === "tl";
 
     // Grab cowork auth token for backend transcript save calls
     const coworkToken = typeof window !== "undefined"
@@ -143,6 +154,9 @@ export default function CoworkMeetingRoom() {
                     style={S.lkRoom}
                     onDisconnected={handleDisconnected}
                 >
+                    {/* Syncs LiveKit mute state into recording hook — must be inside LiveKitRoom */}
+                    <MuteWatcher onMuteChange={recording.setMuted} />
+
                     {/* Top bar — inside LiveKitRoom so useParticipants works */}
                     <TopBar
                         meet={meet}
@@ -152,6 +166,7 @@ export default function CoworkMeetingRoom() {
                         onToggleTranscript={() => setShowTranscript(p => !p)}
                         onEnd={handleEnd}
                         onLeave={handleLeave}
+                        recording={recording}
                     />
 
                     {/* Video grid + transcript panel side by side */}
@@ -199,8 +214,24 @@ export default function CoworkMeetingRoom() {
     );
 }
 
+// ── MuteWatcher — inside LiveKitRoom so useLocalParticipant works ─────────────
+// Watches LiveKit mic mute state every 500ms and reports it to the recording hook.
+function MuteWatcher({ onMuteChange }) {
+    const { localParticipant } = useLocalParticipant();
+    useEffect(() => {
+        if (!localParticipant || !onMuteChange) return;
+        const interval = setInterval(() => {
+            const pub = localParticipant.getTrackPublication("microphone");
+            const muted = !pub || pub.isMuted;
+            onMuteChange(muted);
+        }, 500);
+        return () => clearInterval(interval);
+    }, [localParticipant, onMuteChange]);
+    return null; // renders nothing
+}
+
 // ── Top bar (inside LiveKitRoom so useParticipants works) ─────────────────────
-function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, onEnd, onLeave }) {
+function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, onEnd, onLeave, recording }) {
     const [showCode, setShowCode] = useState(false);
     const [copied, setCopied] = useState(false);
     const [showPeople, setShowPeople] = useState(false);
@@ -348,6 +379,20 @@ function TopBar({ meet, isHost, joinCode, showTranscript, onToggleTranscript, on
                             </div>
                         )}
                     </div>
+                )}
+
+                {/* ── Audio Recording Controls (CEO/TL only) ── */}
+                {isHost && recording && (
+                    <RecordingControls
+                        isHost={isHost}
+                        isRecording={recording.isRecording}
+                        isUploading={recording.isUploading}
+                        uploadDone={recording.uploadDone}
+                        uploadError={recording.uploadError}
+                        uploadResult={recording.uploadResult}
+                        onStart={recording.hostStartRecording}
+                        onStop={recording.hostStopRecording}
+                    />
                 )}
 
                 {/* Transcript toggle */}
