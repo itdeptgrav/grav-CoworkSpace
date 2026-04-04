@@ -168,6 +168,108 @@ function DocCard({ att, isMe, onDl }) {
 // ─── Message bubble ───────────────────────────────────────────────────────────
 function Bubble({ msg, isMe, showAvatar, onImg, onDl }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
+
+  // ── Meeting invite card ──────────────────────────────────────────────────────
+  if (msg.messageType === "meeting_invite") {
+    const md = msg.meetingData || {};
+    const isLiveNow = md.dateTime
+      ? (Date.now() >= new Date(md.dateTime).getTime() && Date.now() <= new Date(md.dateTime).getTime() + 2 * 3600000)
+      : false;
+
+    return (
+      <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 8 }}>
+        {/* Avatar */}
+        <div style={{ width: 28, height: 28, flexShrink: 0 }}>
+          {showAvatar && !isMe && (
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>
+              {getInit(msg.senderName || "")}
+            </div>
+          )}
+        </div>
+
+        {/* Invite card */}
+        <div style={{ maxWidth: 320, display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+          {showAvatar && !isMe && (
+            <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>
+          )}
+          <div style={{
+            background: "#fff",
+            border: "2px solid #16A34A",
+            borderRadius: 16,
+            overflow: "hidden",
+            boxShadow: "0 4px 16px rgba(22,163,74,0.15)",
+            width: 300,
+          }}>
+            {/* Green header */}
+            <div style={{ background: isLiveNow ? "#DC2626" : "#16A34A", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 32, height: 32, background: "rgba(255,255,255,0.2)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", letterSpacing: "0.04em" }}>
+                  {isLiveNow ? "🔴 LIVE NOW" : "📹 MEETING INVITATION"}
+                </div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)", marginTop: 1 }}>from {msg.senderName}</div>
+              </div>
+            </div>
+
+            {/* Details */}
+            <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{md.meetTitle || "CoWork Meeting"}</div>
+              {md.description && (
+                <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>{md.description}</div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, color: "#374151" }}>
+                {md.dateTime && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>📅</span>
+                    <span>{new Date(md.dateTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
+                  </div>
+                )}
+                {/* Meeting code — prominent */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>🔑</span>
+                  <span style={{ fontSize: 11, color: "#9AA0A6" }}>Join Code:</span>
+                  <span style={{
+                    fontFamily: "monospace", fontSize: 18, fontWeight: 900,
+                    color: isLiveNow ? "#DC2626" : "#16A34A",
+                    letterSpacing: 4, background: isLiveNow ? "#FEF2F2" : "#F0FDF4",
+                    padding: "2px 10px", borderRadius: 8,
+                  }}>
+                    {md.joinCode || md.meetId}
+                  </span>
+                </div>
+              </div>
+
+              {/* Join button */}
+              <a
+                href={`/coworking/cowork-meeting/${md.meetId}`}
+                style={{
+                  display: "block", width: "100%", padding: "10px 0",
+                  background: isLiveNow ? "#DC2626" : "#16A34A",
+                  color: "#fff", border: "none", borderRadius: 10,
+                  fontSize: 13, fontWeight: 700, textAlign: "center",
+                  textDecoration: "none", marginTop: 4,
+                  boxShadow: isLiveNow ? "0 4px 12px rgba(220,38,38,0.35)" : "0 4px 12px rgba(22,163,74,0.3)",
+                }}
+              >
+                {isLiveNow ? "🔴 Join Live Meeting" : "🎥 Join Meeting"}
+              </a>
+            </div>
+          </div>
+
+          {/* Timestamp */}
+          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3, paddingRight: isMe ? 0 : 4, paddingLeft: isMe ? 4 : 0 }}>
+            {fmtTime(msg.createdAt)}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ── End meeting invite ───────────────────────────────────────────────────────
+
   return (
     <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
       {/* Avatar */}

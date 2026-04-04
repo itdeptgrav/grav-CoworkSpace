@@ -29,6 +29,50 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
     const [pdfOpen, setPdfOpen] = useState(false);
     const [imgOpen, setImgOpen] = useState(null);
 
+    /* ── Meeting invite card ─────────────────────────────── */
+    if (msg.messageType === "meeting_invite") {
+        const md = msg.meetingData || {};
+        return (
+            <div style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", margin: "10px 0" }}>
+                <div style={{
+                    background: "linear-gradient(135deg,#1A73E8,#0D47A1)",
+                    borderRadius: 16, padding: "16px 18px",
+                    maxWidth: 320, width: "100%",
+                    boxShadow: "0 4px 16px rgba(26,115,232,0.3)",
+                    fontFamily: "'Google Sans','Roboto',sans-serif",
+                }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                        <div style={{ width: 36, height: 36, background: "rgba(255,255,255,0.2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
+                            </svg>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Meeting Invitation</div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)" }}>from {msg.senderName}</div>
+                        </div>
+                    </div>
+
+                    {/* Meeting details */}
+                    <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "12px 14px", marginBottom: 12, backdropFilter: "blur(4px)" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 6 }}>{md.meetTitle || "CoWork Meeting"}</div>
+                        {md.description && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", marginBottom: 8, lineHeight: 1.5 }}>{md.description}</div>}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "rgba(255,255,255,0.85)" }}>
+                            {md.dateTime && <span>📅 {new Date(md.dateTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>}
+                            <span>🔑 Code: <strong style={{ fontFamily: "monospace", letterSpacing: 2 }}>{md.meetId}</strong></span>
+                        </div>
+                    </div>
+
+                    {/* Footer note */}
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textAlign: "center" }}>
+                        Click Join Meeting to participate
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     /* ── System message ─────────────────────────────────── */
     if (msg.messageType === "system") {
         return (
