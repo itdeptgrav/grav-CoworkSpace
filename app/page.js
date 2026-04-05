@@ -17,34 +17,17 @@ export default function CoworkingLoginPage() {
 
   // Permanent fix for autofill overlap
   useEffect(() => {
-    // Check for autofilled values
     const checkAutofill = () => {
       const emailInput = document.getElementById('email');
       const passwordInput = document.getElementById('password');
-
-      if (emailInput && emailInput.value) {
-        setEmailFilled(true);
-        setEmail(emailInput.value);
-      }
-      if (passwordInput && passwordInput.value) {
-        setPasswordFilled(true);
-        setPassword(passwordInput.value);
-      }
+      if (emailInput && emailInput.value) { setEmailFilled(true); setEmail(emailInput.value); }
+      if (passwordInput && passwordInput.value) { setPasswordFilled(true); setPassword(passwordInput.value); }
     };
-
-    // Check immediately
     checkAutofill();
-
-    // Check after a short delay for browser autofill
     setTimeout(checkAutofill, 100);
     setTimeout(checkAutofill, 500);
-
-    // Listen for animation events that browsers fire when autofilling
     document.addEventListener('animationstart', checkAutofill);
-
-    return () => {
-      document.removeEventListener('animationstart', checkAutofill);
-    };
+    return () => document.removeEventListener('animationstart', checkAutofill);
   }, []);
 
   const handleLogin = async (e) => {
@@ -53,21 +36,36 @@ export default function CoworkingLoginPage() {
     setLoading(true);
     try {
       const { role } = await coworkSignIn(email, password);
-      // Accept any role except "none" or undefined
-      if (role && role !== "none") {  // ← Changed this line
-        router.push("/coworking");
-      } else {
-        setError("No workspace access. Contact your admin.");
+
+      if (!role || role === "none") {
+        setError("No workspace access assigned. Contact your administrator.");
+        return;
       }
+
+      router.push("/coworking");
+
     } catch (err) {
-      const msg =
-        err.code === "auth/invalid-credential" || err.code === "auth/wrong-password"
-          ? "Wrong email or password."
-          : err.code === "auth/user-not-found"
-            ? "No account found."
-            : err.code === "auth/too-many-requests"
-              ? "Too many attempts. Try later."
-              : err.message;
+      const code = err.code || "";
+      let msg;
+
+      if (code === "cowork/employee-not-found") {
+        msg = "Account not found in workspace. Your account may have been removed. Contact your administrator.";
+      } else if (code === "cowork/account-inactive") {
+        msg = "Your account has been deactivated. Contact your administrator.";
+      } else if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/invalid-email") {
+        msg = "Incorrect email or password. Please try again.";
+      } else if (code === "auth/user-not-found") {
+        msg = "No account found with this email. Contact your administrator.";
+      } else if (code === "auth/user-disabled") {
+        msg = "Your account has been disabled. Contact your administrator.";
+      } else if (code === "auth/too-many-requests") {
+        msg = "Too many failed attempts. Please wait a few minutes and try again.";
+      } else if (code === "auth/network-request-failed") {
+        msg = "Network error. Check your connection and try again.";
+      } else {
+        msg = err.message?.replace("Firebase: ", "").replace(/ \(auth\/.*\)\.?$/, "") || "Login failed. Please try again.";
+      }
+
       setError(msg);
     } finally {
       setLoading(false);
@@ -80,24 +78,15 @@ export default function CoworkingLoginPage() {
       <div className="hidden lg:flex lg:w-1/2 bg-gray-50 items-center justify-center p-12">
         <div className="max-w-md">
           <div className="flex items-center gap-3 mb-16">
-            <Image
-              src="/grav-image-logo.svg"
-              alt="CoWork Space"
-              width={32}
-              height={32}
-              className="w-8 h-8"
-            />
+            <Image src="/grav-image-logo.svg" alt="CoWork Space" width={32} height={32} className="w-8 h-8" />
             <span className="text-2xl font-semibold text-gray-900">CoWork Space</span>
           </div>
-
           <h1 className="text-4xl font-bold text-gray-900 mb-5">
             A smarter way<br />to work together.
           </h1>
-
           <p className="text-gray-600 mb-12 leading-relaxed">
             Real-time messaging, task management, meetings and team collaboration — all in one place.
           </p>
-
           <div className="space-y-4">
             {[
               ["💬", "Instant group & direct messaging"],
@@ -117,15 +106,9 @@ export default function CoworkingLoginPage() {
       {/* Right Panel - Full width on mobile */}
       <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
         <div className="w-full max-w-md">
-          {/* Mobile Logo - Shows only on mobile */}
+          {/* Mobile Logo */}
           <div className="flex justify-center mb-8 lg:hidden">
-            <Image
-              src="/grav-image-logo.svg"
-              alt="CoWork Space"
-              width={80}
-              height={80}
-              className="w-25 h-25"
-            />
+            <Image src="/grav-image-logo.svg" alt="CoWork Space" width={80} height={80} className="w-25 h-25" />
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-8 lg:p-10">
@@ -135,8 +118,8 @@ export default function CoworkingLoginPage() {
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6 flex items-center gap-2 text-red-600 text-sm">
-                <span>⚠️</span>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6 flex items-start gap-2 text-red-600 text-sm">
+                <span className="mt-0.5 flex-shrink-0">⚠️</span>
                 <span>{error}</span>
               </div>
             )}
@@ -148,21 +131,16 @@ export default function CoworkingLoginPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setEmailFilled(!!e.target.value);
-                  }}
+                  onChange={(e) => { setEmail(e.target.value); setEmailFilled(!!e.target.value); }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 peer"
                   placeholder=" "
                   required
                   autoComplete="email"
                 />
-                <label
-                  htmlFor="email"
+                <label htmlFor="email"
                   className={`absolute left-4 bg-white px-1 transition-all duration-200 pointer-events-none
                     ${email || emailFilled ? '-top-2.5 text-xs text-blue-600' : 'top-3 text-base text-gray-500'}
-                    peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-blue-600`}
-                >
+                    peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-blue-600`}>
                   Email
                 </label>
               </div>
@@ -173,29 +151,21 @@ export default function CoworkingLoginPage() {
                   id="password"
                   type={showPw ? "text" : "password"}
                   value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setPasswordFilled(!!e.target.value);
-                  }}
+                  onChange={(e) => { setPassword(e.target.value); setPasswordFilled(!!e.target.value); }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 peer pr-12"
                   placeholder=" "
                   required
                   autoComplete="current-password"
                 />
-                <label
-                  htmlFor="password"
+                <label htmlFor="password"
                   className={`absolute left-4 bg-white px-1 transition-all duration-200 pointer-events-none
                     ${password || passwordFilled ? '-top-2.5 text-xs text-blue-600' : 'top-3 text-base text-gray-500'}
-                    peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-blue-600`}
-                >
+                    peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-blue-600`}>
                   Password
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
+                <button type="button" onClick={() => setShowPw(!showPw)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 transition-colors"
-                  aria-label={showPw ? "Hide password" : "Show password"}
-                >
+                  aria-label={showPw ? "Hide password" : "Show password"}>
                   {showPw ? (
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -213,24 +183,17 @@ export default function CoworkingLoginPage() {
                 Don't have an account? Contact your <strong>CEO / Admin</strong>.
               </p>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-blue-300 disabled:cursor-not-allowed"
-              >
+              <button type="submit" disabled={loading}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-blue-300 disabled:cursor-not-allowed">
                 {loading ? "Signing in..." : "Sign in"}
               </button>
             </form>
           </div>
 
           <div className="text-center mt-6">
-            <a href="https://policies.google.com/privacy" className="text-sm text-gray-500 hover:text-gray-700 mx-2">
-              Privacy
-            </a>
+            <a href="https://policies.google.com/privacy" className="text-sm text-gray-500 hover:text-gray-700 mx-2">Privacy</a>
             <span className="text-gray-300">·</span>
-            <a href="https://policies.google.com/terms" className="text-sm text-gray-500 hover:text-gray-700 mx-2">
-              Terms
-            </a>
+            <a href="https://policies.google.com/terms" className="text-sm text-gray-500 hover:text-gray-700 mx-2">Terms</a>
           </div>
         </div>
       </div>

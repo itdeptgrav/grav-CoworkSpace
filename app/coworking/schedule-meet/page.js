@@ -12,6 +12,7 @@ import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { listMeets } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { collection, getDocs } from "firebase/firestore";
+import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
 
 function getMeetStatus(meet) {
   if (meet.status === "ended") return "ended";
@@ -41,7 +42,7 @@ function timeUntil(iso) {
 const AV_COLORS = ["#1a73e8", "#0f9d58", "#f29900", "#7b1fa2", "#d93025", "#00acc1", "#e64a19", "#0097a7"];
 const avBg = (id = "") => AV_COLORS[(id.charCodeAt(0) || 0) % AV_COLORS.length];
 
-function MeetCard({ meet, status, router, empMap = {} }) {
+function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost }) {
   const dt = new Date(meet.dateTime);
   const month = dt.toLocaleString("en-IN", { month: "short" });
   const day = dt.getDate();
@@ -158,6 +159,22 @@ function MeetCard({ meet, status, router, empMap = {} }) {
             View
           </button>
         )}
+        {/* View Summary button — CEO/TL only */}
+        {isHost && (
+          <button
+            className="smc-btn smc-btn-summary"
+            onClick={() => onViewSummary(meet.meetId, meet.title)}
+            title="View AI Meeting Summary"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            Summary
+          </button>
+        )}
       </div>
     </div>
   );
@@ -197,8 +214,12 @@ export default function MeetingsPage() {
   const [search, setSearch] = useState("");
   const [, setTick] = useState(0);
   const [empMap, setEmpMap] = useState({}); // employeeId -> { name, department }
+  const [summaryModal, setSummaryModal] = useState(null); // { meetId, meetTitle } | null
+
+  const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
 
   const isCEO = role === "ceo";
+  const isHost = role === "ceo" || role === "tl"; // CEO + TL can see Summary, New Meeting
 
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 30000);
@@ -310,6 +331,8 @@ export default function MeetingsPage() {
         .smc-btn-gmeet:hover{background:#F8F9FA}
         .smc-btn-view{background:#F8F9FA;color:#9AA0A6;border:1px solid #E4E7EC !important}
         .smc-btn-view:hover{background:#F1F3F4}
+        .smc-btn-summary{background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0 !important}
+        .smc-btn-summary:hover{background:#DCFCE7}
         /* Skeleton */
         .sm-skel{animation:sm-sk 1.4s ease infinite}
         @keyframes sm-sk{0%,100%{opacity:1}50%{opacity:0.4}}
@@ -346,7 +369,8 @@ export default function MeetingsPage() {
             </div>
             <span className="sm-hdr-title">Meetings</span>
           </div>
-          {isCEO && (
+          {/* CHANGED: isCEO → isHost so TL also sees New Meeting button */}
+          {isHost && (
             <button className="sm-new-btn" onClick={() => router.push("/coworking/schedule-meet/new")}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
               <span className="sm-btn-label">New Meeting</span>
@@ -400,14 +424,15 @@ export default function MeetingsPage() {
                 <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>No meetings yet</div>
-              {isCEO && <div style={{ fontSize: 13, color: "#9AA0A6" }}>Click "New Meeting" to schedule one.</div>}
+              {/* CHANGED: isCEO → isHost so TL also sees the hint text */}
+              {isHost && <div style={{ fontSize: 13, color: "#9AA0A6" }}>Click "New Meeting" to schedule one.</div>}
             </div>
           ) : (
             <>
               {live.length > 0 && (
                 <Section label="Live Now" count={live.length} dotColor="#EA4335" dotGlow="0 0 0 3px rgba(234,67,53,0.25)">
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {live.map(m => <MeetCard key={m.meetId} meet={m} status="live" router={router} empMap={empMap} />)}
+                    {live.map(m => <MeetCard key={m.meetId} meet={m} status="live" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} />)}
                   </div>
                 </Section>
               )}
@@ -418,14 +443,14 @@ export default function MeetingsPage() {
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, flexShrink: 0 }}><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
                       No upcoming meetings
                     </div>
-                    : upcoming.map(m => <MeetCard key={m.meetId} meet={m} status="upcoming" router={router} empMap={empMap} />)
+                    : upcoming.map(m => <MeetCard key={m.meetId} meet={m} status="upcoming" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} />)
                   }
                 </div>
               </Section>
               {ended.length > 0 && (
                 <Section label="Past" count={ended.length} dotColor="#D0D5DD">
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {ended.map(m => <MeetCard key={m.meetId} meet={m} status="ended" router={router} empMap={empMap} />)}
+                    {ended.map(m => <MeetCard key={m.meetId} meet={m} status="ended" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} />)}
                   </div>
                 </Section>
               )}
@@ -433,6 +458,15 @@ export default function MeetingsPage() {
           )}
         </div>
       </div>
+
+      {/* Meeting Summary Modal */}
+      {summaryModal && (
+        <MeetingSummaryModal
+          meetId={summaryModal.meetId}
+          meetTitle={summaryModal.meetTitle}
+          onClose={() => setSummaryModal(null)}
+        />
+      )}
     </>
   );
 }

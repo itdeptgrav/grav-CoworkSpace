@@ -32,7 +32,8 @@ export default function NewMeetPage() {
 
   // ── Auth guard ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!loading && (!user || role !== "ceo")) {
+    // AFTER — TL allowed through:
+    if (!loading && (!user || (role !== "ceo" && role !== "tl"))) {
       router.push(user ? "/coworking" : "/coworking-login");
     }
   }, [user, role, loading, router]);
@@ -99,7 +100,7 @@ export default function NewMeetPage() {
     }
   };
 
-  if (loading || !user || role !== "ceo") return null;
+  if (loading || !user || (role !== "ceo" && role !== "tl")) return null;
 
   const empName = (emp) =>
     emp.role === "tl" && emp.department

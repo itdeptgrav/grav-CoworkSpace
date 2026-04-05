@@ -19,11 +19,8 @@ export default function CoworkingLayout({ children }) {
     const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
     const pathname = usePathname();
 
-    // ── Bypass shell entirely for meeting room ──────────────────────────────
-    // LiveKit VideoConference needs true full-screen with no sidebar/header.
-    if (pathname?.includes("/cowork-meeting/")) {
-        return <>{children}</>;
-    }
+    // ── Room phase covers shell with position:fixed z-index:9999
+    // No bypass needed — lobby/prejoin should show the shell normally
 
     if (loading) {
         return (

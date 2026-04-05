@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
-import { createEmployee, listEmployees } from "../../../lib/coworkApi";
+import { createEmployee, listEmployees, deleteEmployee } from "../../../lib/coworkApi";
 import { GwAvatar } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseAuth } from "../../../lib/coworkFirebase";
 
@@ -46,6 +46,9 @@ export default function CreateEmployeePage() {
 
   // ── Reset password modal state ──────────────────────────────────────────
   const [resetModal, setResetModal] = useState(null);  // { employeeId, name }
+  const [deleteModal, setDeleteModal] = useState(null); // { employeeId, name, email }
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [resetPwd, setResetPwd] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState("");
@@ -97,6 +100,25 @@ export default function CreateEmployeePage() {
   const closeReset = () => {
     if (resetBusy) return;
     setResetModal(null);
+  };
+
+  // ── Delete employee ────────────────────────────────────────────────────────
+  const openDelete = (emp) => { setDeleteModal(emp); setDeleteError(""); };
+  const closeDelete = () => { if (deleteBusy) return; setDeleteModal(null); setDeleteError(""); };
+  const handleDelete = async () => {
+    if (!deleteModal || deleteBusy) return;
+    setDeleteBusy(true); setDeleteError("");
+    try {
+      await deleteEmployee(deleteModal.employeeId);
+      setDeleteModal(null);
+      // Refresh employee list
+      const data = await listEmployees();
+      setEmployees(data.employees || []);
+    } catch (e) {
+      setDeleteError(e.message || "Delete failed. Please try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
   const handleReset = async (e) => {
@@ -321,20 +343,90 @@ export default function CreateEmployeePage() {
                     {/* Actions */}
                     <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
                       {emp.role !== "ceo" && (
-                        <button
-                          onClick={() => openReset(emp)}
-                          style={{ padding: "5px 12px", border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", color: "#374151", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
-                          onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#fca5a5"; e.currentTarget.style.color = "#b91c1c"; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; }}
-                        >
-                          Reset Password
-                        </button>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={() => openReset(emp)}
+                            style={{ padding: "5px 12px", border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", color: "#374151", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#fffbeb"; e.currentTarget.style.borderColor = "#fcd34d"; e.currentTarget.style.color = "#92400e"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; }}
+                          >
+                            Reset Password
+                          </button>
+                          <button
+                            onClick={() => openDelete(emp)}
+                            style={{ padding: "5px 12px", border: "1px solid #fca5a5", borderRadius: 4, background: "#fff5f5", color: "#dc2626", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#ef4444"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff5f5"; e.currentTarget.style.borderColor = "#fca5a5"; }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── DELETE EMPLOYEE MODAL ──────────────────────────────────── */}
+      {deleteModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget) closeDelete(); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 400, boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "sans-serif", overflow: "hidden" }}>
+
+            {/* Red header */}
+            <div style={{ background: "#fef2f2", borderBottom: "1px solid #fecaca", padding: "18px 24px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#fee2e2", border: "1px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>
+                🗑️
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#991b1b" }}>Delete Employee</div>
+                <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 2 }}>
+                  {deleteModal.name} &nbsp;·&nbsp; {deleteModal.employeeId}
+                </div>
+              </div>
+              <button onClick={closeDelete} disabled={deleteBusy}
+                style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", lineHeight: 1 }}>
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "20px 24px" }}>
+              <p style={{ fontSize: 14, color: "#374151", margin: "0 0 10px", lineHeight: 1.6 }}>
+                This will permanently delete <strong>{deleteModal.name}</strong> from both the app and Firebase Authentication.
+              </p>
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#6b7280", lineHeight: 1.7 }}>
+                <div>📧 <strong>Email:</strong> {deleteModal.email}</div>
+                <div>🆔 <strong>ID:</strong> {deleteModal.employeeId}</div>
+                <div>👤 <strong>Role:</strong> {deleteModal.role}</div>
+              </div>
+              <p style={{ fontSize: 12, color: "#dc2626", margin: "12px 0 0", lineHeight: 1.5 }}>
+                ⚠️ After deletion the same email can be re-registered as a new employee.
+              </p>
+              {deleteError && (
+                <div style={{ marginTop: 10, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, fontSize: 12, color: "#dc2626" }}>
+                  {deleteError}
+                </div>
+              )}
+            </div>
+
+            {/* Footer buttons */}
+            <div style={{ padding: "12px 24px 20px", display: "flex", gap: 10 }}>
+              <button onClick={closeDelete} disabled={deleteBusy}
+                style={{ flex: 1, padding: "9px 0", border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: deleteBusy ? "not-allowed" : "pointer", fontFamily: "sans-serif" }}>
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleteBusy}
+                style={{ flex: 1, padding: "9px 0", border: "none", borderRadius: 6, background: deleteBusy ? "#fca5a5" : "#dc2626", color: "#fff", fontSize: 13, fontWeight: 600, cursor: deleteBusy ? "not-allowed" : "pointer", fontFamily: "sans-serif", transition: "background 0.15s" }}>
+                {deleteBusy ? "Deleting…" : "Yes, Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}

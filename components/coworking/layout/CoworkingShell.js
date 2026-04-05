@@ -1376,9 +1376,26 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         @media (max-width: 768px) {
           .cw-notif-popup {
-            width: calc(100vw - 24px);
-            right: -8px;
+            /* On mobile: fixed overlay anchored to top of screen, full-width with margin */
+            position: fixed;
+            top: 60px;
+            left: 12px;
+            right: 12px;
+            width: auto;
+            max-height: 70vh;
+            border-radius: 16px;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.1);
           }
+        }
+        @media (max-width: 400px) {
+          .cw-notif-popup {
+            top: 54px;
+            left: 8px;
+            right: 8px;
+            max-height: 75vh;
+          }
+          .cw-notif-popup-item-title { font-size: 13px; }
+          .cw-notif-popup-head { padding: 12px 14px; }
         }
         .cw-topbar-avatar {
           width: 34px; height: 34px;
@@ -1615,7 +1632,25 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                         <div className="cw-notif-popup-empty">No notifications yet</div>
                       ) : (
                         notifications.slice(0, 15).map((n, i) => (
-                          <div key={n.id || i} className="cw-notif-popup-item" style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)" }}>
+                          <div key={n.id || i} className="cw-notif-popup-item"
+                            style={{ background: n.read ? "transparent" : "rgba(26,115,232,0.03)", cursor: "pointer" }}
+                            onClick={() => {
+                              setNotifOpen(false);
+                              const d = n.data || {};
+                              const t = n.type || "";
+                              if (["task_assigned", "task_confirmed", "task_started", "task_update", "task_forwarded",
+                                "task_chat", "daily_report", "deadline_changed"].includes(t) || t.startsWith("completion")) {
+                                if (d.taskId) localStorage.setItem("selectedTaskId", d.taskId);
+                                router.push("/coworking/tasks");
+                              } else if (t === "group_message" || t === "group_added") {
+                                router.push(d.groupId ? `/coworking/create-group/group-chat/${d.groupId}` : "/coworking/create-group");
+                              } else if (t === "direct_message") {
+                                router.push("/coworking/direct-messages");
+                              } else if (t === "meet_scheduled") {
+                                router.push("/coworking/schedule-meet");
+                              }
+                            }}
+                          >
                             <span className={`cw-notif-popup-item-dot${n.read ? " read" : ""}`} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div className="cw-notif-popup-item-title">{n.title}</div>
