@@ -905,10 +905,30 @@ export default function Dashboard() {
   const urgent = trackerTasks.filter(t => ["overdue", "critical", "near"].includes(dlInfo(t.dueDate)?.s)).length;
 
   const now = new Date();
-  const upMeets = meets.filter(m => new Date(m.dateTime) > now).sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-  const pastMts = meets.filter(m => new Date(m.dateTime) <= now).sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+
+  // Use same status logic as schedule-meet page — always respect DB status first
+  const getMeetStatus = (m) => {
+    if (m.status === "ended") return "ended";          // DB says ended → always ended
+    if (m.status === "cancelled") return "ended";
+    const start = new Date(m.dateTime).getTime();
+    const nowMs = Date.now();
+    if (nowMs >= start && nowMs <= start + 2 * 3600000) return "live";
+    if (nowMs > start + 2 * 3600000) return "ended";   // past 2h window → ended
+    return "upcoming";
+  };
+
+  const liveMeets = meets.filter(m => getMeetStatus(m) === "live")
+    .sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+
+  const upMeets = meets.filter(m => getMeetStatus(m) === "upcoming")
+    .sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+
+  const pastMts = meets.filter(m => getMeetStatus(m) === "ended")
+    .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+
   const featMeet = upMeets[0] || pastMts[0];
-  const todayM = meets.filter(m => new Date(m.dateTime).toDateString() === now.toDateString()).length;
+  const todayM = meets.filter(m => new Date(m.dateTime).toDateString() === now.toDateString() && getMeetStatus(m) !== "ended").length;
+  const nextMeet = upMeets[0] || null;
 
   const greeting = (() => { const h = time.getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; })();
 
@@ -966,6 +986,7 @@ export default function Dashboard() {
               <span style={{ fontSize: 10, fontWeight: 700, color: "#4F46E5", fontFamily: "monospace" }}>{pct}%</span>
             </div>
           </div>
+
 
           {/* Quick actions */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 12 }}>
@@ -1046,39 +1067,66 @@ export default function Dashboard() {
           )}
 
           {/* Upcoming Meeting */}
-          {featMeet && (
-            <Card style={{ marginBottom: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <Card style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <Ic n="cal" s={13} c="#6B7280" />
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{upMeets.length > 0 ? "Upcoming Events" : "Recent Events"}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>Upcoming Events</span>
+                {/* count circles */}
+                <div style={{ display: "flex", marginLeft: 4 }}>
+                  {[...Array(Math.min(3, upMeets.length + liveMeets.length))].map((_, i) => (
+                    <div key={i} style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid #fff", marginLeft: i > 0 ? -4 : 0, background: AVC[i % AVC.length], display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6, fontWeight: 700, color: "#fff" }}>
+                      {i + 1}
+                    </div>
+                  ))}
+                  {(upMeets.length + liveMeets.length) > 3 && (
+                    <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid #fff", marginLeft: -4, background: "#E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6, fontWeight: 700, color: "#374151" }}>
+                      +{(upMeets.length + liveMeets.length) - 3}
+                    </div>
+                  )}
+                </div>
               </div>
-              {(upMeets.length > 0 ? upMeets : pastMts).slice(0, 2).map(m => {
-                const dt = new Date(m.dateTime); const past = dt <= now; const today = dt.toDateString() === now.toDateString();
-                return (
-                  <div key={m.meetId} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0", borderBottom: "1px solid #F9FAFB" }}>
-                    <div style={{ textAlign: "center", width: 32, flexShrink: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: past ? "#9CA3AF" : "#111827", lineHeight: 1 }}>{dt.getDate()}</div>
-                      <div style={{ fontSize: 8, color: "#9CA3AF", textTransform: "uppercase" }}>{dt.toLocaleDateString("en-IN", { month: "short" })}</div>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{m.title}</div>
-                      <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>
-                        {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                        {today && !past && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#F0FDF4", color: "#16A34A" }}>Today</span>}
-                        {past && <span style={{ fontSize: 9, color: "#D1D5DB" }}>Ended</span>}
+              <button onClick={() => router.push("/coworking/schedule-meet")} style={{ fontSize: 10, fontWeight: 600, color: "#374151", background: "none", border: "1px solid #E5E7EB", borderRadius: 5, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit" }}>+ New</button>
+            </div>
+
+            {/* Scrollable list — all live then all upcoming, no ended */}
+            <div style={{ maxHeight: 240, overflowY: "auto", marginRight: -4, paddingRight: 4 }}>
+              {[...liveMeets, ...upMeets].length === 0
+                ? <Empty iconName="cal" title="No upcoming meetings" sub="All clear!" />
+                : [...liveMeets, ...upMeets].map(m => {
+                  const dt = new Date(m.dateTime);
+                  const isLive = liveMeets.some(l => l.meetId === m.meetId);
+                  const today = dt.toDateString() === now.toDateString();
+                  return (
+                    <div key={m.meetId} onClick={() => router.push(`/coworking/cowork-meeting/${m.meetId}`)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderBottom: "1px solid #F9FAFB", cursor: "pointer", borderRadius: 7, transition: "background 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      {/* Date block */}
+                      <div style={{ textAlign: "center", width: 32, flexShrink: 0 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: isLive ? "#DC2626" : "#111827", lineHeight: 1 }}>{dt.getDate()}</div>
+                        <div style={{ fontSize: 8, color: "#9CA3AF", textTransform: "uppercase" }}>{dt.toLocaleDateString("en-IN", { month: "short" })}</div>
                       </div>
+                      {/* Title + time */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{m.title}</div>
+                        <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                          {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                          {isLive && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#FEF2F2", color: "#DC2626" }}>● LIVE</span>}
+                          {today && !isLive && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: "#F0FDF4", color: "#16A34A" }}>Today</span>}
+                        </div>
+                      </div>
+                      {/* Join button */}
+                      <button onClick={e => { e.stopPropagation(); router.push(`/coworking/cowork-meeting/${m.meetId}`); }}
+                        style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 6, background: isLive ? "#FEF2F2" : "#F0F9FF", color: isLive ? "#DC2626" : "#1D4ED8", border: "none", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {isLive ? "Join" : "Open"}
+                      </button>
                     </div>
-                    {m.googleMeetLink && !past && (
-                      <a href={m.googleMeetLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 5, background: "#F0FDF4", color: "#16A34A", textDecoration: "none" }}>Join</a>
-                    )}
-                  </div>
-                );
-              })}
-              <button onClick={() => router.push("/coworking/schedule-meet")} style={{ marginTop: 9, width: "100%", padding: "7px 0", border: "1px solid #E5E7EB", borderRadius: 7, background: "transparent", fontSize: 11, fontWeight: 600, color: "#374151", cursor: "pointer", fontFamily: "inherit" }}>
-                + Schedule Meeting
-              </button>
-            </Card>
-          )}
+                  );
+                })
+              }
+            </div>
+          </Card>
 
           {/* Active tasks */}
           <Card style={{ marginBottom: 10 }}>
@@ -1246,6 +1294,7 @@ export default function Dashboard() {
             </div>
           </div>
 
+
           {/* Stats strip */}
           <div className="st-strip">
             {[
@@ -1353,7 +1402,22 @@ export default function Dashboard() {
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <Ic n="cal" s={13} c="#6B7280" />
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{upMeets.length > 0 ? "Upcoming Events" : "Recent Events"}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>Upcoming Events</div>
+                        {/* count circles */}
+                        <div style={{ display: "flex" }}>
+                          {[...Array(Math.min(3, upMeets.length + liveMeets.length))].map((_, i) => (
+                            <div key={i} style={{ width: 15, height: 15, borderRadius: "50%", border: "2px solid #fff", marginLeft: i > 0 ? -4 : 0, background: AVC[i % AVC.length], display: "flex", alignItems: "center", justifyContent: "center", fontSize: 5.5, fontWeight: 700, color: "#fff" }}>
+                              {i + 1}
+                            </div>
+                          ))}
+                          {(upMeets.length + liveMeets.length) > 3 && (
+                            <div style={{ width: 15, height: 15, borderRadius: "50%", border: "2px solid #fff", marginLeft: -4, background: "#E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 5.5, fontWeight: 700, color: "#374151" }}>
+                              +{(upMeets.length + liveMeets.length) - 3}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                       <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>{time.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</div>
                     </div>
                   </div>
@@ -1361,57 +1425,41 @@ export default function Dashboard() {
                     onMouseEnter={e => e.currentTarget.style.borderColor = "#374151"}
                     onMouseLeave={e => e.currentTarget.style.borderColor = "#E5E7EB"}>+ New</button>
                 </div>
-                {!featMeet ? <Empty iconName="cal" title="No meetings" sub="Schedule your first" />
-                  : (() => {
-                    const dt = new Date(featMeet.dateTime); const past = dt <= now; const today = dt.toDateString() === now.toDateString();
-                    return (
-                      <div>
-                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{featMeet.title}</div>
-                        <div style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.6, marginBottom: 10 }}>{featMeet.description || "A scheduled meeting for your team."}</div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 5 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-                            <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: "#F3F4F6", color: "#374151" }}>{dt.toLocaleDateString("en-IN", { month: "short", day: "numeric" })}</span>
-                            <span style={{ fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: "#F9FAFB", color: "#374151" }}>{dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
-                            {today && !past && <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: "#F0FDF4", color: "#16A34A" }}>Today</span>}
-                            {past && <span style={{ fontSize: 9.5, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: "#F9FAFB", color: "#9CA3AF" }}>Ended</span>}
-                            {featMeet.googleMeetLink && !past && (
-                              <a href={featMeet.googleMeetLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: "#F0FDF4", color: "#16A34A", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
-                                <Ic n="video" s={8} c="#16A34A" /> Join
-                              </a>
-                            )}
+
+                {/* All live + upcoming, scrollable, no ended */}
+                {[...liveMeets, ...upMeets].length === 0
+                  ? <Empty iconName="cal" title="No meetings" sub="All clear for now" />
+                  : <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                    {[...liveMeets, ...upMeets].map((m, idx) => {
+                      const dt = new Date(m.dateTime);
+                      const isLive = liveMeets.some(l => l.meetId === m.meetId);
+                      const today = dt.toDateString() === now.toDateString();
+                      return (
+                        <div key={m.meetId} onClick={() => router.push(`/coworking/cowork-meeting/${m.meetId}`)}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 4px", borderBottom: idx < [...liveMeets, ...upMeets].length - 1 ? "1px solid #F3F4F6" : "none", cursor: "pointer" }}>
+                          {/* Date block */}
+                          <div style={{ width: 28, height: 28, borderRadius: 6, background: isLive ? "#FEF2F2" : "#F3F4F6", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 800, color: isLive ? "#DC2626" : "#374151", lineHeight: 1 }}>{dt.getDate()}</div>
+                            <div style={{ fontSize: 6.5, color: "#9CA3AF", textTransform: "uppercase" }}>{dt.toLocaleDateString("en-IN", { month: "short" })}</div>
                           </div>
-                          <div style={{ display: "flex" }}>
-                            {[...Array(Math.min(3, Math.max(1, meets.length)))].map((_, i) => (
-                              <div key={i} style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid #fff", marginLeft: i > 0 ? -5 : 0, background: AVC[i % AVC.length], display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6.5, fontWeight: 700, color: "#fff" }}>
-                                {String.fromCharCode(65 + i)}
-                              </div>
-                            ))}
-                            {meets.length > 3 && <div style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid #fff", marginLeft: -5, background: "#E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 6.5, fontWeight: 700, color: "#374151" }}>+{meets.length - 3}</div>}
+                          {/* Title + time */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</div>
+                            <div style={{ fontSize: 9.5, color: "#9CA3AF", display: "flex", alignItems: "center", gap: 4, marginTop: 1, flexWrap: "wrap" }}>
+                              {dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                              {isLive && <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#FEF2F2", color: "#DC2626" }}>● LIVE</span>}
+                              {today && !isLive && <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "#F0FDF4", color: "#16A34A" }}>Today</span>}
+                            </div>
                           </div>
+                          {/* Open button */}
+                          <button onClick={e => { e.stopPropagation(); router.push(`/coworking/cowork-meeting/${m.meetId}`); }}
+                            style={{ fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 5, background: isLive ? "#FEF2F2" : "#F0F9FF", color: isLive ? "#DC2626" : "#1D4ED8", border: "none", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+                            {isLive ? "Join" : "Open"}
+                          </button>
                         </div>
-                        {upMeets.length > 1 && (
-                          <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #F9FAFB" }}>
-                            {upMeets.slice(1, 2).map(m => {
-                              const d2 = new Date(m.dateTime);
-                              return (
-                                <div key={m.meetId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                  <div style={{ width: 28, height: 28, borderRadius: 6, background: "#F3F4F6", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 800, color: "#374151", lineHeight: 1 }}>{d2.getDate()}</div>
-                                    <div style={{ fontSize: 6.5, color: "#9CA3AF", textTransform: "uppercase" }}>{d2.toLocaleDateString("en-IN", { month: "short" })}</div>
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: "#111827" }}>{m.title}</div>
-                                    <div style={{ fontSize: 9.5, color: "#9CA3AF" }}>{d2.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>
-                                  </div>
-                                  {m.googleMeetLink && <a href={m.googleMeetLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: "#F3F4F6", color: "#374151", textDecoration: "none" }}>Join</a>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()
+                      );
+                    })}
+                  </div>
                 }
               </Card>
             </div>

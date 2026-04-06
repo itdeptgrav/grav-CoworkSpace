@@ -226,14 +226,17 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, employeeId,
     const [showPeople, setShowPeople] = useState(false);
     const [showShare, setShowShare] = useState(false);
     const [copied, setCopied] = useState(false);
-    const [tick, setTick] = useState(0);
+    const [elapsed, setElapsed] = useState(0); // seconds since meeting started
     const participants = useParticipants();
 
-    // Update clock every minute
+    // Tick every second to keep elapsed time accurate
     useEffect(() => {
-        const t = setInterval(() => setTick(n => n + 1), 30000);
+        const startMs = meet?.dateTime ? new Date(meet.dateTime).getTime() : Date.now();
+        const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+        update();
+        const t = setInterval(update, 1000);
         return () => clearInterval(t);
-    }, []);
+    }, [meet?.dateTime]);
 
     const copyCode = () => {
         navigator.clipboard?.writeText(joinCode || "");
@@ -241,15 +244,24 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, employeeId,
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const timeStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    // Format elapsed time as  0:05  /  1:23  /  1:23:45
+    const fmtElapsed = (s) => {
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+        return `${m}:${String(sec).padStart(2, "0")}`;
+    };
+
+    const elapsedStr = fmtElapsed(elapsed);
 
     return (
         <div className="tb-root">
-            {/* Left: LIVE + meeting name + time */}
+            {/* Left: LIVE + meeting name + elapsed duration */}
             <div className="tb-left">
                 <div style={S.livePill}><span style={S.liveDot} />LIVE</div>
                 <span className="tb-meet-name">{meet?.title || "CoWork Meeting"}</span>
-                <span className="tb-time">{timeStr}</span>
+                <span className="tb-elapsed">⏱ {elapsedStr}</span>
             </div>
 
             {/* Right: controls */}
@@ -928,8 +940,8 @@ function GlobalCSS() {
             .tb-root { height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; background:#202124; border-bottom:1px solid #2a2a2a; flex-shrink:0; z-index:10; gap:8px; font-family:'Google Sans','Roboto',sans-serif; }
             .tb-left  { display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
             .tb-right { display:flex; align-items:center; gap:5px; flex-shrink:0; position:relative; }
-            .tb-meet-name { font-size:14px; font-weight:500; color:#E8EAED; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-            .tb-time  { font-size:11px; color:#9AA0A6; font-family:monospace; flex-shrink:0; }
+            .tb-meet-name { font-size:13px; font-weight:500; color:#E8EAED; white-space:normal; word-break:break-word; line-height:1.35; max-width:280px; }
+            .tb-elapsed   { font-size:11px; color:#9AA0A6; font-family:monospace; flex-shrink:0; background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:99px; }
             .tb-btn   { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; background:#2A2A2A; border:1px solid #3C4043; border-radius:8px; color:#BDC1C6; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; transition:all 0.12s; white-space:nowrap; }
             .tb-btn:hover { background:#3C4043; }
             .tb-btn-active { background:#1e3a5f !important; color:#60A5FA !important; border-color:#3B82F6 !important; }
@@ -942,7 +954,7 @@ function GlobalCSS() {
                 .tb-root  { padding:0 8px; gap:4px; height:48px; }
                 .tb-btn   { padding:6px 9px; gap:0; }
                 .tb-btn-label { display:none; }
-                .tb-meet-name { max-width:120px; font-size:13px; }
+                .tb-meet-name { max-width:160px; font-size:12px; }
                 .tb-time  { display:none; }
                 .tb-end-btn   { padding:7px 10px; font-size:12px; }
                 .tb-leave-btn { padding:7px 10px; font-size:12px; }
