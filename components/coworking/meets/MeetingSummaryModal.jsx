@@ -4,9 +4,12 @@
  *
  * Full-page AI meeting summary modal.
  * Responsive: desktop (wide) + mobile (full screen).
+ * 
+ * ── ADDED: Ask AI tab — lets user ask Gemini anything about the meeting
+ *           using the actual audio recordings as context.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { firebaseAuth } from "../../../lib/coworkFirebase";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -27,9 +30,12 @@ async function fetchSummary(meetId) {
     return data;
 }
 
-async function generateSummary(meetId) {
+async function generateSummary(meetId, force = false) {
     const token = await getToken();
-    const res = await fetch(`${BASE}/cowork/audio/summary/${meetId}`, {
+    const url = force
+        ? `${BASE}/cowork/audio/summary/${meetId}?force=true`
+        : `${BASE}/cowork/audio/summary/${meetId}`;
+    const res = await fetch(url, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     });
@@ -65,6 +71,19 @@ async function downloadDocx(meetId) {
     }
 }
 
+// ── Ask AI — calls the new backend endpoint ───────────────────────────────────
+async function askAI(meetId, question) {
+    const token = await getToken();
+    const res = await fetch(`${BASE}/cowork/audio/ask/${meetId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to get answer");
+    return data.answer;
+}
+
 // ── Speaker colours ───────────────────────────────────────────────────────────
 const PALETTE = ["#1a73e8", "#0f9d58", "#d93025", "#f29900", "#7b1fa2", "#00acc1", "#e64a19", "#0097a7", "#558b2f", "#ad1457"];
 const _clrMap = {};
@@ -83,12 +102,27 @@ function getRows(summary) {
     });
 }
 
+// ── Ask AI suggested prompts ──────────────────────────────────────────────────
+const SUGGESTED_QUESTIONS = [
+    "Who was assigned the most tasks?",
+    "What deadlines were mentioned?",
+    "Summarize what each person committed to",
+    "Were there any unresolved issues?",
+    "What was decided in this meeting?",
+];
+
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
     const [phase, setPhase] = useState("loading");
     const [summary, setSummary] = useState(null);
     const [error, setError] = useState("");
     const [activeTab, setActiveTab] = useState("summary");
+
+    // ── Ask AI state ──────────────────────────────────────────────────────────
+    const [aiMessages, setAiMessages] = useState([]); // [{ role: "user"|"ai", text, loading? }]
+    const [aiInput, setAiInput] = useState("");
+    const [aiLoading, setAiLoading] = useState(false);
+    const aiChatEndRef = useRef(null);
 
     useEffect(() => {
         if (!meetId) return;
@@ -109,6 +143,15 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
         return () => window.removeEventListener("keydown", h);
     }, [onClose]);
 
+    // Auto-scroll AI chat to bottom
+    useEffect(() => {
+        if (activeTab === "askai") {
+            aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [aiMessages, activeTab]);
+
+    const [regenToast, setRegenToast] = useState(null); // null | "loading" | "success" | "cached"
+
     const handleGenerate = async () => {
         setPhase("generating"); setError("");
         try {
@@ -117,12 +160,75 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
         } catch (e) { setError(e.message); setPhase("error"); }
     };
 
+    // ── Regenerate: force=true bypasses the 24h cache, always calls Gemini fresh ──
+    const handleRegenerate = async () => {
+        if (regenToast === "loading") return; // prevent double-click
+        setRegenToast("loading");
+        setError("");
+        try {
+            const data = await generateSummary(meetId, true); // force=true
+            setSummary(data.summary);
+            setPhase("done");
+            setActiveTab("summary"); // jump back to summary so user sees fresh content
+            if (data.cached) {
+                setRegenToast("cached");
+            } else {
+                setRegenToast("success");
+            }
+        } catch (e) {
+            setError(e.message);
+            setPhase("error");
+            setRegenToast(null);
+            return;
+        }
+        // Auto-hide toast after 4 seconds
+        setTimeout(() => setRegenToast(null), 4000);
+    };
+
+    // ── Ask AI send handler ───────────────────────────────────────────────────
+    const handleAskAI = async (questionOverride) => {
+        const question = (questionOverride || aiInput).trim();
+        if (!question || aiLoading) return;
+
+        setAiInput("");
+        setAiMessages(prev => [...prev, { role: "user", text: question }]);
+        setAiLoading(true);
+
+        // Add a loading placeholder for the AI response
+        setAiMessages(prev => [...prev, { role: "ai", text: "", loading: true }]);
+
+        try {
+            const answer = await askAI(meetId, question);
+            setAiMessages(prev => {
+                const updated = [...prev];
+                // Replace the last loading placeholder with the real answer
+                const lastIdx = updated.length - 1;
+                if (updated[lastIdx]?.loading) {
+                    updated[lastIdx] = { role: "ai", text: answer, loading: false };
+                }
+                return updated;
+            });
+        } catch (e) {
+            setAiMessages(prev => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (updated[lastIdx]?.loading) {
+                    updated[lastIdx] = { role: "ai", text: `⚠️ Error: ${e.message}`, loading: false, isError: true };
+                }
+                return updated;
+            });
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
     const TABS = [
         { id: "summary", label: "📋 Summary", count: null },
         { id: "convo", label: "💬 Conversation", count: summary ? getRows(summary).length : null },
         { id: "tasks", label: "✅ Tasks", count: summary?.tasksAssigned?.length || null },
         { id: "deadlines", label: "⏰ Deadlines", count: summary?.deadlines?.length || null },
         { id: "actions", label: "🚀 Action Items", count: summary?.actionItems?.length || null },
+        { id: "askai", label: "🤖 Ask AI", count: aiMessages.filter(m => m.role === "user").length || null },
     ];
 
     return (
@@ -132,6 +238,8 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                 @keyframes msm-fadein  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
                 @keyframes msm-spin    { to{transform:rotate(360deg)} }
                 @keyframes msm-rowIn  { from{opacity:0;transform:translateX(-6px)} to{opacity:1;transform:translateX(0)} }
+                @keyframes msm-msgIn  { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+                @keyframes msm-blink  { 0%,100%{opacity:0.2} 50%{opacity:1} }
 
                 .msm-overlay {
                     position:fixed; inset:0; z-index:99999;
@@ -294,6 +402,165 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                     flex:1; text-align:center; padding:40px 24px;
                 }
 
+                /* ── Ask AI styles ── */
+                .msm-askai-wrap {
+                    display:flex; flex-direction:column;
+                    height:100%; overflow:hidden;
+                }
+                .msm-askai-header {
+                    padding:0 0 16px 0;
+                    flex-shrink:0;
+                }
+                .msm-askai-header-title {
+                    font-size:15px; font-weight:700; color:#111827;
+                    display:flex; align-items:center; gap:8px; margin-bottom:4px;
+                }
+                .msm-askai-header-sub {
+                    font-size:12px; color:#9AA0A6; line-height:1.5;
+                }
+                .msm-askai-chat {
+                    flex:1; overflow-y:auto;
+                    display:flex; flex-direction:column; gap:14px;
+                    padding:4px 0 12px 0;
+                }
+                .msm-askai-chat::-webkit-scrollbar { width:5px; }
+                .msm-askai-chat::-webkit-scrollbar-thumb { background:#E4E7EC; border-radius:3px; }
+
+                /* Empty chat state */
+                .msm-askai-empty {
+                    display:flex; flex-direction:column; align-items:center;
+                    justify-content:center; flex:1;
+                    text-align:center; padding:24px 0 8px;
+                    gap:6px;
+                }
+                .msm-askai-empty-icon { font-size:44px; margin-bottom:6px; }
+                .msm-askai-empty-title { font-size:16px; font-weight:700; color:#111827; margin-bottom:4px; }
+                .msm-askai-empty-sub { font-size:13px; color:#9AA0A6; line-height:1.6; max-width:340px; }
+
+                /* Suggestions */
+                .msm-askai-suggestions {
+                    display:flex; flex-wrap:wrap; gap:8px;
+                    margin-top:16px; justify-content:center;
+                }
+                .msm-askai-suggestion {
+                    padding:8px 14px;
+                    background:#F0F4FF; border:1px solid #DBEAFE;
+                    border-radius:99px;
+                    font-size:12px; font-weight:500; color:#1a73e8;
+                    cursor:pointer; font-family:inherit;
+                    transition:all 0.15s;
+                    text-align:left;
+                }
+                .msm-askai-suggestion:hover {
+                    background:#DBEAFE; border-color:#93C5FD;
+                    transform:translateY(-1px);
+                }
+
+                /* Chat bubbles */
+                .msm-askai-bubble-row {
+                    display:flex; gap:10px; align-items:flex-start;
+                    animation:msm-msgIn 0.22s ease both;
+                }
+                .msm-askai-bubble-row.user { flex-direction:row-reverse; }
+                .msm-askai-avatar {
+                    width:30px; height:30px; border-radius:50%;
+                    display:flex; align-items:center; justify-content:center;
+                    font-size:15px; flex-shrink:0;
+                }
+                .msm-askai-avatar.ai { background:linear-gradient(135deg,#1a73e8,#0D47A1); }
+                .msm-askai-avatar.user { background:#E8F0FE; }
+                .msm-askai-bubble {
+                    max-width:78%; padding:12px 16px;
+                    border-radius:16px; font-size:13.5px; line-height:1.7;
+                }
+                .msm-askai-bubble.user {
+                    background:#1a73e8; color:#fff;
+                    border-bottom-right-radius:4px;
+                }
+                .msm-askai-bubble.ai {
+                    background:#F8FAFF; color:#1F2937;
+                    border:1px solid #DBEAFE;
+                    border-bottom-left-radius:4px;
+                    white-space:pre-wrap;
+                }
+                .msm-askai-bubble.ai.error {
+                    background:#FEF2F2; border-color:#FECDD3; color:#D93025;
+                }
+                /* Loading dots */
+                .msm-askai-dots { display:flex; gap:5px; align-items:center; padding:4px 0; }
+                .msm-askai-dot {
+                    width:7px; height:7px; border-radius:50%;
+                    background:#93C5FD;
+                    animation:msm-blink 1.2s ease-in-out infinite;
+                }
+                .msm-askai-dot:nth-child(2) { animation-delay:0.2s; }
+                .msm-askai-dot:nth-child(3) { animation-delay:0.4s; }
+
+                /* AI input bar */
+                .msm-askai-inputrow {
+                    display:flex; gap:10px; align-items:center;
+                    margin-top:12px; flex-shrink:0;
+                }
+                .msm-askai-input {
+                    flex:1; padding:12px 16px;
+                    border:1.5px solid #E4E7EC; border-radius:12px;
+                    font-size:14px; font-family:inherit; color:#1F2937;
+                    outline:none; background:#fff;
+                    transition:border-color 0.15s;
+                    resize:none; height:46px; line-height:1.5;
+                }
+                .msm-askai-input:focus { border-color:#1a73e8; }
+                .msm-askai-input::placeholder { color:#9AA0A6; }
+                .msm-askai-send {
+                    width:46px; height:46px; border-radius:12px;
+                    background:linear-gradient(135deg,#1a73e8,#0D47A1);
+                    border:none; cursor:pointer;
+                    display:flex; align-items:center; justify-content:center;
+                    flex-shrink:0;
+                    transition:opacity 0.15s, transform 0.1s;
+                    box-shadow:0 4px 12px rgba(26,115,232,0.35);
+                }
+                .msm-askai-send:hover:not(:disabled) { transform:scale(1.05); }
+                .msm-askai-send:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+                .msm-askai-note {
+                    font-size:11px; color:#C4C9D4; text-align:center;
+                    margin-top:8px; flex-shrink:0;
+                }
+
+                /* ── Regen toast ── */
+                @keyframes msm-toastIn { from{opacity:0;transform:translateY(12px) scale(0.95)} to{opacity:1;transform:translateY(0) scale(1)} }
+                @keyframes msm-toastOut { from{opacity:1} to{opacity:0;transform:translateY(6px)} }
+                .msm-regen-toast {
+                    position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+                    z-index:100001;
+                    padding:13px 22px;
+                    border-radius:14px;
+                    font-size:14px; font-weight:600;
+                    display:flex; align-items:center; gap:10px;
+                    box-shadow:0 8px 32px rgba(0,0,0,0.18);
+                    animation:msm-toastIn 0.28s cubic-bezier(.4,0,.2,1) both;
+                    white-space:nowrap;
+                    font-family:'Google Sans','Roboto',sans-serif;
+                    pointer-events:none;
+                }
+                .msm-regen-toast.loading {
+                    background:#1a73e8; color:#fff;
+                }
+                .msm-regen-toast.success {
+                    background:#0f9d58; color:#fff;
+                }
+                .msm-regen-toast.cached {
+                    background:#F29900; color:#fff;
+                }
+                .msm-regen-toast-spin {
+                    width:16px; height:16px;
+                    border:2px solid rgba(255,255,255,0.35);
+                    border-top-color:#fff;
+                    border-radius:50%;
+                    animation:msm-spin 0.8s linear infinite;
+                    flex-shrink:0;
+                }
+
                 /* ── Mobile ── */
                 @media(max-width:640px) {
                     .msm-overlay { padding:0; }
@@ -308,6 +575,7 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                     .msm-footer { padding:12px 18px; }
                     .msm-speaker-cell { width:100px; min-width:90px; }
                     .msm-summary-box { padding:18px; font-size:14px; }
+                    .msm-askai-bubble { max-width:90%; }
                 }
             `}</style>
 
@@ -664,18 +932,125 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                         </div>
                                     )}
 
+                                    {/* ── ASK AI TAB ──────────────────────────────────────────────────── */}
+                                    {activeTab === "askai" && (
+                                        <div className="msm-askai-wrap">
+
+                                            {/* Header */}
+                                            <div className="msm-askai-header">
+                                                <div className="msm-askai-header-title">
+                                                    🤖 Ask Gemini about this meeting
+                                                </div>
+                                                <div className="msm-askai-header-sub">
+                                                    Gemini re-reads the actual audio files and answers your question. Each query takes 20–40 seconds.
+                                                </div>
+                                            </div>
+
+                                            {/* Chat messages */}
+                                            <div className="msm-askai-chat">
+                                                {aiMessages.length === 0 ? (
+                                                    <div className="msm-askai-empty">
+                                                        <div className="msm-askai-empty-icon">🎙️</div>
+                                                        <div className="msm-askai-empty-title">Ask anything about this meeting</div>
+                                                        <div className="msm-askai-empty-sub">
+                                                            "Who was assigned the design task?"<br />
+                                                            "What did Pramod say about testing?"<br />
+                                                            "Summarize the key decisions"
+                                                        </div>
+                                                        <div className="msm-askai-suggestions">
+                                                            {SUGGESTED_QUESTIONS.map((q, i) => (
+                                                                <button
+                                                                    key={i}
+                                                                    className="msm-askai-suggestion"
+                                                                    onClick={() => handleAskAI(q)}
+                                                                    disabled={aiLoading}
+                                                                >
+                                                                    {q}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    aiMessages.map((msg, i) => (
+                                                        <div
+                                                            key={i}
+                                                            className={`msm-askai-bubble-row ${msg.role}`}
+                                                            style={{ animationDelay: `${i * 0.04}s` }}
+                                                        >
+                                                            <div className={`msm-askai-avatar ${msg.role}`}>
+                                                                {msg.role === "ai" ? "🤖" : "👤"}
+                                                            </div>
+                                                            <div className={`msm-askai-bubble ${msg.role}${msg.isError ? " error" : ""}`}>
+                                                                {msg.loading ? (
+                                                                    <div className="msm-askai-dots">
+                                                                        <div className="msm-askai-dot" />
+                                                                        <div className="msm-askai-dot" />
+                                                                        <div className="msm-askai-dot" />
+                                                                    </div>
+                                                                ) : msg.text}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                                <div ref={aiChatEndRef} />
+                                            </div>
+
+                                            {/* Input row */}
+                                            <div className="msm-askai-inputrow">
+                                                <input
+                                                    className="msm-askai-input"
+                                                    type="text"
+                                                    placeholder="Ask anything about this meeting..."
+                                                    value={aiInput}
+                                                    onChange={e => setAiInput(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAskAI(); } }}
+                                                    disabled={aiLoading}
+                                                />
+                                                <button
+                                                    className="msm-askai-send"
+                                                    onClick={() => handleAskAI()}
+                                                    disabled={aiLoading || !aiInput.trim()}
+                                                    title="Send"
+                                                >
+                                                    {aiLoading ? (
+                                                        <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "msm-spin 0.8s linear infinite" }} />
+                                                    ) : (
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                                            <line x1="22" y1="2" x2="11" y2="13" />
+                                                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            </div>
+
+                                            <div className="msm-askai-note">
+                                                Each question re-downloads audio from Drive and sends to Gemini. Questions are independent — no memory between asks.
+                                            </div>
+
+                                        </div>
+                                    )}
+                                    {/* ── END ASK AI TAB ──────────────────────────────────────────────── */}
+
                                 </div>
 
                                 {/* Footer */}
                                 <div className="msm-footer">
-                                    <button onClick={handleGenerate} style={{
+                                    <button onClick={handleRegenerate} disabled={regenToast === "loading"} style={{
                                         padding: "10px 18px",
-                                        background: "#F8F9FA", border: "1px solid #E4E7EC",
+                                        background: regenToast === "loading" ? "#E8F0FE" : "#F8F9FA",
+                                        border: "1px solid #E4E7EC",
                                         borderRadius: 10, fontSize: 13, fontWeight: 600,
-                                        color: "#6B7280", cursor: "pointer", fontFamily: "inherit",
+                                        color: regenToast === "loading" ? "#1a73e8" : "#6B7280",
+                                        cursor: regenToast === "loading" ? "not-allowed" : "pointer",
+                                        fontFamily: "inherit",
                                         display: "flex", alignItems: "center", gap: 6,
+                                        opacity: regenToast === "loading" ? 0.8 : 1,
+                                        transition: "all 0.2s",
                                     }}>
-                                        🔄 Regenerate
+                                        {regenToast === "loading"
+                                            ? <><div style={{ width: 13, height: 13, border: "2px solid #93C5FD", borderTopColor: "#1a73e8", borderRadius: "50%", animation: "msm-spin 0.8s linear infinite" }} />Regenerating…</>
+                                            : <>🔄 Regenerate</>
+                                        }
                                     </button>
                                     <button onClick={() => downloadDocx(meetId)} style={{
                                         flex: 1, padding: "11px 0",
@@ -694,6 +1069,15 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                     </div>
                 </div>
             </div>
+            {/* ── Regenerate toast notification ── */}
+            {regenToast && (
+                <div className={`msm-regen-toast ${regenToast}`}>
+                    {regenToast === "loading" && <div className="msm-regen-toast-spin" />}
+                    {regenToast === "loading" && "Regenerating summary from audio…"}
+                    {regenToast === "success" && <>✅ New summary generated successfully!</>}
+                    {regenToast === "cached" && <>⚠️ Summary returned from cache — try again in a moment</>}
+                </div>
+            )}
         </>
     );
 }
