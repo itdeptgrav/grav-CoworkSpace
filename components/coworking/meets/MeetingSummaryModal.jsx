@@ -4,15 +4,20 @@
  *
  * Full-page AI meeting summary modal.
  * Responsive: desktop (wide) + mobile (full screen).
- * 
+ *
  * ── ADDED: Ask AI tab — lets user ask Gemini anything about the meeting
- *           using the actual audio recordings as context.
+ * ── ADDED: Regenerate with force bypass + success toast
  */
 
 import { useState, useEffect, useRef } from "react";
 import { firebaseAuth } from "../../../lib/coworkFirebase";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+// ── SET YOUR AI AVATAR IMAGE PATH HERE ───────────────────────────────────────
+// Replace with your actual image path, e.g. "/images/ai-avatar.png"
+const AI_AVATAR_SRC = "/grav-logo.png";
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function getToken() {
     const user = firebaseAuth.currentUser;
@@ -71,7 +76,6 @@ async function downloadDocx(meetId) {
     }
 }
 
-// ── Ask AI — calls the new backend endpoint ───────────────────────────────────
 async function askAI(meetId, question) {
     const token = await getToken();
     const res = await fetch(`${BASE}/cowork/audio/ask/${meetId}`, {
@@ -84,8 +88,8 @@ async function askAI(meetId, question) {
     return data.answer;
 }
 
-// ── Speaker colours ───────────────────────────────────────────────────────────
-const PALETTE = ["#1a73e8", "#0f9d58", "#d93025", "#f29900", "#7b1fa2", "#00acc1", "#e64a19", "#0097a7", "#558b2f", "#ad1457"];
+// ── Speaker colours — muted professional palette ──────────────────────────────
+const PALETTE = ["#2563EB", "#059669", "#DC2626", "#D97706", "#7C3AED", "#0891B2", "#C2410C", "#0369A1", "#4D7C0F", "#BE185D"];
 const _clrMap = {};
 let _clrIdx = 0;
 function spkColor(name) {
@@ -93,7 +97,6 @@ function spkColor(name) {
     return _clrMap[name];
 }
 
-// ── Parse dialogue rows ───────────────────────────────────────────────────────
 function getRows(summary) {
     if (summary.dialogue?.length > 0) return summary.dialogue;
     return (summary.conversationFlow || []).map(l => {
@@ -102,7 +105,6 @@ function getRows(summary) {
     });
 }
 
-// ── Ask AI suggested prompts ──────────────────────────────────────────────────
 const SUGGESTED_QUESTIONS = [
     "Who was assigned the most tasks?",
     "What deadlines were mentioned?",
@@ -111,15 +113,45 @@ const SUGGESTED_QUESTIONS = [
     "What was decided in this meeting?",
 ];
 
+const IconSend = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+);
+const IconDownload = () => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+);
+const IconRefresh = () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+);
+const IconClose = () => (
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <line x1="1" y1="1" x2="13" y2="13" /><line x1="13" y1="1" x2="1" y2="13" />
+    </svg>
+);
+
+const TAB_ICONS = {
+    summary: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="2" /><line x1="5" y1="6" x2="11" y2="6" /><line x1="5" y1="9" x2="9" y2="9" /></svg>,
+    convo: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 10a2 2 0 01-2 2H5l-3 2V4a2 2 0 012-2h8a2 2 0 012 2z" /></svg>,
+    tasks: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3,8 6,11 13,4" /><circle cx="8" cy="8" r="7" /></svg>,
+    deadlines: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><polyline points="8,4 8,8 11,10" /></svg>,
+    actions: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="3,2 13,8 3,14" /><line x1="13" y1="2" x2="13" y2="14" /></svg>,
+    askai: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><path d="M6 6.5c0-1.1.9-2 2-2s2 .9 2 2c0 1-1 1.5-2 2v1" /><circle cx="8" cy="12" r=".5" fill="currentColor" /></svg>,
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
     const [phase, setPhase] = useState("loading");
     const [summary, setSummary] = useState(null);
     const [error, setError] = useState("");
     const [activeTab, setActiveTab] = useState("summary");
+    const [regenToast, setRegenToast] = useState(null);
 
-    // ── Ask AI state ──────────────────────────────────────────────────────────
-    const [aiMessages, setAiMessages] = useState([]); // [{ role: "user"|"ai", text, loading? }]
+    const [aiMessages, setAiMessages] = useState([]);
     const [aiInput, setAiInput] = useState("");
     const [aiLoading, setAiLoading] = useState(false);
     const aiChatEndRef = useRef(null);
@@ -136,21 +168,15 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
         })();
     }, [meetId]);
 
-    // Close on Escape key
     useEffect(() => {
         const h = (e) => { if (e.key === "Escape") onClose(); };
         window.addEventListener("keydown", h);
         return () => window.removeEventListener("keydown", h);
     }, [onClose]);
 
-    // Auto-scroll AI chat to bottom
     useEffect(() => {
-        if (activeTab === "askai") {
-            aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        }
+        if (activeTab === "askai") aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [aiMessages, activeTab]);
-
-    const [regenToast, setRegenToast] = useState(null); // null | "loading" | "success" | "cached"
 
     const handleGenerate = async () => {
         setPhase("generating"); setError("");
@@ -160,709 +186,617 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
         } catch (e) { setError(e.message); setPhase("error"); }
     };
 
-    // ── Regenerate: force=true bypasses the 24h cache, always calls Gemini fresh ──
     const handleRegenerate = async () => {
-        if (regenToast === "loading") return; // prevent double-click
-        setRegenToast("loading");
-        setError("");
+        if (regenToast === "loading") return;
+        setRegenToast("loading"); setError("");
         try {
-            const data = await generateSummary(meetId, true); // force=true
+            const data = await generateSummary(meetId, true);
             setSummary(data.summary);
             setPhase("done");
-            setActiveTab("summary"); // jump back to summary so user sees fresh content
-            if (data.cached) {
-                setRegenToast("cached");
-            } else {
-                setRegenToast("success");
-            }
+            setActiveTab("summary");
+            setRegenToast(data.cached ? "cached" : "success");
         } catch (e) {
-            setError(e.message);
-            setPhase("error");
-            setRegenToast(null);
-            return;
+            setError(e.message); setPhase("error"); setRegenToast(null); return;
         }
-        // Auto-hide toast after 4 seconds
         setTimeout(() => setRegenToast(null), 4000);
     };
 
-    // ── Ask AI send handler ───────────────────────────────────────────────────
     const handleAskAI = async (questionOverride) => {
         const question = (questionOverride || aiInput).trim();
         if (!question || aiLoading) return;
-
         setAiInput("");
         setAiMessages(prev => [...prev, { role: "user", text: question }]);
         setAiLoading(true);
-
-        // Add a loading placeholder for the AI response
         setAiMessages(prev => [...prev, { role: "ai", text: "", loading: true }]);
-
         try {
             const answer = await askAI(meetId, question);
             setAiMessages(prev => {
-                const updated = [...prev];
-                // Replace the last loading placeholder with the real answer
-                const lastIdx = updated.length - 1;
-                if (updated[lastIdx]?.loading) {
-                    updated[lastIdx] = { role: "ai", text: answer, loading: false };
-                }
-                return updated;
+                const u = [...prev];
+                if (u[u.length - 1]?.loading) u[u.length - 1] = { role: "ai", text: answer, loading: false };
+                return u;
             });
         } catch (e) {
             setAiMessages(prev => {
-                const updated = [...prev];
-                const lastIdx = updated.length - 1;
-                if (updated[lastIdx]?.loading) {
-                    updated[lastIdx] = { role: "ai", text: `⚠️ Error: ${e.message}`, loading: false, isError: true };
-                }
-                return updated;
+                const u = [...prev];
+                if (u[u.length - 1]?.loading) u[u.length - 1] = { role: "ai", text: `Error: ${e.message}`, loading: false, isError: true };
+                return u;
             });
-        } finally {
-            setAiLoading(false);
-        }
+        } finally { setAiLoading(false); }
     };
 
     const TABS = [
-        { id: "summary", label: "📋 Summary", count: null },
-        { id: "convo", label: "💬 Conversation", count: summary ? getRows(summary).length : null },
-        { id: "tasks", label: "✅ Tasks", count: summary?.tasksAssigned?.length || null },
-        { id: "deadlines", label: "⏰ Deadlines", count: summary?.deadlines?.length || null },
-        { id: "actions", label: "🚀 Action Items", count: summary?.actionItems?.length || null },
-        { id: "askai", label: "🤖 Ask AI", count: aiMessages.filter(m => m.role === "user").length || null },
+        { id: "summary", label: "Summary", icon: TAB_ICONS.summary, count: null },
+        { id: "convo", label: "Conversation", icon: TAB_ICONS.convo, count: summary ? getRows(summary).length : null },
+        { id: "tasks", label: "Tasks", icon: TAB_ICONS.tasks, count: summary?.tasksAssigned?.length || null },
+        { id: "deadlines", label: "Deadlines", icon: TAB_ICONS.deadlines, count: summary?.deadlines?.length || null },
+        { id: "actions", label: "Action Items", icon: TAB_ICONS.actions, count: summary?.actionItems?.length || null },
+        { id: "askai", label: "Ask AI", icon: TAB_ICONS.askai, count: aiMessages.filter(m => m.role === "user").length || null },
     ];
 
     return (
         <>
-            {/* ── Responsive CSS ── */}
             <style>{`
-                @keyframes msm-fadein  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-                @keyframes msm-spin    { to{transform:rotate(360deg)} }
-                @keyframes msm-rowIn  { from{opacity:0;transform:translateX(-6px)} to{opacity:1;transform:translateX(0)} }
-                @keyframes msm-msgIn  { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-                @keyframes msm-blink  { 0%,100%{opacity:0.2} 50%{opacity:1} }
+                @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=DM+Mono:wght@400;500&display=swap');
 
-                .msm-overlay {
+                @keyframes _in    { from{opacity:0;transform:scale(0.97) translateY(12px)} to{opacity:1;transform:scale(1) translateY(0)} }
+                @keyframes _spin  { to{transform:rotate(360deg)} }
+                @keyframes _row   { from{opacity:0;transform:translateX(-3px)} to{opacity:1;transform:translateX(0)} }
+                @keyframes _msg   { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
+                @keyframes _dot   { 0%,100%{opacity:0.25;transform:scale(0.75)} 50%{opacity:1;transform:scale(1)} }
+                @keyframes _toast { from{opacity:0;transform:translateX(-50%) translateY(6px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
+
+                *,*::before,*::after { box-sizing:border-box; }
+
+                .M-overlay {
                     position:fixed; inset:0; z-index:99999;
-                    background:rgba(0,0,0,0.55);
+                    background:rgba(2,8,23,0.65);
                     display:flex; align-items:center; justify-content:center;
-                    padding:16px;
-                    backdrop-filter:blur(6px);
-                    font-family:'Google Sans','Roboto',sans-serif;
+                    padding:20px;
+                    backdrop-filter:blur(10px) saturate(1.4);
+                    font-family:'DM Sans',system-ui,sans-serif;
                 }
-                .msm-modal {
+                .M-modal {
                     background:#fff;
-                    border-radius:20px;
-                    width:100%; max-width:960px;
-                    height:92vh; max-height:860px;
+                    border-radius:14px;
+                    width:100%; max-width:980px;
+                    height:90vh; max-height:880px;
                     display:flex; flex-direction:column;
-                    box-shadow:0 32px 80px rgba(0,0,0,0.3);
-                    animation:msm-fadein 0.28s cubic-bezier(.4,0,.2,1);
+                    box-shadow:0 0 0 1px rgba(0,0,0,0.07),0 20px 60px rgba(0,0,0,0.22);
+                    animation:_in 0.22s cubic-bezier(0.16,1,0.3,1) both;
                     overflow:hidden;
                 }
-                .msm-header {
+
+                /* Header */
+                .M-hdr {
                     display:flex; align-items:center; justify-content:space-between;
-                    padding:20px 28px;
-                    border-bottom:1px solid #E4E7EC;
+                    padding:16px 22px;
                     background:#fff;
+                    border-bottom:1px solid #EEF0F3;
                     flex-shrink:0;
                 }
-                .msm-body {
-                    flex:1; display:flex; flex-direction:column;
-                    overflow:hidden; padding:0;
+                .M-hdr-eyebrow {
+                    font-size:10px; font-weight:600; letter-spacing:0.1em;
+                    color:#9CA3AF; text-transform:uppercase; margin-bottom:3px;
                 }
-                .msm-participants {
-                    display:flex; align-items:center; flex-wrap:wrap; gap:8px;
-                    padding:14px 28px;
-                    background:#F8FAFF;
-                    border-bottom:1px solid #E4E7EC;
+                .M-hdr-title {
+                    font-size:16px; font-weight:600; color:#111827;
+                    display:flex; align-items:center; gap:8px; line-height:1.2;
+                }
+                .M-hdr-id {
+                    font-family:'DM Mono',monospace;
+                    font-size:10.5px; color:#6B7280;
+                    background:#F3F4F6; border:1px solid #E5E7EB;
+                    padding:2px 8px; border-radius:4px;
+                }
+                .M-close {
+                    width:30px; height:30px; border-radius:7px;
+                    border:1px solid #E5E7EB; background:#F9FAFB;
+                    cursor:pointer; display:flex; align-items:center; justify-content:center;
+                    color:#6B7280; transition:all 0.12s; flex-shrink:0;
+                }
+                .M-close:hover { background:#F3F4F6; color:#111827; border-color:#D1D5DB; }
+
+                /* Participants */
+                .M-chips {
+                    display:flex; align-items:center; flex-wrap:wrap; gap:5px;
+                    padding:9px 22px;
+                    background:#FAFAFA;
+                    border-bottom:1px solid #EEF0F3;
                     flex-shrink:0;
                 }
-                .msm-tabs {
-                    display:flex; gap:0;
-                    border-bottom:2px solid #E4E7EC;
-                    flex-shrink:0;
-                    overflow-x:auto;
-                    scrollbar-width:none;
-                    padding:0 28px;
-                    background:#fff;
+                .M-chips-lbl {
+                    font-size:10px; font-weight:700; letter-spacing:0.08em;
+                    color:#9CA3AF; text-transform:uppercase; margin-right:3px;
                 }
-                .msm-tabs::-webkit-scrollbar { display:none; }
-                .msm-tab {
-                    padding:14px 20px;
-                    font-size:13px; font-weight:500;
+                .M-chip {
+                    display:inline-flex; align-items:center; gap:4px;
+                    padding:3px 9px; border-radius:5px;
+                    font-size:11.5px; font-weight:500;
+                }
+                .M-chip-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+
+                /* Tabs */
+                .M-tabs {
+                    display:flex; background:#fff;
+                    border-bottom:1px solid #EEF0F3;
+                    flex-shrink:0; overflow-x:auto; scrollbar-width:none;
+                    padding:0 22px;
+                }
+                .M-tabs::-webkit-scrollbar { display:none; }
+                .M-tab {
+                    display:flex; align-items:center; gap:5px;
+                    padding:11px 14px;
+                    font-size:12.5px; font-weight:500;
                     color:#6B7280; background:transparent;
                     border:none; border-bottom:2px solid transparent;
                     cursor:pointer; font-family:inherit;
-                    white-space:nowrap;
-                    margin-bottom:-2px;
-                    transition:all 0.15s;
-                    display:flex; align-items:center; gap:6px;
-                }
-                .msm-tab:hover { color:#1a73e8; background:#F0F4FF; }
-                .msm-tab.active {
-                    color:#1a73e8;
-                    border-bottom-color:#1a73e8;
-                    font-weight:700;
-                }
-                .msm-tab-count {
-                    background:#E8F0FE; color:#1a73e8;
-                    border-radius:99px; padding:1px 7px;
-                    font-size:11px; font-weight:700;
-                }
-                .msm-content {
-                    flex:1; overflow-y:auto;
-                    padding:28px;
-                }
-                .msm-content::-webkit-scrollbar { width:6px; }
-                .msm-content::-webkit-scrollbar-thumb { background:#E4E7EC; border-radius:3px; }
-                .msm-footer {
-                    display:flex; gap:12px; align-items:center;
-                    padding:16px 28px;
-                    border-top:1px solid #E4E7EC;
-                    background:#fff;
-                    flex-shrink:0;
-                }
-                /* Dialogue table */
-                .msm-dialogue-table {
-                    width:100%;
-                    border:1px solid #E4E7EC;
-                    border-radius:12px;
-                    overflow:hidden;
-                    border-collapse:collapse;
-                }
-                .msm-dialogue-table th {
-                    text-align:left; padding:12px 20px;
-                    background:#F8F9FA;
-                    font-size:11px; font-weight:700;
-                    color:#6B7280; text-transform:uppercase; letter-spacing:0.06em;
-                    border-bottom:1px solid #E4E7EC;
-                }
-                .msm-dialogue-table td {
-                    padding:13px 20px;
-                    vertical-align:top;
-                    font-size:13.5px;
-                    border-bottom:1px solid #F1F3F4;
-                    line-height:1.6;
-                }
-                .msm-dialogue-table tr:last-child td { border-bottom:none; }
-                .msm-dialogue-table tr:nth-child(even) td { background:#FAFBFF; }
-                .msm-dialogue-table tr { animation:msm-rowIn 0.18s ease both; }
-                .msm-speaker-cell {
-                    width:160px; min-width:130px;
-                    font-weight:700;
-                }
-                /* Task card */
-                .msm-task {
-                    background:#F0FDF4; border:1px solid #BBF7D0;
-                    border-radius:10px; padding:14px 18px; margin-bottom:10px;
-                }
-                .msm-task-name { font-size:11px; font-weight:700; color:#16A34A; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.04em; }
-                .msm-task-text { font-size:13.5px; color:#1F2937; line-height:1.6; }
-                /* Deadline card */
-                .msm-deadline {
-                    display:flex; gap:14px; align-items:flex-start;
-                    background:#FFF7ED; border:1px solid #FED7AA;
-                    border-radius:10px; padding:14px 18px; margin-bottom:10px;
-                }
-                /* Action item */
-                .msm-action {
-                    display:flex; gap:12px; align-items:flex-start;
-                    padding:12px 0; border-bottom:1px solid #F1F3F4;
-                }
-                .msm-action:last-child { border-bottom:none; }
-                .msm-action-num {
-                    width:26px; height:26px; border-radius:50%;
-                    background:#EBF3FE; color:#1a73e8;
-                    font-size:12px; font-weight:700;
-                    display:flex; align-items:center; justify-content:center;
-                    flex-shrink:0; margin-top:1px;
-                }
-                /* Summary box */
-                .msm-summary-box {
-                    background:linear-gradient(135deg,#F8FAFF,#EFF6FF);
-                    border:1px solid #DBEAFE;
-                    border-radius:14px; padding:24px 28px;
-                    font-size:15px; color:#1F2937; line-height:1.85;
+                    white-space:nowrap; margin-bottom:-1px;
+                    transition:color 0.12s;
                     letter-spacing:0.01em;
                 }
-                .msm-meta {
-                    font-size:12px; color:#9AA0A6; margin-top:14px;
-                    display:flex; align-items:center; gap:10px;
+                .M-tab:hover { color:#1F2937; }
+                .M-tab.on { color:#2563EB; border-bottom-color:#2563EB; font-weight:600; }
+                .M-badge {
+                    background:#EFF6FF; color:#2563EB;
+                    border-radius:4px; padding:1px 5px;
+                    font-size:10px; font-weight:700;
+                    font-family:'DM Mono',monospace;
                 }
-                .msm-meta-dot { width:3px; height:3px; border-radius:50%; background:#D1D5DB; }
-                /* Empty state */
-                .msm-empty {
-                    text-align:center; padding:48px 24px;
-                    color:#9AA0A6;
-                }
-                /* Center state */
-                .msm-center {
-                    display:flex; flex-direction:column;
-                    align-items:center; justify-content:center;
-                    flex:1; text-align:center; padding:40px 24px;
-                }
+                .M-tab.on .M-badge { background:#DBEAFE; }
 
-                /* ── Ask AI styles ── */
-                .msm-askai-wrap {
-                    display:flex; flex-direction:column;
-                    height:100%; overflow:hidden;
-                }
-                .msm-askai-header {
-                    padding:0 0 16px 0;
-                    flex-shrink:0;
-                }
-                .msm-askai-header-title {
-                    font-size:15px; font-weight:700; color:#111827;
-                    display:flex; align-items:center; gap:8px; margin-bottom:4px;
-                }
-                .msm-askai-header-sub {
-                    font-size:12px; color:#9AA0A6; line-height:1.5;
-                }
-                .msm-askai-chat {
-                    flex:1; overflow-y:auto;
-                    display:flex; flex-direction:column; gap:14px;
-                    padding:4px 0 12px 0;
-                }
-                .msm-askai-chat::-webkit-scrollbar { width:5px; }
-                .msm-askai-chat::-webkit-scrollbar-thumb { background:#E4E7EC; border-radius:3px; }
+                /* Body / content */
+                .M-body { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+                .M-scroll { flex:1; overflow-y:auto; padding:22px; }
+                .M-scroll::-webkit-scrollbar { width:4px; }
+                .M-scroll::-webkit-scrollbar-thumb { background:#D1D5DB; border-radius:2px; }
 
-                /* Empty chat state */
-                .msm-askai-empty {
+                /* Center states */
+                .M-center {
                     display:flex; flex-direction:column; align-items:center;
-                    justify-content:center; flex:1;
-                    text-align:center; padding:24px 0 8px;
-                    gap:6px;
+                    justify-content:center; flex:1; text-align:center; padding:48px 24px;
                 }
-                .msm-askai-empty-icon { font-size:44px; margin-bottom:6px; }
-                .msm-askai-empty-title { font-size:16px; font-weight:700; color:#111827; margin-bottom:4px; }
-                .msm-askai-empty-sub { font-size:13px; color:#9AA0A6; line-height:1.6; max-width:340px; }
-
-                /* Suggestions */
-                .msm-askai-suggestions {
-                    display:flex; flex-wrap:wrap; gap:8px;
-                    margin-top:16px; justify-content:center;
-                }
-                .msm-askai-suggestion {
-                    padding:8px 14px;
-                    background:#F0F4FF; border:1px solid #DBEAFE;
-                    border-radius:99px;
-                    font-size:12px; font-weight:500; color:#1a73e8;
-                    cursor:pointer; font-family:inherit;
-                    transition:all 0.15s;
-                    text-align:left;
-                }
-                .msm-askai-suggestion:hover {
-                    background:#DBEAFE; border-color:#93C5FD;
-                    transform:translateY(-1px);
-                }
-
-                /* Chat bubbles */
-                .msm-askai-bubble-row {
-                    display:flex; gap:10px; align-items:flex-start;
-                    animation:msm-msgIn 0.22s ease both;
-                }
-                .msm-askai-bubble-row.user { flex-direction:row-reverse; }
-                .msm-askai-avatar {
-                    width:30px; height:30px; border-radius:50%;
+                .M-state-ico {
+                    width:44px; height:44px; border-radius:11px;
+                    background:#F9FAFB; border:1px solid #E5E7EB;
                     display:flex; align-items:center; justify-content:center;
-                    font-size:15px; flex-shrink:0;
+                    margin-bottom:14px; color:#6B7280;
                 }
-                .msm-askai-avatar.ai { background:linear-gradient(135deg,#1a73e8,#0D47A1); }
-                .msm-askai-avatar.user { background:#E8F0FE; }
-                .msm-askai-bubble {
-                    max-width:78%; padding:12px 16px;
-                    border-radius:16px; font-size:13.5px; line-height:1.7;
-                }
-                .msm-askai-bubble.user {
-                    background:#1a73e8; color:#fff;
-                    border-bottom-right-radius:4px;
-                }
-                .msm-askai-bubble.ai {
-                    background:#F8FAFF; color:#1F2937;
-                    border:1px solid #DBEAFE;
-                    border-bottom-left-radius:4px;
-                    white-space:pre-wrap;
-                }
-                .msm-askai-bubble.ai.error {
-                    background:#FEF2F2; border-color:#FECDD3; color:#D93025;
-                }
-                /* Loading dots */
-                .msm-askai-dots { display:flex; gap:5px; align-items:center; padding:4px 0; }
-                .msm-askai-dot {
-                    width:7px; height:7px; border-radius:50%;
-                    background:#93C5FD;
-                    animation:msm-blink 1.2s ease-in-out infinite;
-                }
-                .msm-askai-dot:nth-child(2) { animation-delay:0.2s; }
-                .msm-askai-dot:nth-child(3) { animation-delay:0.4s; }
+                .M-state-title { font-size:15px; font-weight:600; color:#111827; margin-bottom:5px; }
+                .M-state-sub { font-size:13px; color:#6B7280; line-height:1.65; max-width:340px; }
 
-                /* AI input bar */
-                .msm-askai-inputrow {
-                    display:flex; gap:10px; align-items:center;
-                    margin-top:12px; flex-shrink:0;
-                }
-                .msm-askai-input {
-                    flex:1; padding:12px 16px;
-                    border:1.5px solid #E4E7EC; border-radius:12px;
-                    font-size:14px; font-family:inherit; color:#1F2937;
-                    outline:none; background:#fff;
-                    transition:border-color 0.15s;
-                    resize:none; height:46px; line-height:1.5;
-                }
-                .msm-askai-input:focus { border-color:#1a73e8; }
-                .msm-askai-input::placeholder { color:#9AA0A6; }
-                .msm-askai-send {
-                    width:46px; height:46px; border-radius:12px;
-                    background:linear-gradient(135deg,#1a73e8,#0D47A1);
-                    border:none; cursor:pointer;
-                    display:flex; align-items:center; justify-content:center;
-                    flex-shrink:0;
-                    transition:opacity 0.15s, transform 0.1s;
-                    box-shadow:0 4px 12px rgba(26,115,232,0.35);
-                }
-                .msm-askai-send:hover:not(:disabled) { transform:scale(1.05); }
-                .msm-askai-send:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
-                .msm-askai-note {
-                    font-size:11px; color:#C4C9D4; text-align:center;
-                    margin-top:8px; flex-shrink:0;
+                /* Spinners */
+                .M-spin { border-radius:50%; animation:_spin 0.7s linear infinite; flex-shrink:0; }
+                .M-spin-sm { width:13px;height:13px;border:2px solid rgba(37,99,235,0.2);border-top-color:#2563EB; }
+                .M-spin-md { width:34px;height:34px;border:3px solid #E5E7EB;border-top-color:#2563EB; }
+                .M-spin-w  { width:13px;height:13px;border:2px solid rgba(255,255,255,0.25);border-top-color:#fff; }
+
+                /* Summary prose */
+                .M-prose {
+                    background:#FAFAFA; border:1px solid #E5E7EB;
+                    border-radius:10px; padding:18px 20px;
+                    font-size:13.5px; color:#1F2937; line-height:1.8;
+                    margin-bottom:14px;
                 }
 
-                /* ── Regen toast ── */
-                @keyframes msm-toastIn { from{opacity:0;transform:translateY(12px) scale(0.95)} to{opacity:1;transform:translateY(0) scale(1)} }
-                @keyframes msm-toastOut { from{opacity:1} to{opacity:0;transform:translateY(6px)} }
-                .msm-regen-toast {
-                    position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
-                    z-index:100001;
+                /* Section cards */
+                .M-card { border:1px solid #E5E7EB; border-radius:10px; overflow:hidden; margin-bottom:10px; background:#fff; }
+                .M-card-hdr {
+                    display:flex; align-items:center; gap:7px;
+                    padding:9px 15px;
+                    background:#FAFAFA; border-bottom:1px solid #F3F4F6;
+                    font-size:10.5px; font-weight:700;
+                    letter-spacing:0.07em; text-transform:uppercase;
+                }
+                .M-card-hdr-cnt {
+                    margin-left:auto;
+                    background:#E5E7EB; color:#4B5563;
+                    border-radius:4px; padding:1px 6px;
+                    font-size:10px; font-family:'DM Mono',monospace;
+                }
+                .M-card-body { padding:12px 15px; display:flex; flex-direction:column; gap:7px; }
+
+                /* Task row */
+                .M-task {
+                    display:flex; gap:9px; align-items:flex-start;
+                    padding:9px 12px; border-radius:7px;
+                    background:#F9FAFB; border:1px solid #F3F4F6;
+                }
+                .M-task-tag {
+                    font-size:10px; font-weight:700;
+                    padding:2px 7px; border-radius:4px;
+                    white-space:nowrap; flex-shrink:0;
+                    margin-top:1px; letter-spacing:0.04em;
+                }
+                .M-task-txt { font-size:13px; color:#374151; line-height:1.6; }
+
+                /* Deadline row */
+                .M-dl {
+                    display:flex; gap:9px; align-items:flex-start;
+                    padding:9px 12px; border-radius:7px;
+                    background:#FFFBEB; border:1px solid #FEF3C7;
+                    margin-bottom:7px;
+                }
+                .M-dl-dot { width:5px;height:5px;border-radius:50%;background:#D97706;flex-shrink:0;margin-top:5px; }
+
+                /* Action row */
+                .M-action { display:flex; gap:9px; align-items:flex-start; padding:9px 0; border-bottom:1px solid #F3F4F6; }
+                .M-action:last-child { border-bottom:none; }
+                .M-action-n {
+                    width:19px;height:19px;border-radius:4px;
+                    background:#EFF6FF;color:#2563EB;
+                    font-size:10px;font-weight:700;
+                    font-family:'DM Mono',monospace;
+                    display:flex;align-items:center;justify-content:center;
+                    flex-shrink:0;margin-top:1px;
+                }
+
+                /* More link */
+                .M-more {
+                    font-size:11.5px; color:#2563EB; font-weight:600;
+                    cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-top:2px;
+                }
+                .M-more:hover { text-decoration:underline; }
+
+                /* Meta */
+                .M-meta {
+                    display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+                    font-size:11px; color:#9CA3AF; margin-top:4px;
+                    font-family:'DM Mono',monospace;
+                }
+                .M-meta-sep { color:#D1D5DB; }
+
+                /* Table */
+                .M-tbl { width:100%;border-collapse:collapse;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;font-size:13px; }
+                .M-tbl th { text-align:left;padding:9px 15px;background:#FAFAFA;color:#6B7280;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;border-bottom:1px solid #E5E7EB; }
+                .M-tbl td { padding:10px 15px;vertical-align:top;border-bottom:1px solid #F3F4F6;line-height:1.65;color:#374151; }
+                .M-tbl tr:last-child td { border-bottom:none; }
+                .M-tbl tr:nth-child(even) td { background:#FAFAFA; }
+                .M-tbl tr { animation:_row 0.15s ease both; }
+                .M-tbl-spk { width:140px;min-width:110px; }
+
+                /* Empty */
+                .M-empty { text-align:center;padding:36px 24px;color:#9CA3AF;font-size:13px; }
+
+                /* Footer */
+                .M-footer {
+                    display:flex; gap:9px; align-items:center;
                     padding:13px 22px;
-                    border-radius:14px;
-                    font-size:14px; font-weight:600;
-                    display:flex; align-items:center; gap:10px;
-                    box-shadow:0 8px 32px rgba(0,0,0,0.18);
-                    animation:msm-toastIn 0.28s cubic-bezier(.4,0,.2,1) both;
-                    white-space:nowrap;
-                    font-family:'Google Sans','Roboto',sans-serif;
-                    pointer-events:none;
+                    border-top:1px solid #EEF0F3;
+                    background:#fff; flex-shrink:0;
                 }
-                .msm-regen-toast.loading {
-                    background:#1a73e8; color:#fff;
+                .M-btn-ghost {
+                    display:flex;align-items:center;gap:6px;
+                    padding:8px 15px;
+                    background:#fff;border:1px solid #E5E7EB;border-radius:7px;
+                    font-size:12.5px;font-weight:500;color:#374151;
+                    cursor:pointer;font-family:inherit;transition:all 0.12s;white-space:nowrap;
                 }
-                .msm-regen-toast.success {
-                    background:#0f9d58; color:#fff;
+                .M-btn-ghost:hover:not(:disabled) { background:#F9FAFB;border-color:#D1D5DB; }
+                .M-btn-ghost:disabled { opacity:0.55;cursor:not-allowed; }
+                .M-btn-primary {
+                    flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+                    padding:9px 18px;
+                    background:#1D4ED8;color:#fff;
+                    border:none;border-radius:7px;
+                    font-size:13px;font-weight:600;cursor:pointer;
+                    font-family:inherit;transition:background 0.12s;
+                    letter-spacing:0.01em;
                 }
-                .msm-regen-toast.cached {
-                    background:#F29900; color:#fff;
+                .M-btn-primary:hover { background:#1E40AF; }
+                .M-btn-gen {
+                    display:inline-flex;align-items:center;gap:7px;
+                    padding:10px 24px;
+                    background:#1D4ED8;color:#fff;
+                    border:none;border-radius:7px;
+                    font-size:13.5px;font-weight:600;cursor:pointer;
+                    font-family:inherit;transition:background 0.12s;margin-top:18px;
                 }
-                .msm-regen-toast-spin {
-                    width:16px; height:16px;
-                    border:2px solid rgba(255,255,255,0.35);
-                    border-top-color:#fff;
-                    border-radius:50%;
-                    animation:msm-spin 0.8s linear infinite;
-                    flex-shrink:0;
-                }
+                .M-btn-gen:hover { background:#1E40AF; }
 
-                /* ── Mobile ── */
-                @media(max-width:640px) {
-                    .msm-overlay { padding:0; }
-                    .msm-modal {
-                        border-radius:0; height:100vh; max-height:100vh;
-                    }
-                    .msm-header { padding:16px 18px; }
-                    .msm-participants { padding:10px 18px; }
-                    .msm-tabs { padding:0 8px; }
-                    .msm-tab { padding:12px 12px; font-size:12px; }
-                    .msm-content { padding:18px; }
-                    .msm-footer { padding:12px 18px; }
-                    .msm-speaker-cell { width:100px; min-width:90px; }
-                    .msm-summary-box { padding:18px; font-size:14px; }
-                    .msm-askai-bubble { max-width:90%; }
+                /* Ask AI */
+                .M-ai-wrap { display:flex;flex-direction:column;height:100%;overflow:hidden; }
+                .M-ai-hdr { padding-bottom:12px;flex-shrink:0;border-bottom:1px solid #EEF0F3;margin-bottom:14px; }
+                .M-ai-hdr-title { font-size:13.5px;font-weight:600;color:#111827;margin-bottom:3px; }
+                .M-ai-hdr-sub { font-size:11.5px;color:#9CA3AF; }
+
+                .M-ai-chat { flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-bottom:6px; }
+                .M-ai-chat::-webkit-scrollbar { width:4px; }
+                .M-ai-chat::-webkit-scrollbar-thumb { background:#E5E7EB;border-radius:2px; }
+
+                .M-ai-empty {
+                    display:flex;flex-direction:column;align-items:center;
+                    justify-content:center;flex:1;text-align:center;padding:16px 0;
+                }
+                .M-ai-empty-ico {
+                    width:50px;height:50px;border-radius:12px;
+                    border:1px solid #E5E7EB;background:#F9FAFB;
+                    display:flex;align-items:center;justify-content:center;
+                    margin-bottom:12px;overflow:hidden;
+                }
+                .M-ai-empty-title { font-size:14px;font-weight:600;color:#111827;margin-bottom:4px; }
+                .M-ai-empty-sub { font-size:12px;color:#9CA3AF;line-height:1.65;max-width:300px; }
+
+                .M-ai-suggestions { display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;justify-content:center; }
+                .M-ai-sug {
+                    padding:6px 11px;
+                    background:#fff;border:1px solid #E5E7EB;border-radius:6px;
+                    font-size:12px;font-weight:500;color:#374151;
+                    cursor:pointer;font-family:inherit;transition:all 0.12s;
+                }
+                .M-ai-sug:hover:not(:disabled) { background:#EFF6FF;border-color:#BFDBFE;color:#1D4ED8; }
+                .M-ai-sug:disabled { opacity:0.5;cursor:not-allowed; }
+
+                .M-ai-row { display:flex;gap:9px;align-items:flex-start;animation:_msg 0.16s ease both; }
+                .M-ai-row.user { flex-direction:row-reverse; }
+
+                .M-ai-av {
+                    width:27px;height:27px;border-radius:7px;flex-shrink:0;overflow:hidden;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:11px;font-weight:700;
+                }
+                .M-ai-av.ai { background:#EFF6FF;border:1px solid #BFDBFE; }
+                .M-ai-av.ai img { width:100%;height:100%;object-fit:cover;display:block; }
+                .M-ai-av.user { background:#1D4ED8;color:#fff; }
+
+                .M-ai-bbl {
+                    max-width:75%;padding:10px 13px;border-radius:10px;
+                    font-size:13px;line-height:1.7;
+                }
+                .M-ai-bbl.user { background:#1D4ED8;color:#fff;border-bottom-right-radius:3px; }
+                .M-ai-bbl.ai { background:#FAFAFA;color:#1F2937;border:1px solid #E5E7EB;border-bottom-left-radius:3px;white-space:pre-wrap; }
+                .M-ai-bbl.ai.err { background:#FEF2F2;border-color:#FECDD3;color:#B91C1C; }
+
+                .M-dots { display:flex;gap:4px;align-items:center;padding:2px 0; }
+                .M-dot { width:5px;height:5px;border-radius:50%;background:#9CA3AF;animation:_dot 1.1s ease-in-out infinite; }
+                .M-dot:nth-child(2){animation-delay:0.18s} .M-dot:nth-child(3){animation-delay:0.36s}
+
+                .M-ai-bar { display:flex;gap:7px;align-items:center;margin-top:12px;flex-shrink:0; }
+                .M-ai-inp {
+                    flex:1;padding:9px 13px;
+                    border:1px solid #E5E7EB;border-radius:7px;
+                    font-size:13.5px;font-family:inherit;color:#111827;
+                    outline:none;background:#fff;transition:border-color 0.12s,box-shadow 0.12s;
+                    height:40px;
+                }
+                .M-ai-inp:focus { border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,0.07); }
+                .M-ai-inp::placeholder { color:#9CA3AF; }
+                .M-ai-inp:disabled { background:#F9FAFB; }
+                .M-ai-send {
+                    width:40px;height:40px;border-radius:7px;
+                    background:#1D4ED8;color:#fff;border:none;cursor:pointer;
+                    display:flex;align-items:center;justify-content:center;
+                    flex-shrink:0;transition:background 0.12s;
+                }
+                .M-ai-send:hover:not(:disabled) { background:#1E40AF; }
+                .M-ai-send:disabled { background:#9CA3AF;cursor:not-allowed; }
+                .M-ai-note { font-size:11px;color:#D1D5DB;text-align:center;margin-top:7px;flex-shrink:0; }
+
+                /* Toast */
+                .M-toast {
+                    position:fixed;bottom:22px;left:50%;
+                    transform:translateX(-50%);
+                    z-index:100001;
+                    display:flex;align-items:center;gap:8px;
+                    padding:9px 16px;border-radius:8px;
+                    font-size:12.5px;font-weight:500;
+                    font-family:'DM Sans',system-ui,sans-serif;
+                    box-shadow:0 4px 18px rgba(0,0,0,0.14),0 0 0 1px rgba(0,0,0,0.04);
+                    animation:_toast 0.2s ease both;
+                    white-space:nowrap;pointer-events:none;
+                }
+                .M-toast.loading { background:#1F2937;color:#F9FAFB; }
+                .M-toast.success { background:#14532D;color:#DCFCE7; }
+                .M-toast.cached  { background:#78350F;color:#FEF3C7; }
+                .M-toast-dot { width:5px;height:5px;border-radius:50%;flex-shrink:0; }
+                .M-toast.success .M-toast-dot { background:#4ADE80; }
+                .M-toast.cached  .M-toast-dot { background:#FCD34D; }
+
+                /* Mobile */
+                @media(max-width:640px){
+                    .M-overlay{padding:0;}
+                    .M-modal{border-radius:0;height:100vh;max-height:100vh;}
+                    .M-hdr{padding:13px 15px;}
+                    .M-chips{padding:8px 15px;}
+                    .M-tabs{padding:0 5px;}
+                    .M-tab{padding:10px 11px;font-size:12px;}
+                    .M-scroll{padding:15px;}
+                    .M-footer{padding:10px 15px;}
+                    .M-ai-bbl{max-width:87%;}
+                    .M-tbl-spk{width:85px;min-width:75px;}
                 }
             `}</style>
 
-            <div className="msm-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-                <div className="msm-modal">
+            <div className="M-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+                <div className="M-modal">
 
-                    {/* ── Header ── */}
-                    <div className="msm-header">
-                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-
-                            <div>
-                                <div style={{ fontSize: 20, fontWeight: 500, color: "#1729ea", letterSpacing: "-0.01em" }}>
-                                    Cowork Meeting Summary
-                                </div>
-                                <div style={{ fontSize: 23, fontWeight: 600, color: "#eb1c1c", marginTop: 2 }}>
-                                    {meetTitle || meetId} &nbsp;·&nbsp; <span style={{ fontFamily: "monospace", color: "#0c0101" }}>{meetId}</span>
-                                </div>
+                    {/* Header */}
+                    <div className="M-hdr">
+                        <div>
+                            <div className="M-hdr-eyebrow">Cowork · Meeting Summary</div>
+                            <div className="M-hdr-title">
+                                {meetTitle || meetId}
+                                <span className="M-hdr-id">{meetId}</span>
                             </div>
                         </div>
-                        <button onClick={onClose} style={{
-                            width: 38, height: 38, borderRadius: "50%",
-                            border: "1.5px solid #E4E7EC", background: "#F8F9FA",
-                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                            color: "#6B7280", fontSize: 18, lineHeight: 1,
-                        }}>✕</button>
+                        <button className="M-close" onClick={onClose} aria-label="Close"><IconClose /></button>
                     </div>
 
-                    {/* ── Body ── */}
-                    <div className="msm-body">
+                    {/* Body */}
+                    <div className="M-body">
 
-                        {/* LOADING */}
                         {phase === "loading" && (
-                            <div className="msm-center">
-                                <div style={{ width: 44, height: 44, border: "3px solid #E4E7EC", borderTopColor: "#1a73e8", borderRadius: "50%", animation: "msm-spin 0.8s linear infinite" }} />
-                                <div style={{ fontSize: 14, color: "#6B7280", marginTop: 16 }}>Checking for existing summary…</div>
+                            <div className="M-center">
+                                <div className="M-spin M-spin-md" style={{ marginBottom: 14 }} />
+                                <div style={{ fontSize: 13, color: "#6B7280" }}>Loading summary…</div>
                             </div>
                         )}
 
-                        {/* NO SUMMARY YET */}
                         {phase === "empty" && (
-                            <div className="msm-center">
-                                <div style={{ fontSize: 64, marginBottom: 20 }}>🎙️</div>
-                                <div style={{ fontSize: 20, fontWeight: 800, color: "#111827", marginBottom: 10 }}>
-                                    No summary yet
+                            <div className="M-center">
+                                <div className="M-state-ico">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
                                 </div>
-                                <div style={{ fontSize: 14, color: "#6B7280", maxWidth: 380, lineHeight: 1.7, marginBottom: 32 }}>
-                                    Gemini AI will analyze all audio recordings from this meeting and generate a full summary — including conversation flow, tasks, and deadlines.
-                                </div>
-                                <button onClick={handleGenerate} style={{
-                                    padding: "13px 36px",
-                                    background: "linear-gradient(135deg,#1a73e8,#0D47A1)",
-                                    color: "#fff", border: "none", borderRadius: 12,
-                                    fontSize: 15, fontWeight: 700, cursor: "pointer",
-                                    fontFamily: "inherit",
-                                    boxShadow: "0 6px 20px rgba(26,115,232,0.4)",
-                                }}>
-                                    ✨ Generate AI Summary
+                                <div className="M-state-title">No summary generated</div>
+                                <div className="M-state-sub">Gemini AI will analyze all audio recordings and produce a structured summary with conversation, tasks, and deadlines.</div>
+                                <button className="M-btn-gen" onClick={handleGenerate}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                    Generate Summary
                                 </button>
                             </div>
                         )}
 
-                        {/* GENERATING */}
                         {phase === "generating" && (
-                            <div className="msm-center">
-                                <div style={{ position: "relative", width: 72, height: 72 }}>
-                                    <div style={{ width: 72, height: 72, border: "4px solid #E4E7EC", borderTopColor: "#1a73e8", borderRadius: "50%", animation: "msm-spin 0.9s linear infinite" }} />
-                                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🤖</div>
-                                </div>
-                                <div style={{ fontSize: 17, fontWeight: 700, color: "#111827", marginTop: 20, marginBottom: 10 }}>
-                                    Gemini is analyzing…
-                                </div>
-                                <div style={{ fontSize: 13, color: "#9AA0A6", lineHeight: 1.8, maxWidth: 340 }}>
-                                    Downloading audio files<br />
-                                    → Sending to Gemini AI<br />
-                                    → Extracting conversation, tasks &amp; deadlines<br />
-                                    <span style={{ color: "#1a73e8", fontWeight: 600 }}>Takes 20–60 seconds</span>
+                            <div className="M-center">
+                                <div className="M-spin M-spin-md" style={{ marginBottom: 14 }} />
+                                <div className="M-state-title">Analyzing audio recordings</div>
+                                <div className="M-state-sub" style={{ marginTop: 5 }}>
+                                    Downloading files · Sending to Gemini · Extracting insights<br />
+                                    <span style={{ color: "#2563EB", fontWeight: 600 }}>This takes 20–60 seconds</span>
                                 </div>
                             </div>
                         )}
 
-                        {/* ERROR */}
                         {phase === "error" && (
-                            <div className="msm-center">
-                                <div style={{ fontSize: 52, marginBottom: 16 }}>⚠️</div>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: "#D93025", marginBottom: 10 }}>Something went wrong</div>
-                                <div style={{
-                                    fontSize: 13, color: "#6B7280",
-                                    background: "#FEF2F2", border: "1px solid #FECDD3",
-                                    borderRadius: 10, padding: "14px 20px",
-                                    maxWidth: 420, lineHeight: 1.6, marginBottom: 24,
-                                }}>
+                            <div className="M-center">
+                                <div className="M-state-ico" style={{ background: "#FEF2F2", borderColor: "#FECDD3", color: "#DC2626" }}>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                                </div>
+                                <div className="M-state-title" style={{ color: "#DC2626" }}>Something went wrong</div>
+                                <div style={{ fontSize: 12, color: "#6B7280", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7, padding: "11px 16px", maxWidth: 380, lineHeight: 1.6, margin: "10px 0 18px", textAlign: "left" }}>
                                     {error}
                                 </div>
-                                <button onClick={handleGenerate} style={{
-                                    padding: "11px 28px",
-                                    background: "#1a73e8", color: "#fff",
-                                    border: "none", borderRadius: 10,
-                                    fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                                }}>🔄 Try Again</button>
+                                <button className="M-btn-ghost" onClick={handleGenerate}><IconRefresh /> Try Again</button>
                             </div>
                         )}
 
-                        {/* DONE */}
                         {phase === "done" && summary && (
                             <>
                                 {/* Participants */}
                                 {summary.participants?.length > 0 && (
-                                    <div className="msm-participants">
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", letterSpacing: "0.06em" }}>PARTICIPANTS:</span>
-                                        {summary.participants.map((p, i) => (
-                                            <span key={i} style={{
-                                                padding: "4px 12px",
-                                                background: `${spkColor(p)}18`,
-                                                color: spkColor(p),
-                                                border: `1px solid ${spkColor(p)}40`,
-                                                borderRadius: 99, fontSize: 12, fontWeight: 600,
-                                            }}>{p}</span>
-                                        ))}
+                                    <div className="M-chips">
+                                        <span className="M-chips-lbl">Participants</span>
+                                        {summary.participants.map((p, i) => {
+                                            const c = spkColor(p);
+                                            return (
+                                                <span key={i} className="M-chip" style={{ background: `${c}12`, color: c, border: `1px solid ${c}28` }}>
+                                                    <span className="M-chip-dot" style={{ background: c }} />{p}
+                                                </span>
+                                            );
+                                        })}
                                     </div>
                                 )}
 
                                 {/* Tabs */}
-                                <div className="msm-tabs">
+                                <div className="M-tabs">
                                     {TABS.map(t => (
-                                        <button
-                                            key={t.id}
-                                            className={`msm-tab${activeTab === t.id ? " active" : ""}`}
-                                            onClick={() => setActiveTab(t.id)}
-                                        >
-                                            {t.label}
-                                            {t.count > 0 && <span className="msm-tab-count">{t.count}</span>}
+                                        <button key={t.id} className={`M-tab${activeTab === t.id ? " on" : ""}`} onClick={() => setActiveTab(t.id)}>
+                                            {t.icon}{t.label}
+                                            {t.count > 0 && <span className="M-badge">{t.count}</span>}
                                         </button>
                                     ))}
                                 </div>
 
-                                {/* Tab content */}
-                                <div className="msm-content">
+                                {/* Scrollable content */}
+                                <div className="M-scroll">
 
-                                    {/* SUMMARY TAB — compact dashboard */}
+                                    {/* SUMMARY */}
                                     {activeTab === "summary" && (() => {
-                                        const rows = getRows(summary);
                                         const tasks = summary.tasksAssigned || [];
                                         const deadlines = summary.deadlines || [];
                                         const actions = summary.actionItems || [];
                                         return (
-                                            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                                            <div>
+                                                <div className="M-prose">{summary.summary || "No summary available."}</div>
 
-                                                {/* ── Overview text ── */}
-                                                <div className="msm-summary-box">
-                                                    {summary.summary || "No summary available."}
-                                                </div>
-
-
-                                                {/* ── Tasks compact ── */}
                                                 {tasks.length > 0 && (
-                                                    <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: "14px 18px" }}>
-                                                        <div style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                                                            ✅ Tasks Assigned
-                                                            <span style={{ background: "#16A34A", color: "#fff", borderRadius: 99, padding: "1px 7px", fontSize: 10 }}>{tasks.length}</span>
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#059669" }}>
+                                                            {TAB_ICONS.tasks} Tasks Assigned
+                                                            <span className="M-card-hdr-cnt">{tasks.length}</span>
                                                         </div>
-                                                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                                        <div className="M-card-body">
                                                             {tasks.slice(0, 4).map((t, i) => {
-                                                                const ci = t.indexOf(":");
-                                                                const hasName = ci > 0 && ci < 30;
-                                                                const name = hasName ? t.slice(0, ci).trim() : null;
-                                                                const text = hasName ? t.slice(ci + 1).trim() : t;
-                                                                // Truncate to ~80 chars
-                                                                const short = text.length > 85 ? text.slice(0, 85) + "…" : text;
+                                                                const ci = t.indexOf(":"); const h = ci > 0 && ci < 30;
+                                                                const name = h ? t.slice(0, ci).trim() : null;
+                                                                const text = h ? t.slice(ci + 1).trim() : t;
+                                                                const c = spkColor(name || "task");
                                                                 return (
-                                                                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                                                                        <span style={{ fontSize: 12, fontWeight: 700, color: spkColor(name || "task"), flexShrink: 0, minWidth: 60 }}>
-                                                                            {name || "·"}
-                                                                        </span>
-                                                                        <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>{short}</span>
+                                                                    <div key={i} className="M-task">
+                                                                        {name && <span className="M-task-tag" style={{ background: `${c}12`, color: c }}>{name}</span>}
+                                                                        <span className="M-task-txt">{text.length > 90 ? text.slice(0, 90) + "…" : text}</span>
                                                                     </div>
                                                                 );
                                                             })}
-                                                            {tasks.length > 4 && (
-                                                                <div style={{ fontSize: 12, color: "#16A34A", fontWeight: 600, cursor: "pointer" }} onClick={() => setActiveTab("tasks")}>
-                                                                    +{tasks.length - 4} more → click Tasks tab
-                                                                </div>
-                                                            )}
+                                                            {tasks.length > 4 && <span className="M-more" onClick={() => setActiveTab("tasks")}>+{tasks.length - 4} more →</span>}
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {/* ── Deadlines compact ── */}
                                                 {deadlines.length > 0 && (
-                                                    <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 12, padding: "14px 18px" }}>
-                                                        <div style={{ fontSize: 11, fontWeight: 700, color: "#D97706", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                                                            ⏰ Deadlines
-                                                            <span style={{ background: "#D97706", color: "#fff", borderRadius: 99, padding: "1px 7px", fontSize: 10 }}>{deadlines.length}</span>
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#D97706" }}>
+                                                            {TAB_ICONS.deadlines} Deadlines
+                                                            <span className="M-card-hdr-cnt">{deadlines.length}</span>
                                                         </div>
-                                                        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                                                            {deadlines.slice(0, 3).map((d, i) => {
-                                                                const short = d.length > 90 ? d.slice(0, 90) + "…" : d;
-                                                                return (
-                                                                    <div key={i} style={{ fontSize: 13, color: "#92400E", display: "flex", gap: 8 }}>
-                                                                        <span style={{ flexShrink: 0 }}>›</span>
-                                                                        <span style={{ lineHeight: 1.5 }}>{short}</span>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                            {deadlines.length > 3 && (
-                                                                <div style={{ fontSize: 12, color: "#D97706", fontWeight: 600, cursor: "pointer" }} onClick={() => setActiveTab("deadlines")}>
-                                                                    +{deadlines.length - 3} more → click Deadlines tab
+                                                        <div className="M-card-body">
+                                                            {deadlines.slice(0, 3).map((d, i) => (
+                                                                <div key={i} className="M-dl">
+                                                                    <div className="M-dl-dot" />
+                                                                    <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{d.length > 95 ? d.slice(0, 95) + "…" : d}</span>
                                                                 </div>
-                                                            )}
+                                                            ))}
+                                                            {deadlines.length > 3 && <span className="M-more" onClick={() => setActiveTab("deadlines")}>+{deadlines.length - 3} more →</span>}
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {/* ── Action items compact ── */}
                                                 {actions.length > 0 && (
-                                                    <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: "14px 18px" }}>
-                                                        <div style={{ fontSize: 11, fontWeight: 700, color: "#1a73e8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                                                            🚀 Action Items
-                                                            <span style={{ background: "#1a73e8", color: "#fff", borderRadius: 99, padding: "1px 7px", fontSize: 10 }}>{actions.length}</span>
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#2563EB" }}>
+                                                            {TAB_ICONS.actions} Action Items
+                                                            <span className="M-card-hdr-cnt">{actions.length}</span>
                                                         </div>
-                                                        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                                                            {actions.slice(0, 3).map((a, i) => {
-                                                                const short = a.length > 90 ? a.slice(0, 90) + "…" : a;
-                                                                return (
-                                                                    <div key={i} style={{ fontSize: 13, color: "#1e40af", display: "flex", gap: 8 }}>
-                                                                        <span style={{ flexShrink: 0, fontWeight: 700 }}>{i + 1}.</span>
-                                                                        <span style={{ lineHeight: 1.5 }}>{short}</span>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                            {actions.length > 3 && (
-                                                                <div style={{ fontSize: 12, color: "#1a73e8", fontWeight: 600, cursor: "pointer" }} onClick={() => setActiveTab("actions")}>
-                                                                    +{actions.length - 3} more → click Action Items tab
+                                                        <div style={{ padding: "4px 15px 12px" }}>
+                                                            {actions.slice(0, 3).map((a, i) => (
+                                                                <div key={i} className="M-action">
+                                                                    <span className="M-action-n">{i + 1}</span>
+                                                                    <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, paddingTop: 1 }}>{a.length > 95 ? a.slice(0, 95) + "…" : a}</span>
                                                                 </div>
-                                                            )}
+                                                            ))}
+                                                            {actions.length > 3 && <span className="M-more" style={{ marginTop: 5 }} onClick={() => setActiveTab("actions")}>+{actions.length - 3} more →</span>}
                                                         </div>
                                                     </div>
                                                 )}
 
-                                                {/* ── Meta ── */}
-                                                <div className="msm-meta">
+                                                <div className="M-meta">
                                                     <span>{summary.audioFilesCount || 0} audio files</span>
-                                                    <span className="msm-meta-dot" />
+                                                    <span className="M-meta-sep">·</span>
                                                     <span>{summary.participants?.length || 0} participants</span>
-                                                    <span className="msm-meta-dot" />
-                                                    <span>
-                                                        {summary.createdAtMs
-                                                            ? new Date(summary.createdAtMs).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
-                                                            : "Generated recently"}
-                                                    </span>
+                                                    <span className="M-meta-sep">·</span>
+                                                    <span>{summary.createdAtMs ? new Date(summary.createdAtMs).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "Generated recently"}</span>
                                                 </div>
-
                                             </div>
                                         );
                                     })()}
 
-                                    {/* CONVERSATION TAB */}
+                                    {/* CONVERSATION */}
                                     {activeTab === "convo" && (() => {
                                         const rows = getRows(summary);
-                                        if (rows.length === 0) return (
-                                            <div className="msm-empty">
-                                                <div style={{ fontSize: 40, marginBottom: 12 }}>💬</div>
-                                                <div>No conversation data available.</div>
-                                            </div>
-                                        );
+                                        if (!rows.length) return <div className="M-empty">No conversation data available.</div>;
                                         return (
                                             <div>
-                                                <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 16 }}>
+                                                <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>
                                                     Full Conversation · {rows.length} exchanges
                                                 </div>
-                                                <table className="msm-dialogue-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th className="msm-speaker-cell">Speaker</th>
-                                                            <th>Dialogue</th>
-                                                        </tr>
-                                                    </thead>
+                                                <table className="M-tbl">
+                                                    <thead><tr><th className="M-tbl-spk">Speaker</th><th>Dialogue</th></tr></thead>
                                                     <tbody>
                                                         {rows.map((row, i) => {
                                                             const c = spkColor(row.speaker);
                                                             return (
-                                                                <tr key={i} style={{ animationDelay: `${i * 0.03}s` }}>
-                                                                    <td className="msm-speaker-cell" style={{ color: c }}>
-                                                                        {row.speaker}
-                                                                    </td>
-                                                                    <td style={{ color: "#1F2937" }}>
-                                                                        "{row.text}"
-                                                                    </td>
+                                                                <tr key={i} style={{ animationDelay: `${i * 0.022}s` }}>
+                                                                    <td className="M-tbl-spk" style={{ color: c, fontWeight: 600 }}>{row.speaker}</td>
+                                                                    <td>"{row.text}"</td>
                                                                 </tr>
                                                             );
                                                         })}
@@ -872,23 +806,21 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                         );
                                     })()}
 
-                                    {/* TASKS TAB */}
+                                    {/* TASKS */}
                                     {activeTab === "tasks" && (
                                         <div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 16 }}>
-                                                Tasks Assigned
-                                            </div>
-                                            {(summary.tasksAssigned || []).length === 0
-                                                ? <div className="msm-empty"><div style={{ fontSize: 40 }}>✅</div><div>No tasks were assigned.</div></div>
-                                                : (summary.tasksAssigned || []).map((task, i) => {
-                                                    const ci = task.indexOf(":");
-                                                    const hasName = ci > 0 && ci < 30;
-                                                    const name = hasName ? task.slice(0, ci).trim() : null;
-                                                    const text = hasName ? task.slice(ci + 1).trim() : task;
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Tasks Assigned</div>
+                                            {!summary.tasksAssigned?.length
+                                                ? <div className="M-empty">No tasks were assigned.</div>
+                                                : summary.tasksAssigned.map((task, i) => {
+                                                    const ci = task.indexOf(":"); const h = ci > 0 && ci < 30;
+                                                    const name = h ? task.slice(0, ci).trim() : null;
+                                                    const text = h ? task.slice(ci + 1).trim() : task;
+                                                    const c = spkColor(name || "task");
                                                     return (
-                                                        <div key={i} className="msm-task">
-                                                            {name && <div className="msm-task-name" style={{ color: spkColor(name) }}>{name}</div>}
-                                                            <div className="msm-task-text">{text}</div>
+                                                        <div key={i} className="M-task" style={{ marginBottom: 7 }}>
+                                                            {name && <span className="M-task-tag" style={{ background: `${c}12`, color: c }}>{name}</span>}
+                                                            <span className="M-task-txt">{text}</span>
                                                         </div>
                                                     );
                                                 })
@@ -896,98 +828,86 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                         </div>
                                     )}
 
-                                    {/* DEADLINES TAB */}
+                                    {/* DEADLINES */}
                                     {activeTab === "deadlines" && (
                                         <div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 16 }}>
-                                                Deadlines Mentioned
-                                            </div>
-                                            {(summary.deadlines || []).length === 0
-                                                ? <div className="msm-empty"><div style={{ fontSize: 40 }}>⏰</div><div>No specific deadlines were mentioned.</div></div>
-                                                : (summary.deadlines || []).map((d, i) => (
-                                                    <div key={i} className="msm-deadline">
-                                                        <span style={{ fontSize: 22, flexShrink: 0 }}>⏰</span>
-                                                        <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.6 }}>{d}</div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Deadlines Mentioned</div>
+                                            {!summary.deadlines?.length
+                                                ? <div className="M-empty">No specific deadlines were mentioned.</div>
+                                                : summary.deadlines.map((d, i) => (
+                                                    <div key={i} className="M-dl">
+                                                        <div className="M-dl-dot" />
+                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65 }}>{d}</div>
                                                     </div>
                                                 ))
                                             }
                                         </div>
                                     )}
 
-                                    {/* ACTION ITEMS TAB */}
+                                    {/* ACTIONS */}
                                     {activeTab === "actions" && (
                                         <div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 16 }}>
-                                                Action Items &amp; Next Steps
-                                            </div>
-                                            {(summary.actionItems || []).length === 0
-                                                ? <div className="msm-empty"><div style={{ fontSize: 40 }}>🚀</div><div>No action items recorded.</div></div>
-                                                : (summary.actionItems || []).map((a, i) => (
-                                                    <div key={i} className="msm-action">
-                                                        <div className="msm-action-num">{i + 1}</div>
-                                                        <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.6, paddingTop: 3 }}>{a}</div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Action Items &amp; Next Steps</div>
+                                            {!summary.actionItems?.length
+                                                ? <div className="M-empty">No action items recorded.</div>
+                                                : summary.actionItems.map((a, i) => (
+                                                    <div key={i} className="M-action">
+                                                        <span className="M-action-n">{i + 1}</span>
+                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65, paddingTop: 1 }}>{a}</div>
                                                     </div>
                                                 ))
                                             }
                                         </div>
                                     )}
 
-                                    {/* ── ASK AI TAB ──────────────────────────────────────────────────── */}
+                                    {/* ASK AI */}
                                     {activeTab === "askai" && (
-                                        <div className="msm-askai-wrap">
-
-                                            {/* Header */}
-                                            <div className="msm-askai-header">
-                                                <div className="msm-askai-header-title">
-                                                    🤖 Ask Gemini about this meeting
-                                                </div>
-                                                <div className="msm-askai-header-sub">
-                                                    Gemini re-reads the actual audio files and answers your question. Each query takes 20–40 seconds.
-                                                </div>
+                                        <div className="M-ai-wrap">
+                                            <div className="M-ai-hdr">
+                                                <div className="M-ai-hdr-title">Ask AI about this meeting</div>
+                                                <div className="M-ai-hdr-sub">Gemini re-reads the audio recordings to answer your question · Each query takes 20–40 seconds</div>
                                             </div>
 
-                                            {/* Chat messages */}
-                                            <div className="msm-askai-chat">
+                                            <div className="M-ai-chat">
                                                 {aiMessages.length === 0 ? (
-                                                    <div className="msm-askai-empty">
-                                                        <div className="msm-askai-empty-icon">🎙️</div>
-                                                        <div className="msm-askai-empty-title">Ask anything about this meeting</div>
-                                                        <div className="msm-askai-empty-sub">
-                                                            "Who was assigned the design task?"<br />
-                                                            "What did Pramod say about testing?"<br />
-                                                            "Summarize the key decisions"
+                                                    <div className="M-ai-empty">
+                                                        <div className="M-ai-empty-ico">
+                                                            {/* AI avatar image — set your path in AI_AVATAR_SRC at the top */}
+                                                            <img
+                                                                src={AI_AVATAR_SRC}
+                                                                alt="AI"
+                                                                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                                                onError={(e) => {
+                                                                    e.target.style.display = "none";
+                                                                    e.target.parentNode.style.color = "#6B7280";
+                                                                    e.target.parentNode.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+                                                                }}
+                                                            />
                                                         </div>
-                                                        <div className="msm-askai-suggestions">
+                                                        <div className="M-ai-empty-title">Ask anything about this meeting</div>
+                                                        <div className="M-ai-empty-sub">
+                                                            Who was assigned tasks? What did each person say?<br />What decisions were made?
+                                                        </div>
+                                                        <div className="M-ai-suggestions">
                                                             {SUGGESTED_QUESTIONS.map((q, i) => (
-                                                                <button
-                                                                    key={i}
-                                                                    className="msm-askai-suggestion"
-                                                                    onClick={() => handleAskAI(q)}
-                                                                    disabled={aiLoading}
-                                                                >
-                                                                    {q}
-                                                                </button>
+                                                                <button key={i} className="M-ai-sug" onClick={() => handleAskAI(q)} disabled={aiLoading}>{q}</button>
                                                             ))}
                                                         </div>
                                                     </div>
                                                 ) : (
                                                     aiMessages.map((msg, i) => (
-                                                        <div
-                                                            key={i}
-                                                            className={`msm-askai-bubble-row ${msg.role}`}
-                                                            style={{ animationDelay: `${i * 0.04}s` }}
-                                                        >
-                                                            <div className={`msm-askai-avatar ${msg.role}`}>
-                                                                {msg.role === "ai" ? "🤖" : "👤"}
+                                                        <div key={i} className={`M-ai-row ${msg.role}`} style={{ animationDelay: `${i * 0.025}s` }}>
+                                                            <div className={`M-ai-av ${msg.role}`}>
+                                                                {msg.role === "ai"
+                                                                    ? <img src={AI_AVATAR_SRC} alt="AI" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={(e) => { e.target.style.display = "none"; }} />
+                                                                    : "U"
+                                                                }
                                                             </div>
-                                                            <div className={`msm-askai-bubble ${msg.role}${msg.isError ? " error" : ""}`}>
-                                                                {msg.loading ? (
-                                                                    <div className="msm-askai-dots">
-                                                                        <div className="msm-askai-dot" />
-                                                                        <div className="msm-askai-dot" />
-                                                                        <div className="msm-askai-dot" />
-                                                                    </div>
-                                                                ) : msg.text}
+                                                            <div className={`M-ai-bbl ${msg.role}${msg.isError ? " err" : ""}`}>
+                                                                {msg.loading
+                                                                    ? <div className="M-dots"><div className="M-dot" /><div className="M-dot" /><div className="M-dot" /></div>
+                                                                    : msg.text
+                                                                }
                                                             </div>
                                                         </div>
                                                     ))
@@ -995,73 +915,36 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                                 <div ref={aiChatEndRef} />
                                             </div>
 
-                                            {/* Input row */}
-                                            <div className="msm-askai-inputrow">
+                                            <div className="M-ai-bar">
                                                 <input
-                                                    className="msm-askai-input"
+                                                    className="M-ai-inp"
                                                     type="text"
-                                                    placeholder="Ask anything about this meeting..."
+                                                    placeholder="Ask anything about this meeting…"
                                                     value={aiInput}
                                                     onChange={e => setAiInput(e.target.value)}
                                                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAskAI(); } }}
                                                     disabled={aiLoading}
                                                 />
-                                                <button
-                                                    className="msm-askai-send"
-                                                    onClick={() => handleAskAI()}
-                                                    disabled={aiLoading || !aiInput.trim()}
-                                                    title="Send"
-                                                >
-                                                    {aiLoading ? (
-                                                        <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "msm-spin 0.8s linear infinite" }} />
-                                                    ) : (
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                                            <line x1="22" y1="2" x2="11" y2="13" />
-                                                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                                                        </svg>
-                                                    )}
+                                                <button className="M-ai-send" onClick={() => handleAskAI()} disabled={aiLoading || !aiInput.trim()}>
+                                                    {aiLoading ? <div className="M-spin M-spin-w" /> : <IconSend />}
                                                 </button>
                                             </div>
-
-                                            <div className="msm-askai-note">
-                                                Each question re-downloads audio from Drive and sends to Gemini. Questions are independent — no memory between asks.
-                                            </div>
-
+                                            <div className="M-ai-note">Each question re-downloads audio from Drive and sends to Gemini independently.</div>
                                         </div>
                                     )}
-                                    {/* ── END ASK AI TAB ──────────────────────────────────────────────── */}
 
                                 </div>
 
                                 {/* Footer */}
-                                <div className="msm-footer">
-                                    <button onClick={handleRegenerate} disabled={regenToast === "loading"} style={{
-                                        padding: "10px 18px",
-                                        background: regenToast === "loading" ? "#E8F0FE" : "#F8F9FA",
-                                        border: "1px solid #E4E7EC",
-                                        borderRadius: 10, fontSize: 13, fontWeight: 600,
-                                        color: regenToast === "loading" ? "#1a73e8" : "#6B7280",
-                                        cursor: regenToast === "loading" ? "not-allowed" : "pointer",
-                                        fontFamily: "inherit",
-                                        display: "flex", alignItems: "center", gap: 6,
-                                        opacity: regenToast === "loading" ? 0.8 : 1,
-                                        transition: "all 0.2s",
-                                    }}>
+                                <div className="M-footer">
+                                    <button className="M-btn-ghost" onClick={handleRegenerate} disabled={regenToast === "loading"}>
                                         {regenToast === "loading"
-                                            ? <><div style={{ width: 13, height: 13, border: "2px solid #93C5FD", borderTopColor: "#1a73e8", borderRadius: "50%", animation: "msm-spin 0.8s linear infinite" }} />Regenerating…</>
-                                            : <>🔄 Regenerate</>
+                                            ? <><div className="M-spin M-spin-sm" />Regenerating…</>
+                                            : <><IconRefresh />Regenerate</>
                                         }
                                     </button>
-                                    <button onClick={() => downloadDocx(meetId)} style={{
-                                        flex: 1, padding: "11px 0",
-                                        background: "linear-gradient(135deg,#1a73e8,#0D47A1)",
-                                        color: "#fff", border: "none", borderRadius: 10,
-                                        fontSize: 14, fontWeight: 700,
-                                        cursor: "pointer", fontFamily: "inherit",
-                                        boxShadow: "0 4px 12px rgba(26,115,232,0.3)",
-                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                                    }}>
-                                        ⬇ Download Summary (.docx)
+                                    <button className="M-btn-primary" onClick={() => downloadDocx(meetId)}>
+                                        <IconDownload />Download Summary (.docx)
                                     </button>
                                 </div>
                             </>
@@ -1069,13 +952,13 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                     </div>
                 </div>
             </div>
-            {/* ── Regenerate toast notification ── */}
+
+            {/* Toast */}
             {regenToast && (
-                <div className={`msm-regen-toast ${regenToast}`}>
-                    {regenToast === "loading" && <div className="msm-regen-toast-spin" />}
-                    {regenToast === "loading" && "Regenerating summary from audio…"}
-                    {regenToast === "success" && <>✅ New summary generated successfully!</>}
-                    {regenToast === "cached" && <>⚠️ Summary returned from cache — try again in a moment</>}
+                <div className={`M-toast ${regenToast}`}>
+                    {regenToast === "loading" && <><div className="M-spin M-spin-w" />Regenerating summary from audio…</>}
+                    {regenToast === "success" && <><div className="M-toast-dot" />New summary generated successfully</>}
+                    {regenToast === "cached" && <><div className="M-toast-dot" />Returned from cache — force bypass failed</>}
                 </div>
             )}
         </>
