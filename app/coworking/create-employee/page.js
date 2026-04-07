@@ -55,6 +55,11 @@ export default function CreateEmployeePage() {
   const [resetSuccess, setResetSuccess] = useState("");
   const [showPwd, setShowPwd] = useState(false);
 
+  // ── Change role modal state ─────────────────────────────────────────────
+  const [roleModal, setRoleModal] = useState(null);  // { employeeId, name, currentRole }
+  const [roleBusy, setRoleBusy] = useState(false);
+  const [roleError, setRoleError] = useState("");
+
   useEffect(() => {
     if (!loading && (!user || role !== "ceo")) {
       router.push(user ? "/coworking" : "/");
@@ -118,6 +123,33 @@ export default function CreateEmployeePage() {
       setDeleteError(e.message || "Delete failed. Please try again.");
     } finally {
       setDeleteBusy(false);
+    }
+  };
+
+  // ── Change role ───────────────────────────────────────────────────────────
+  const openRole = (emp) => { setRoleModal({ employeeId: emp.employeeId, name: emp.name, currentRole: emp.role }); setRoleError(""); };
+  const closeRole = () => { if (roleBusy) return; setRoleModal(null); setRoleError(""); };
+  const handleChangeRole = async (newRole) => {
+    if (!roleModal || roleBusy) return;
+    setRoleBusy(true); setRoleError("");
+    try {
+      const user = firebaseAuth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
+      const res = await fetch(`${BASE}/cowork/employee/${roleModal.employeeId}/change-role`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ role: newRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Role change failed");
+      setRoleModal(null);
+      const refreshed = await listEmployees();
+      setEmployees(refreshed.employees || []);
+    } catch (e) {
+      setRoleError(e.message || "Role change failed.");
+    } finally {
+      setRoleBusy(false);
     }
   };
 
@@ -353,6 +385,14 @@ export default function CreateEmployeePage() {
                             Reset Password
                           </button>
                           <button
+                            onClick={() => openRole(emp)}
+                            style={{ padding: "5px 12px", border: "1px solid #bfdbfe", borderRadius: 4, background: "#eff6ff", color: "#1e40af", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#dbeafe"; e.currentTarget.style.borderColor = "#93c5fd"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#eff6ff"; e.currentTarget.style.borderColor = "#bfdbfe"; }}
+                          >
+                            Change Role
+                          </button>
+                          <button
                             onClick={() => openDelete(emp)}
                             style={{ padding: "5px 12px", border: "1px solid #fca5a5", borderRadius: 4, background: "#fff5f5", color: "#dc2626", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
                             onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#ef4444"; }}
@@ -367,6 +407,106 @@ export default function CreateEmployeePage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHANGE ROLE MODAL ──────────────────────────────────────── */}
+      {roleModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget) closeRole(); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 420, boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "sans-serif", overflow: "hidden" }}>
+
+            {/* Header */}
+            <div style={{ background: "#eff6ff", borderBottom: "1px solid #bfdbfe", padding: "18px 24px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#dbeafe", border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>
+                👤
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e3a5f" }}>Change Role</div>
+                <div style={{ fontSize: 12, color: "#3b82f6", marginTop: 2 }}>
+                  {roleModal.name} &nbsp;·&nbsp; {roleModal.employeeId}
+                </div>
+              </div>
+              <button onClick={closeRole} disabled={roleBusy}
+                style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", lineHeight: 1 }}>
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{ fontSize: 13, color: "#374151", marginBottom: 6 }}>
+                Current role: <span style={roleStyle(roleModal.currentRole)}>{roleLabel(roleModal.currentRole)}</span>
+              </div>
+              <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 20px", lineHeight: 1.6 }}>
+                Select the new role for this member. Only CEO can promote/demote roles.
+              </p>
+
+              {/* Role option cards */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Employee option */}
+                <button
+                  onClick={() => handleChangeRole("employee")}
+                  disabled={roleBusy || roleModal.currentRole === "employee"}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
+                    border: roleModal.currentRole === "employee" ? "2px solid #bbf7d0" : "1.5px solid #e5e7eb",
+                    borderRadius: 8, background: roleModal.currentRole === "employee" ? "#f0fdf4" : "#fff",
+                    cursor: roleModal.currentRole === "employee" || roleBusy ? "not-allowed" : "pointer",
+                    opacity: roleModal.currentRole === "employee" ? 0.6 : 1,
+                    textAlign: "left", fontFamily: "sans-serif", transition: "all 0.12s",
+                  }}
+                >
+                  <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>👤</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#14532d" }}>Employee</div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Standard member. Can join meetings and use tasks.</div>
+                  </div>
+                  {roleModal.currentRole === "employee" && <span style={{ marginLeft: "auto", fontSize: 11, color: "#16a34a", fontWeight: 700 }}>CURRENT</span>}
+                </button>
+
+                {/* Team Lead option */}
+                <button
+                  onClick={() => handleChangeRole("tl")}
+                  disabled={roleBusy || roleModal.currentRole === "tl"}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
+                    border: roleModal.currentRole === "tl" ? "2px solid #bfdbfe" : "1.5px solid #e5e7eb",
+                    borderRadius: 8, background: roleModal.currentRole === "tl" ? "#eff6ff" : "#fff",
+                    cursor: roleModal.currentRole === "tl" || roleBusy ? "not-allowed" : "pointer",
+                    opacity: roleModal.currentRole === "tl" ? 0.6 : 1,
+                    textAlign: "left", fontFamily: "sans-serif", transition: "all 0.12s",
+                  }}
+                >
+                  <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏅</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1e3a5f" }}>Team Lead</div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Can start meetings, view recordings, and manage team tasks.</div>
+                  </div>
+                  {roleModal.currentRole === "tl" && <span style={{ marginLeft: "auto", fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>CURRENT</span>}
+                </button>
+              </div>
+
+              {roleError && (
+                <div style={{ marginTop: 14, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, fontSize: 12, color: "#dc2626" }}>
+                  {roleError}
+                </div>
+              )}
+              {roleBusy && (
+                <div style={{ marginTop: 14, textAlign: "center", fontSize: 13, color: "#6b7280" }}>Updating role…</div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: "12px 24px 20px" }}>
+              <button onClick={closeRole} disabled={roleBusy}
+                style={{ width: "100%", padding: "9px 0", border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: roleBusy ? "not-allowed" : "pointer", fontFamily: "sans-serif" }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

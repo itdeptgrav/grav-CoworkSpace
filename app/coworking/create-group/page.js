@@ -23,7 +23,7 @@ import CoworkingShell from "../../../components/coworking/layout/CoworkingShell"
 import { GwAvatar, GwSpinner, GwEmpty, GwConfirm } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
 
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 async function apiFetch(path, opts = {}) {
   const u = firebaseAuth.currentUser;
