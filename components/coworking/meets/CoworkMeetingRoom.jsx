@@ -163,6 +163,7 @@ export default function CoworkMeetingRoom() {
                     onDisconnected={handleDisconnected}
                 >
                     <MuteWatcher onMuteChange={recording.setMuted} />
+                    <AvatarColorInjector />
 
                     {/* Top bar */}
                     <TopBar
@@ -204,6 +205,47 @@ export default function CoworkMeetingRoom() {
             onBack={() => router.push("/coworking/schedule-meet")}
         />
     );
+}
+
+// ── AvatarColorInjector ───────────────────────────────────────────────────────
+// Watches LiveKit DOM and injects --lk-av-color + data-lk-participant-name
+// so the CSS ::before circle shows the right colour and initials.
+const AVATAR_COLORS_LIST = ["#1A73E8", "#0F9D58", "#F29900", "#7B1FA2", "#D93025", "#00ACC1", "#E64A19", "#0097A7"];
+function getAvatarColor(name = "") { return AVATAR_COLORS_LIST[(name.charCodeAt(0) || 0) % AVATAR_COLORS_LIST.length]; }
+function getInitials(name = "") { return name.trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?"; }
+
+function AvatarColorInjector() {
+    useEffect(() => {
+        const applyColors = () => {
+            // Find all participant tiles
+            const tiles = document.querySelectorAll(".lk-participant-tile");
+            tiles.forEach(tile => {
+                // Get participant name from the name label inside the tile
+                const nameEl = tile.querySelector(".lk-participant-name, [class*='participantName'], .lk-participant-metadata-item");
+                const name = nameEl?.textContent?.replace(/\(you\)/i, "").trim() || "";
+                if (!name) return;
+                const color = getAvatarColor(name);
+                const inits = getInitials(name);
+                // Set CSS variable for background colour
+                tile.style.setProperty("--lk-av-color", color);
+                // Set data attribute so CSS content: attr() shows the initials
+                const placeholder = tile.querySelector(".lk-participant-placeholder, [class*='participantPlaceholder']");
+                if (placeholder) {
+                    placeholder.setAttribute("data-lk-participant-name", inits);
+                    placeholder.style.setProperty("--lk-av-color", color);
+                }
+            });
+        };
+
+        // Run immediately and also watch for DOM changes
+        applyColors();
+        const observer = new MutationObserver(applyColors);
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+        const interval = setInterval(applyColors, 1000); // fallback poll
+
+        return () => { observer.disconnect(); clearInterval(interval); };
+    }, []);
+    return null;
 }
 
 // ── MuteWatcher ───────────────────────────────────────────────────────────────
@@ -935,6 +977,63 @@ function GlobalCSS() {
             @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
             .lk-video-conference { height:100% !important; width:100% !important; }
             [data-lk-theme="default"] { --lk-bg:#111 !important; }
+
+            /* ── Override LiveKit's grey person silhouette with coloured initial avatar ── */
+
+            /* Hide the default grey SVG person icon completely */
+            .lk-participant-placeholder svg,
+            .lk-participant-tile .lk-participant-placeholder svg,
+            [class*="participantPlaceholder"] svg,
+            .lk-camera-disabled-indicator svg,
+            .lk-participant-media-video ~ .lk-participant-placeholder svg {
+                display: none !important;
+            }
+
+            /* The placeholder container — turn it into a solid coloured circle */
+            .lk-participant-placeholder,
+            .lk-participant-tile .lk-participant-placeholder,
+            [class*="participantPlaceholder"] {
+                background: transparent !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 100% !important;
+                height: 100% !important;
+                position: absolute !important;
+                inset: 0 !important;
+            }
+
+            /* Inject the coloured circle via ::before — colour driven by CSS custom property set per-tile */
+            .lk-participant-placeholder::before,
+            [class*="participantPlaceholder"]::before {
+                content: attr(data-lk-participant-name);
+                width: 96px;
+                height: 96px;
+                border-radius: 50%;
+                background: var(--lk-av-color, #1A73E8);
+                color: #fff;
+                font-size: 36px;
+                font-weight: 700;
+                font-family: 'Google Sans', 'Roboto', sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                letter-spacing: 0.02em;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+                text-transform: uppercase;
+            }
+
+            /* Make the tile background dark (not grey) when camera is off */
+            .lk-participant-tile:not(:has(video[style*="display: block"])) .lk-participant-placeholder ~ *,
+            .lk-participant-tile { background: #1a1a1a !important; }
+
+            /* Responsive avatar size */
+            @media (max-width: 600px) {
+                .lk-participant-placeholder::before,
+                [class*="participantPlaceholder"]::before {
+                    width: 68px; height: 68px; font-size: 26px;
+                }
+            }
 
             /* ── TopBar responsive ── */
             .tb-root { height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; background:#202124; border-bottom:1px solid #2a2a2a; flex-shrink:0; z-index:10; gap:8px; font-family:'Google Sans','Roboto',sans-serif; }
