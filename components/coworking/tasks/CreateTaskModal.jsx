@@ -129,7 +129,7 @@ export default function CreateTaskModal({
                 senderName: currentEmployeeName || "System",
                 text: `📎 ${attachments.length} attachment${attachments.length > 1 ? "s" : ""} added at task creation`,
                 attachments: cleanAttachments,
-                messageType: "attachment",
+                messageType: "text",
                 mention: null,
                 createdAt: serverTimestamp(),
             });
