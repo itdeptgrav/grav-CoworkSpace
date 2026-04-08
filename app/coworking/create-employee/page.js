@@ -539,7 +539,7 @@ export default function CreateEmployeePage() {
             {/* Body */}
             <div style={{ padding: "20px 24px" }}>
               <p style={{ fontSize: 14, color: "#374151", margin: "0 0 10px", lineHeight: 1.6 }}>
-                This will permanently delete <strong>{deleteModal.name}</strong> from both the app and Firebase Authentication.
+                This will permanently delete <strong>{deleteModal.name}</strong>
               </p>
               <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#6b7280", lineHeight: 1.7 }}>
                 <div>📧 <strong>Email:</strong> {deleteModal.email}</div>
