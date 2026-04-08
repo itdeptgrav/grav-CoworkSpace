@@ -108,6 +108,42 @@ export default function CreateTaskModal({
         } catch (err) { console.error("postSubtaskNotification:", err); }
     };
 
+
+    const postAttachmentsToChat = async (taskId, attachments) => {
+        if (!attachments || attachments.length === 0) return;
+        try {
+            const messageId = crypto.randomUUID();
+            const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
+            const taskRef = doc(firebaseDb, "cowork_tasks", taskId);
+            const cleanAttachments = attachments.map(att => ({
+                url: att.url || att.fileUrl || "",
+                name: att.name || "Attachment",
+                type: att.type || "file",
+                mimeType: att.mimeType || (att.type === "image" ? "image/jpeg" : "application/pdf"),
+                originalName: att.name || "Attachment",
+            }));
+            await setDoc(doc(msgsRef, messageId), {
+                messageId,
+                taskId,
+                senderId: currentEmployeeId,
+                senderName: currentEmployeeName || "System",
+                text: `📎 ${attachments.length} attachment${attachments.length > 1 ? "s" : ""} added at task creation`,
+                attachments: cleanAttachments,
+                messageType: "attachment",
+                mention: null,
+                createdAt: serverTimestamp(),
+            });
+            await updateDoc(taskRef, {
+                chatMessageCount: increment(1),
+                lastChatAt: serverTimestamp(),
+                lastChatPreview: `📎 ${attachments.length} file${attachments.length > 1 ? "s" : ""} attached`,
+                updatedAt: serverTimestamp(),
+            });
+        } catch (err) { console.error("postAttachmentsToChat:", err); }
+    };
+
+    // handleImagePick comes next (already in your code)
+
     const handleImagePick = async (e) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
@@ -191,6 +227,10 @@ export default function CreateTaskModal({
                 });
                 if (parentTask?.taskId && newTask?.taskId) {
                     await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
+                }
+                // ← ADD THESE 3 LINES
+                if (newTask?.taskId && attachments.length > 0) {
+                    await postAttachmentsToChat(newTask.taskId, attachments);
                 }
                 onSuccess?.(newTask);
             }
