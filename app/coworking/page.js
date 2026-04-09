@@ -868,18 +868,26 @@ export default function Dashboard() {
       let all = [];
 
       if (role === "ceo") {
-        // CEO sees all tasks (assigned by them or to them)
+        // CEO sees all tasks
         const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), orderBy("createdAt", "desc")));
         snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
       } else {
-        // Employee / TL — only see tasks assigned TO them or created BY them
+        // Employee/TL — tasks assigned TO them OR created BY them
+        // No orderBy here — Firestore needs composite index for where+orderBy
+        // We sort in JS below instead
         const [snapTo, snapBy] = await Promise.all([
-          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId), orderBy("createdAt", "desc"))),
-          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId), orderBy("createdAt", "desc"))),
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId))),
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId))),
         ]);
         const seen = new Set();
         [...snapTo.docs, ...snapBy.docs].forEach(d => {
           if (!seen.has(d.id)) { seen.add(d.id); all.push({ ...d.data(), taskId: d.id }); }
+        });
+        // Sort by createdAt descending in JS
+        all.sort((a, b) => {
+          const aT = a.createdAt?.seconds ?? 0;
+          const bT = b.createdAt?.seconds ?? 0;
+          return bT - aT;
         });
       }
 
