@@ -2889,35 +2889,143 @@ export default function TasksPage() {
                 ) : filteredRoots.length === 0 ? (
                   <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch || filterDept || filterEmployee || filterDateFrom || filterDateTo ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch && !filterDept && !filterEmployee ? "Click + Add Task to start" : "Try adjusting search or filters"}</p></div>
                 ) : (
-                  STATUS_GROUPS_TABLE.map(grp => {
-                    const grpTasks = filteredRoots.filter(t => t.status === grp.key);
-                    if (!grpTasks.length) return null;
-                    const collapsed = collapsedGroups.has(grp.key);
-                    return (
-                      <div key={grp.key} className="gv-tbl-group">
-                        <div className="gv-grp-header" onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); n.has(grp.key) ? n.delete(grp.key) : n.add(grp.key); return n; })}>
-                          <span className="gv-grp-badge" style={{ color: grp.color, background: grp.bg, border: `1px solid ${grp.color}33` }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: grp.dot, display: "inline-block" }} />{grp.label}</span>
-                          <span className="gv-grp-count">{grpTasks.length}</span>
-                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ marginLeft: "auto", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--text-4)" }}><path d="M2 3.5l3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                        </div>
-                        {!collapsed && (
-                          <>
-                            <div className="gv-tbl-head">
-                              <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
-                              <div className="col-name">Task Name</div>
-                              <div className="col-desc">Description</div>
-                              <div className="col-people">People</div>
-                              <div className="col-pri">Priority</div>
-                              <div className="col-date">Timeline</div>
-                              <div className="col-status">Status</div>
-                              <div className="col-act" />
-                            </div>
-                            {grpTasks.map(t => <TblRow key={t.taskId} t={t} />)}
-                          </>
-                        )}
-                      </div>
+                  (() => {
+                    // ── Split filteredRoots into two sections ──────────────
+                    // Section A: tasks assigned TO me by someone else
+                    const assignedToMe = filteredRoots.filter(t =>
+                      (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId
                     );
-                  })
+                    // Section B: tasks I created myself
+                    const createdByMe = filteredRoots.filter(t =>
+                      t.assignedBy === employeeId
+                    );
+
+                    // Render table rows + column header for a list of tasks inside a section
+                    const renderTaskGroup = (tasks, sectionKey) =>
+                      STATUS_GROUPS_TABLE.map(grp => {
+                        const grpTasks = tasks.filter(t => t.status === grp.key);
+                        if (!grpTasks.length) return null;
+                        const collapsed = collapsedGroups.has(`${sectionKey}_${grp.key}`);
+                        return (
+                          <div key={grp.key} className="gv-tbl-group">
+                            <div className="gv-grp-header" onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); const k = `${sectionKey}_${grp.key}`; n.has(k) ? n.delete(k) : n.add(k); return n; })}>
+                              <span className="gv-grp-badge" style={{ color: grp.color, background: grp.bg, border: `1px solid ${grp.color}33` }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: grp.dot, display: "inline-block" }} />{grp.label}</span>
+                              <span className="gv-grp-count">{grpTasks.length}</span>
+                              <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ marginLeft: "auto", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--text-4)" }}><path d="M2 3.5l3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            </div>
+                            {!collapsed && (
+                              <>
+                                <div className="gv-tbl-head">
+                                  <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
+                                  <div className="col-name">Task Name</div>
+                                  <div className="col-desc">Description</div>
+                                  <div className="col-people">People</div>
+                                  <div className="col-pri">Priority</div>
+                                  <div className="col-date">Timeline</div>
+                                  <div className="col-status">Status</div>
+                                  <div className="col-act" />
+                                </div>
+                                {grpTasks.map(t => <TblRow key={t.taskId} t={t} />)}
+                              </>
+                            )}
+                          </div>
+                        );
+                      });
+
+                    // Section box wrapper with title + minimize/maximize
+                    const SectionBox = ({ sectionKey, title, icon, accentColor, accentBg, tasks, count }) => {
+                      const sectionCollapsed = collapsedGroups.has(`section_${sectionKey}`);
+                      const toggleSection = () => setCollapsedGroups(prev => {
+                        const n = new Set(prev);
+                        const k = `section_${sectionKey}`;
+                        n.has(k) ? n.delete(k) : n.add(k);
+                        return n;
+                      });
+                      return (
+                        <div style={{
+                          border: `1.5px solid ${accentColor}22`,
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          background: "var(--surface)",
+                          boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                          marginBottom: 12,
+                        }}>
+                          {/* Section header */}
+                          <div style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "9px 14px",
+                            background: accentBg,
+                            borderBottom: sectionCollapsed ? "none" : `1px solid ${accentColor}22`,
+                            cursor: "pointer", userSelect: "none",
+                          }} onClick={toggleSection}>
+                            <span style={{ fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: accentColor, flex: 1, letterSpacing: "0.01em" }}>{title}</span>
+                            <span style={{
+                              fontSize: 10, fontWeight: 700,
+                              padding: "2px 8px", borderRadius: 99,
+                              background: accentColor, color: "#fff",
+                              marginRight: 6,
+                            }}>{count}</span>
+                            {/* Maximize / Minimize icon */}
+                            <button style={{
+                              width: 22, height: 22, border: `1px solid ${accentColor}44`,
+                              borderRadius: 5, background: "#fff",
+                              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                              color: accentColor, flexShrink: 0, transition: "all 0.12s",
+                            }}
+                              onClick={e => { e.stopPropagation(); toggleSection(); }}
+                              title={sectionCollapsed ? "Maximize" : "Minimize"}
+                            >
+                              {sectionCollapsed ? (
+                                // Maximize icon
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+                                  <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+                                </svg>
+                              ) : (
+                                // Minimize icon
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+                                  <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                          {/* Section body — hidden when minimized */}
+                          {!sectionCollapsed && renderTaskGroup(tasks, sectionKey)}
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <>
+                        {/* Section A: Assigned to me by others */}
+                        {assignedToMe.length > 0 && (
+                          <SectionBox
+                            sectionKey="assigned"
+                            title="Assigned to me"
+                            icon="📥"
+                            accentColor="#5B5EF4"
+                            accentBg="#F5F3FF"
+                            tasks={assignedToMe}
+                            count={assignedToMe.length}
+                          />
+                        )}
+                        {/* Section B: Created by me */}
+                        {createdByMe.length > 0 && (
+                          <SectionBox
+                            sectionKey="created"
+                            title="Created by me"
+                            icon="✏️"
+                            accentColor="#0891B2"
+                            accentBg="#F0F9FF"
+                            tasks={createdByMe}
+                            count={createdByMe.length}
+                          />
+                        )}
+                      </>
+                    );
+                  })()
                 )}
               </div>
             </div>
