@@ -1321,17 +1321,24 @@ export default function TasksPage() {
     try {
       let tasks = await listTasks();
 
-      // ── CEO visibility: hide TL-created subtasks from CEO tree ──────────
+      // ── Visibility filter: applied for all roles as final safety net ──────────
+      // The backend already filters correctly, but we re-apply here as defence-in-depth
+      // to prevent any flash of wrong tasks if the backend fallback (/task/list) is used.
       if (role === "ceo") {
+        // CEO: ONLY tasks CEO personally created. TL-created tasks are completely hidden.
         tasks = tasks.filter(t => {
-          if (!t.parentTaskId) {
-            // Root task: show only if created by CEO
-            return t.assignedBy === employeeId || t.createdByCeo === true;
-          }
-          // Subtask: show only if created by CEO, hide TL-created subtasks
-          return t.createdByCeo === true || (t.assignedBy === employeeId && t.createdByTl !== true);
+          if (t.createdByTl === true && t.assignedBy !== employeeId) return false;
+          return t.assignedBy === employeeId
+            || t.createdByCeo === true
+            || t.assignedByRole === "ceo";
         });
+      } else if (role === "employee") {
+        // Employee: ONLY tasks directly assigned to them. No parent tasks they weren't assigned to.
+        tasks = tasks.filter(t =>
+          (t.assigneeIds || []).includes(employeeId)
+        );
       }
+      // TL: no extra filter — backend already returns correct set
 
       setAllTasks(tasks);
       const map = new Map(tasks.map(t => [t.taskId, t]));
@@ -1872,18 +1879,57 @@ export default function TasksPage() {
   // ── Real-time listener: update allTasks timestamps & lastChatAt live ──────────
   // Only updates task metadata (title, status, lastChatAt) — NOT unread counts.
   // Unread counts are handled by setupChatCountListeners above.
+  //
+  // FIX: The previous listener queried ALL cowork_tasks with no visibility filter,
+  // causing wrong employees to see tasks briefly on first load (flash bug).
+  // Now we scope the Firestore query to ONLY tasks visible to the current user:
+  //   CEO      → tasks where assignedBy === CEO (tasks they created)
+  //   TL       → tasks where assignedBy === TL  OR  assigneeIds contains TL
+  //   Employee → tasks where assigneeIds contains employee
+  // After the snapshot fires, we apply the same role-based filter used in loadAllTasks
+  // before merging into state — so stale/wrong tasks can never appear.
   useEffect(() => {
-    if (!employeeId) return;
+    if (!employeeId || !role) return;
     const tasksRef = collection(firebaseDb, "cowork_tasks");
+
+    // Build a role-appropriate Firestore query so we never pull unrelated tasks
+    let taskQuery;
+    if (role === "ceo") {
+      // CEO: only tasks they created
+      taskQuery = query(tasksRef, where("assignedBy", "==", employeeId), orderBy("updatedAt", "desc"), limit(100));
+    } else if (role === "tl") {
+      // TL sees tasks they created (separate listener below handles assigned-to-TL)
+      taskQuery = query(tasksRef, where("assignedBy", "==", employeeId), orderBy("updatedAt", "desc"), limit(100));
+    } else {
+      // Employee: only tasks assigned to them
+      taskQuery = query(tasksRef, where("assigneeIds", "array-contains", employeeId), orderBy("updatedAt", "desc"), limit(100));
+    }
+
+    // Helper: apply the same visibility filter used in loadAllTasks
+    const applyVisibilityFilter = (taskData) => {
+      if (role === "ceo") {
+        // Hide any task the CEO didn’t create, or that was created by TL
+        if (taskData.createdByTl === true && taskData.assignedBy !== employeeId) return false;
+        return taskData.assignedBy === employeeId
+          || taskData.createdByCeo === true
+          || taskData.assignedByRole === "ceo";
+      }
+      // TL and Employee: the Firestore query already scopes correctly
+      return true;
+    };
+
     const unsub = onSnapshot(
-      query(tasksRef, orderBy("updatedAt", "desc"), limit(50)),
+      taskQuery,
       snap => {
         if (snap.empty) return;
         setAllTasks(prev => {
           const map = new Map(prev.map(t => [t.taskId, t]));
           snap.docs.forEach(d => {
             const updated = { ...d.data(), taskId: d.id };
-            map.set(d.id, updated);
+            // Apply visibility filter before merging — prevents wrong tasks from entering state
+            if (applyVisibilityFilter(updated)) {
+              map.set(d.id, updated);
+            }
           });
           const newList = [...map.values()];
           const taskMapLocal = new Map(newList.map(t => [t.taskId, t]));
@@ -1895,9 +1941,45 @@ export default function TasksPage() {
       },
       err => console.error("realtime tasks listener:", err)
     );
-    return () => unsub();
+
+    // For TL: also listen to tasks assigned TO them (second query needed because Firestore
+    // doesn’t support OR queries across different fields in a single listener)
+    let unsubTlAssigned = null;
+    if (role === "tl") {
+      const tlAssignedQuery = query(
+        tasksRef,
+        where("assigneeIds", "array-contains", employeeId),
+        orderBy("updatedAt", "desc"),
+        limit(100)
+      );
+      unsubTlAssigned = onSnapshot(
+        tlAssignedQuery,
+        snap => {
+          if (snap.empty) return;
+          setAllTasks(prev => {
+            const map = new Map(prev.map(t => [t.taskId, t]));
+            snap.docs.forEach(d => {
+              const updated = { ...d.data(), taskId: d.id };
+              map.set(d.id, updated);
+            });
+            const newList = [...map.values()];
+            const taskMapLocal = new Map(newList.map(t => [t.taskId, t]));
+            allTaskMapRef.current = taskMapLocal;
+            setAllTaskMap(taskMapLocal);
+            setupChatCountListeners(newList);
+            return newList;
+          });
+        },
+        err => console.error("realtime tasks listener (TL assigned):", err)
+      );
+    }
+
+    return () => {
+      unsub();
+      if (unsubTlAssigned) unsubTlAssigned();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeId]);
+  }, [employeeId, role]);
 
   useEffect(() => {
     if (activeDetailTab === "reports" && selectedTask?.taskId) loadReports(selectedTask.taskId);
@@ -2013,7 +2095,7 @@ export default function TasksPage() {
     .gv-tbl-head .col-status  { width:108px; padding:0 10px; flex-shrink:0; }
     .gv-tbl-head .col-act     { width:30px; flex-shrink:0; }
 
-    .gv-tbl-row { display:flex; align-items:center; padding:0 6px; height:40px; border-bottom:1px solid #F3F4F8; cursor:pointer; transition:background 0.08s; background:var(--surface); overflow:visible; }
+    .gv-tbl-row { display:flex; align-items:flex-start; padding:6px 6px; min-height:40px; border-bottom:1px solid #F3F4F8; cursor:pointer; transition:background 0.08s; background:var(--surface); overflow:visible; }
     .gv-tbl-row:hover { background:#F7F8FC; }
     .gv-tbl-row.selected { background:var(--p-lt); }
     .gv-tbl-row.subtask-row { background:#FAFBFF; }
@@ -2022,8 +2104,8 @@ export default function TasksPage() {
     .gv-tbl-row:hover .gv-tbl-drag { opacity:1; }
     .gv-tbl-check { width:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .gv-tbl-expand { width:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .gv-tbl-row .col-name  { flex:2; min-width:0; padding:0 10px; display:flex; align-items:center; gap:4px; border-right:1px solid var(--border); }
-    .gv-tbl-row .col-desc  { flex:2.5; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
+    .gv-tbl-row .col-name  { flex:2; min-width:0; padding:4px 10px; display:flex; align-items:flex-start; gap:4px; border-right:1px solid var(--border); min-height:28px; }
+    .gv-tbl-row .col-desc  { flex:2.5; min-width:0; padding:4px 10px; border-right:1px solid var(--border); }
     .gv-tbl-row .col-people { width:90px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); overflow:visible; }
     .gv-tbl-row .col-pri   { width:88px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
     .gv-tbl-row .col-date  { width:116px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
@@ -2031,7 +2113,7 @@ export default function TasksPage() {
     .gv-tbl-row .col-act   { width:30px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
     .gv-task-name { font-size:12px; font-weight:500; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .gv-task-name.done-line { text-decoration:line-through; color:var(--text-4); font-weight:400; }
-    .gv-task-desc { font-size:11px; color:var(--text-4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .gv-task-desc { font-size:11px; color:var(--text-4); white-space:pre-wrap; word-break:break-word; line-height:1.5; }
 
     .gv-avatar-stack { display:flex; position:relative; overflow:visible; }
     .gv-avatar-stack-tip { display:none; position:fixed; background:#1A1D2E; color:#fff; border-radius:8px; padding:6px 10px; font-size:10px; white-space:nowrap; z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,0.3); pointer-events:none; margin-top:-90px; }
@@ -2679,28 +2761,108 @@ export default function TasksPage() {
                         Export CSV
                       </button>
                     </div>
-                    {/* Row 2: Expanded filter inputs */}
-                    {filterOpen && (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, padding: "6px 10px 10px" }}>
-                        {[
-                          { label: "Department", val: filterDept, set: setFilterDept, ph: "e.g. Engineering", type: "text" },
-                          { label: "Person Name", val: filterEmployee, set: setFilterEmployee, ph: "e.g. Ramesh", type: "text" },
-                          { label: "Date From", val: filterDateFrom, set: setFilterDateFrom, ph: "", type: "date" },
-                          { label: "Date To", val: filterDateTo, set: setFilterDateTo, ph: "", type: "date" },
-                        ].map(f => (
-                          <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                            <label style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)" }}>{f.label}</label>
-                            <input
-                              type={f.type}
-                              value={f.val}
-                              onChange={e => f.set(e.target.value)}
-                              placeholder={f.ph}
-                              style={{ padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, color: "var(--text-1)", fontFamily: "var(--font)", outline: "none", background: "#fff" }}
-                            />
+                    {/* Row 2: Expanded filter panel — department pills + other inputs */}
+                    {filterOpen && (() => {
+                      // ── Derive available departments from tasks that have at least one assignee
+                      // Only include departments from tasks assigned by CEO or TL
+                      const deptSet = new Set();
+                      allTasks.filter(t => !t.parentTaskId).forEach(t => {
+                        const isFromCeoOrTl = t.assignedByRole === "ceo" || t.assignedByRole === "tl" || t.createdByCeo === true || t.createdByTl === true || t.assignedBy === employeeId;
+                        if (!isFromCeoOrTl && role !== "tl") return;
+                        // Check task-level department field
+                        if (t.department) deptSet.add(t.department);
+                        // Check each assignee\'s department from employeeMapFull
+                        (t.assigneeIds || []).forEach(aid => {
+                          const emp = employeeMapFull.get(aid);
+                          if (emp?.department) deptSet.add(emp.department);
+                        });
+                      });
+                      const availableDepts = ["All", ...Array.from(deptSet).sort()];
+
+                      // Department icon map — SVG paths keyed by lowercase dept name fragments
+                      const getDeptIcon = (name) => {
+                        const n = name.toLowerCase();
+                        if (n.includes("hr") || n.includes("human")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                        );
+                        if (n.includes("account") || n.includes("finance") || n.includes("accounts")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                        );
+                        if (n.includes("design") || n.includes("creative")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" /></svg>
+                        );
+                        if (n.includes("it") || n.includes("tech") || n.includes("engineer") || n.includes("dev")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
+                        );
+                        if (n.includes("sales") || n.includes("marketing")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></svg>
+                        );
+                        if (n.includes("production") || n.includes("manufactur") || n.includes("operation")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
+                        );
+                        if (n.includes("manage") || n.includes("admin")) return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                        );
+                        // Default generic dept icon
+                        return (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                        );
+                      };
+
+                      const deptScrollRef = { current: null };
+                      return (
+                        <div style={{ padding: "8px 10px 10px", borderTop: "1px solid var(--border)" }}>
+                          {/* ── Department pill row ──────────────────── */}
+                          <div style={{ marginBottom: 10 }}>
+                            <label style={{ display: "block", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)", marginBottom: 6 }}>Department</label>
+                            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
+                              {availableDepts.map(dept => {
+                                const isAll = dept === "All";
+                                const active = isAll ? !filterDept : filterDept === dept;
+                                return (
+                                  <button
+                                    key={dept}
+                                    onClick={() => setFilterDept(isAll ? "" : (filterDept === dept ? "" : dept))}
+                                    style={{
+                                      display: "inline-flex", alignItems: "center", gap: 5,
+                                      padding: "5px 12px", borderRadius: 99, flexShrink: 0,
+                                      border: active ? "1.5px solid var(--p)" : "1.5px solid var(--border)",
+                                      background: active ? "var(--p)" : "var(--surface)",
+                                      color: active ? "#fff" : "var(--text-2)",
+                                      fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                      fontFamily: "var(--font)", transition: "all 0.14s",
+                                      boxShadow: active ? "0 1px 6px var(--p-glow)" : "none",
+                                    }}
+                                  >
+                                    {!isAll && <span style={{ opacity: active ? 1 : 0.6 }}>{getDeptIcon(dept)}</span>}
+                                    {dept}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {/* ── Other filters: Person Name + Date range ── */}
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
+                            {[
+                              { label: "Person Name", val: filterEmployee, set: setFilterEmployee, ph: "e.g. Ramesh", type: "text" },
+                              { label: "Date From", val: filterDateFrom, set: setFilterDateFrom, ph: "", type: "date" },
+                              { label: "Date To", val: filterDateTo, set: setFilterDateTo, ph: "", type: "date" },
+                            ].map(f => (
+                              <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                <label style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)" }}>{f.label}</label>
+                                <input
+                                  type={f.type}
+                                  value={f.val}
+                                  onChange={e => f.set(e.target.value)}
+                                  placeholder={f.ph}
+                                  style={{ padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, color: "var(--text-1)", fontFamily: "var(--font)", outline: "none", background: "#fff" }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}

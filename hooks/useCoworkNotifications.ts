@@ -40,6 +40,8 @@ export interface CoworkNotification {
 interface UseCoworkNotificationsReturn {
   notifications: CoworkNotification[];
   unread: number;
+  // unreadDm: only unread direct_message notifications — use this for Messages badge
+  unreadDm: number;
   markRead: () => Promise<void>;
 }
 
@@ -182,6 +184,7 @@ async function initPush(): Promise<ServiceWorkerRegistration | null> {
 export function useCoworkNotifications(employeeId: string | null): UseCoworkNotificationsReturn {
   const [notifications, setNotifications] = useState<CoworkNotification[]>([]);
   const [unread, setUnread] = useState<number>(0);
+  const [unreadDm, setUnreadDm] = useState<number>(0);
 
   const unsubRef = useRef<Unsubscribe | null>(null);
   const swRef = useRef<ServiceWorkerRegistration | null>(null);
@@ -231,6 +234,7 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
         });
         setNotifications(notifs);
         setUnread(notifs.filter(n => !n.read).length);
+        setUnreadDm(notifs.filter(n => !n.read && n.type === "direct_message").length);
 
         // ── Seed baseline on first load; fire push on subsequent changes ─
         if (firstLoad) {
@@ -318,6 +322,7 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
     try {
       // Optimistic UI update first
       setUnread(0);
+      setUnreadDm(0);
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
 
       // Write to Firestore
@@ -348,7 +353,7 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
     }
   }, [employeeId]);
 
-  return { notifications, unread, markRead };
+  return { notifications, unread, unreadDm, markRead };
 }
 
 // ─── REST fallback ────────────────────────────────────────────────────────────

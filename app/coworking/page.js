@@ -868,27 +868,39 @@ export default function Dashboard() {
       let all = [];
 
       if (role === "ceo") {
-        // CEO sees all tasks
-        const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), orderBy("createdAt", "desc")));
-        snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
-      } else {
-        // Employee/TL — tasks assigned TO them OR created BY them
-        // No orderBy here — Firestore needs composite index for where+orderBy
-        // We sort in JS below instead
-        const [snapTo, snapBy] = await Promise.all([
-          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId))),
-          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId))),
+        // CEO: ONLY tasks they personally created (assignedBy === CEO).
+        // TL-created tasks must NOT appear on CEO dashboard — same rule as tasks page.
+        // A task is CEO's own if: assignedBy === CEO, AND NOT flagged createdByTl===true
+        // (unless CEO is also the assignedBy, which shouldn't happen for TL tasks).
+        const snap = await getDocs(query(
+          collection(firebaseDb, "cowork_tasks"),
+          where("assignedBy", "==", employeeId),
+          orderBy("createdAt", "desc")
+        ));
+        snap.forEach(d => {
+          const t = d.data();
+          // Drop tasks flagged as TL-created that somehow have assignedBy === CEO (edge case guard)
+          if (t.createdByTl === true) return;
+          all.push({ ...t, taskId: d.id });
+        });
+      } else if (role === "tl") {
+        // TL: tasks they created + tasks assigned TO them
+        const [snapBy, snapTo] = await Promise.all([
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId), orderBy("createdAt", "desc"))),
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId), orderBy("createdAt", "desc"))),
         ]);
         const seen = new Set();
-        [...snapTo.docs, ...snapBy.docs].forEach(d => {
+        [...snapBy.docs, ...snapTo.docs].forEach(d => {
           if (!seen.has(d.id)) { seen.add(d.id); all.push({ ...d.data(), taskId: d.id }); }
         });
-        // Sort by createdAt descending in JS
-        all.sort((a, b) => {
-          const aT = a.createdAt?.seconds ?? 0;
-          const bT = b.createdAt?.seconds ?? 0;
-          return bT - aT;
-        });
+      } else {
+        // Employee: ONLY tasks directly assigned to them — no parent tasks they weren't assigned to
+        const snap = await getDocs(query(
+          collection(firebaseDb, "cowork_tasks"),
+          where("assigneeIds", "array-contains", employeeId),
+          orderBy("createdAt", "desc")
+        ));
+        snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
       }
 
       setTasks(all);

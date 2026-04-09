@@ -932,7 +932,7 @@ function NavIcon({ name, size = 20 }) {
 export default function CoworkingShell({ role, employeeName, employeeId, title, children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { notifications, unread, markRead } = useCoworkNotifications(employeeId || "");
+  const { notifications, unread, unreadDm, markRead } = useCoworkNotifications(employeeId || "");
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
@@ -1568,8 +1568,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               >
                 <NavIcon name={item.icon} size={18} />
                 <span>{item.label}</span>
-                {item.id === "messages" && unread > 0 && (
-                  <span className="cw-nav-badge">{unread > 9 ? "9+" : unread}</span>
+                {item.id === "messages" && unreadDm > 0 && (
+                  <span className="cw-nav-badge">{unreadDm > 9 ? "9+" : unreadDm}</span>
                 )}
               </div>
             ))}
