@@ -2565,7 +2565,12 @@ export default function TasksPage() {
                       {dl.status === "overdue" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, display: "inline-block", marginLeft: 3 }} />}
                     </div>
                     {t.assignedBy && (
-                      <span style={{ fontSize: 9.5, color: "var(--text-4)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9.5, color: "var(--text-4)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                        {/* Curved arrow SVG — corner-down-right style, purple tint */}
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, opacity: 0.7 }}>
+                          <path d="M3 2 L3 7 Q3 9 5 9 L10 9" stroke="#8B5CF6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                          <polyline points="8,7 10,9 8,11" stroke="#8B5CF6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        </svg>
                         By {t.assignedBy === employeeId ? <span style={{ color: "#5B5EF4", fontWeight: 600 }}>you</span> : <span style={{ color: "var(--text-3)", fontWeight: 600 }}>{employeeMap?.get(t.assignedBy) || t.assignedByName || t.assignedBy}</span>}
                       </span>
                     )}
