@@ -862,7 +862,7 @@ export default function Dashboard() {
   }, [employeeId]);
 
   const loadTasks = useCallback(async () => {
-    if (!employeeId) return;
+    if (!employeeId || !role) return; // wait until role is known — never run with undefined role
     setTLoad(true);
     try {
       let all = [];
@@ -911,7 +911,7 @@ export default function Dashboard() {
   }, [employeeId, role]);
 
   useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
-  useEffect(() => { if (user && employeeId) loadTasks(); }, [user, employeeId, loadTasks]);
+  useEffect(() => { if (user && employeeId && role) loadTasks(); }, [user, employeeId, role, loadTasks]);
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 60000); return () => clearInterval(t); }, []);
   useEffect(() => { if (employeeId) getCoworkSocket(employeeId); }, [employeeId]);
 
