@@ -254,6 +254,29 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           createdAt: serverTimestamp(),
         });
       }
+      // ── Post system message to task chat if this request is linked to a task ──
+      if (taskRef) {
+        try {
+          const chatMsgId = crypto.randomUUID();
+          await setDoc(
+            doc(collection(firebaseDb, "cowork_tasks", taskRef, "chat"), chatMsgId),
+            {
+              messageId: chatMsgId,
+              taskId: taskRef,
+              senderId: "system",
+              senderName: "System",
+              text: `📋 New request by ${employeeName}: "${subject.trim()}"`,
+              messageType: "system",
+              createdAt: serverTimestamp(),
+              readBy: [],
+            }
+          );
+          // bump task updatedAt so chat count listeners pick it up
+          await updateDoc(doc(firebaseDb, "cowork_tasks", taskRef), {
+            updatedAt: serverTimestamp(),
+          });
+        } catch (_) { /* non-blocking — don't fail the request if chat write fails */ }
+      }
       setSent(true);
     } catch (e) {
       setError(e.message);

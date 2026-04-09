@@ -2558,10 +2558,17 @@ export default function TasksPage() {
                       <svg width="9" height="9" viewBox="0 0 9 9" fill="none" style={{ transform: isExp ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     </span>}
                   </div>
-                  <div className="col-name">
-                    <span className={`gv-task-name${t.status === "done" ? " done-line" : ""}`}>{t.title}</span>
-                    {unread > 0 && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#16A34A", padding: "1px 5px", borderRadius: 99, flexShrink: 0 }}>{unread > 99 ? "99+" : unread}</span>}
-                    {dl.status === "overdue" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, display: "inline-block", marginLeft: 3 }} />}
+                  <div className="col-name" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%", minWidth: 0 }}>
+                      <span className={`gv-task-name${t.status === "done" ? " done-line" : ""}`}>{t.title}</span>
+                      {unread > 0 && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#16A34A", padding: "1px 5px", borderRadius: 99, flexShrink: 0 }}>{unread > 99 ? "99+" : unread}</span>}
+                      {dl.status === "overdue" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, display: "inline-block", marginLeft: 3 }} />}
+                    </div>
+                    {t.assignedBy && (
+                      <span style={{ fontSize: 9.5, color: "var(--text-4)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                        By {t.assignedBy === employeeId ? <span style={{ color: "#5B5EF4", fontWeight: 600 }}>you</span> : <span style={{ color: "var(--text-3)", fontWeight: 600 }}>{employeeMap?.get(t.assignedBy) || t.assignedByName || t.assignedBy}</span>}
+                      </span>
+                    )}
                   </div>
                   <div className="col-desc"><span className="gv-task-desc">{t.description || ""}</span></div>
                   <div className="col-people">

@@ -946,12 +946,12 @@ export default function Dashboard() {
 
   // Use same status logic as schedule-meet page — always respect DB status first
   const getMeetStatus = (m) => {
-    if (m.status === "ended") return "ended";          // DB says ended → always ended
-    if (m.status === "cancelled") return "ended";
+    if (m.isCancelled === true || m.status === "cancelled") return "cancelled";
+    if (m.status === "ended") return "ended";
     const start = new Date(m.dateTime).getTime();
     const nowMs = Date.now();
     if (nowMs >= start && nowMs <= start + 2 * 3600000) return "live";
-    if (nowMs > start + 2 * 3600000) return "ended";   // past 2h window → ended
+    if (nowMs > start + 2 * 3600000) return "ended";
     return "upcoming";
   };
 
@@ -965,7 +965,10 @@ export default function Dashboard() {
     .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
 
   const featMeet = upMeets[0] || pastMts[0];
-  const todayM = meets.filter(m => new Date(m.dateTime).toDateString() === now.toDateString() && getMeetStatus(m) !== "ended").length;
+  const todayM = meets.filter(m => {
+    const s = getMeetStatus(m);
+    return new Date(m.dateTime).toDateString() === now.toDateString() && s !== "ended" && s !== "cancelled";
+  }).length;
   const nextMeet = upMeets[0] || null;
 
   const greeting = (() => { const h = time.getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; })();
