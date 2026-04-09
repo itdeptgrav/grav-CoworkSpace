@@ -865,12 +865,27 @@ export default function Dashboard() {
     if (!employeeId) return;
     setTLoad(true);
     try {
-      const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), orderBy("createdAt", "desc")));
-      const all = [];
-      snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
+      let all = [];
+
+      if (role === "ceo") {
+        // CEO sees all tasks (assigned by them or to them)
+        const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), orderBy("createdAt", "desc")));
+        snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
+      } else {
+        // Employee / TL — only see tasks assigned TO them or created BY them
+        const [snapTo, snapBy] = await Promise.all([
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId), orderBy("createdAt", "desc"))),
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId), orderBy("createdAt", "desc"))),
+        ]);
+        const seen = new Set();
+        [...snapTo.docs, ...snapBy.docs].forEach(d => {
+          if (!seen.has(d.id)) { seen.add(d.id); all.push({ ...d.data(), taskId: d.id }); }
+        });
+      }
+
       setTasks(all);
     } catch (e) { console.error(e); } finally { setTLoad(false); }
-  }, [employeeId]);
+  }, [employeeId, role]);
 
   useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
   useEffect(() => { if (user && employeeId) loadTasks(); }, [user, employeeId, loadTasks]);
