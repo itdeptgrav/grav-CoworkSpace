@@ -3004,7 +3004,7 @@ export default function TasksPage() {
                           <SectionBox
                             sectionKey="assigned"
                             title="Assigned to me"
-                            icon="📥"
+                            icon=""
                             accentColor="#5B5EF4"
                             accentBg="#F5F3FF"
                             tasks={assignedToMe}
@@ -3016,7 +3016,7 @@ export default function TasksPage() {
                           <SectionBox
                             sectionKey="created"
                             title="Created by me"
-                            icon="✏️"
+                            icon=""
                             accentColor="#0891B2"
                             accentBg="#F0F9FF"
                             tasks={createdByMe}
