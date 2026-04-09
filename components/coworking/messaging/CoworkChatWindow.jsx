@@ -1,6 +1,6 @@
 "use client";
+import { ACCEPT_ALL_FILES, ACCEPT_DOCS, ACCEPT_IMAGES, uploadFile, uploadFiles, uploadImage, uploadDoc, getFileType, fileTypeIcon, formatFileSize } from "../../../lib/uploadUtils";
 /**
- * GRAV-CMS/components/coworking/messaging/MediaMessageInput.jsx
  * Uploads images/voice directly to Cloudinary (no backend roundtrip).
  * PDFs go via backend → Google Drive.
  */
@@ -162,8 +162,8 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
 
       {/* Input row */}
       <div style={s.inputRow}>
-        <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
-        <input ref={pdfRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }} onChange={handlePDF} />
+        <input ref={imageRef} type="file" accept={ACCEPT_IMAGES} multiple style={{ display: "none" }} onChange={handleImages} />
+        <input ref={pdfRef} type="file" accept={ACCEPT_DOCS} style={{ display: "none" }} onChange={handlePDF} />
 
         <div style={s.iconBtns}>
           <button type="button" onClick={() => imageRef.current?.click()} style={s.iconBtn} title="Send image" disabled={disabled || recording || uploading}>📷</button>

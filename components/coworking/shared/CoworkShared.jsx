@@ -78,51 +78,119 @@ export function GwStatusBadge({ status }) {
 }
 
 /* ── Confirm Dialog ─────────────────────────────────────── */
-export function GwConfirm({ open, title, message, onConfirm, onCancel, busy = false }) {
+export function GwConfirm({ open, title, message, onConfirm, onCancel, busy = false, confirmLabel = "Delete", icon = "trash" }) {
   if (!open) return null;
+
+  const FONT = "'Inter','DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+
   return (
-    <div style={{
-      position: "fixed", inset: 0,
-      background: "rgba(15,23,42,0.5)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 600,
-      backdropFilter: "blur(3px)",
-    }}>
-      <div className="grav-fadein" style={{
-        background: "var(--surface)",
-        borderRadius: "var(--radius-xl)",
-        padding: "32px",
-        width: "min(420px, 95vw)",
-        boxShadow: "var(--shadow-xl)",
-        fontFamily: "var(--font)",
+    <div
+      onClick={e => { if (e.target === e.currentTarget && !busy) onCancel(); }}
+      style={{
+        position: "fixed", inset: 0,
+        background: "rgba(15,23,42,0.55)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 9000, padding: 20,
+        backdropFilter: "blur(4px)",
+        animation: "gwc-fade 0.12s ease",
+      }}
+    >
+      <div style={{
+        background: "#fff",
+        borderRadius: 14,
+        width: "min(400px, 100%)",
+        boxShadow: "0 24px 60px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06)",
+        fontFamily: FONT,
+        overflow: "hidden",
+        animation: "gwc-pop 0.15s cubic-bezier(0.4,0,0.2,1)",
       }}>
-        <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700, color: "var(--gray-900)" }}>{title}</h3>
-        <p style={{ margin: "0 0 24px", fontSize: 14, color: "var(--gray-600)", lineHeight: 1.65 }}>{message}</p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: "20px 22px 16px", display: "flex", alignItems: "flex-start", gap: 14, borderBottom: "1px solid #F1F5F9" }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: 10,
+            background: "#FEF2F2", border: "1px solid #FECACA",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+              <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+            </svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.01em" }}>{title}</div>
+          </div>
           <button
             onClick={onCancel}
             disabled={busy}
-            className="grav-btn"
-            style={{ ...btnStyle("ghost"), opacity: busy ? 0.5 : 1, pointerEvents: busy ? "none" : "auto" }}
+            style={{ width: 26, height: 26, border: "1px solid #E2E8F0", borderRadius: 6, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#94A3B8", flexShrink: 0, padding: 0 }}
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div style={{ padding: "14px 22px 20px" }}>
+          <p style={{ margin: 0, fontSize: 13, color: "#475569", lineHeight: 1.65 }}>{message}</p>
+          <div style={{ marginTop: 10, padding: "9px 12px", background: "#FEF9EC", border: "1px solid #FDE68A", borderRadius: 7, display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <span style={{ fontSize: 12, color: "#92400E", fontWeight: 500 }}>This action is permanent and cannot be reversed.</span>
+          </div>
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ padding: "0 22px 20px", display: "flex", gap: 9, justifyContent: "flex-end" }}>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              padding: "8px 18px", border: "1.5px solid #E2E8F0", borderRadius: 8,
+              background: "#F8FAFC", color: "#374151",
+              fontSize: 13, fontWeight: 500, cursor: busy ? "not-allowed" : "pointer",
+              fontFamily: FONT, opacity: busy ? 0.5 : 1, transition: "all 0.12s",
+            }}
+            onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "#F1F5F9"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "#F8FAFC"; }}
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={busy}
-            className="grav-btn"
-            style={{ ...btnStyle("danger"), opacity: busy ? 0.7 : 1, pointerEvents: busy ? "none" : "auto", display: "flex", alignItems: "center", gap: 6, minWidth: 90, justifyContent: "center" }}
+            style={{
+              padding: "8px 20px", border: "none", borderRadius: 8,
+              background: busy ? "#FCA5A5" : "#EF4444", color: "#fff",
+              fontSize: 13, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer",
+              fontFamily: FONT, display: "flex", alignItems: "center", gap: 7,
+              minWidth: 110, justifyContent: "center", transition: "background 0.12s",
+              boxShadow: busy ? "none" : "0 2px 8px rgba(239,68,68,0.35)",
+            }}
+            onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "#DC2626"; }}
+            onMouseLeave={e => { if (!busy) e.currentTarget.style.background = "#EF4444"; }}
           >
             {busy ? (
               <>
-                <svg style={{ animation: "gw-spin 0.8s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                <svg style={{ animation: "gw-spin 0.75s linear infinite", flexShrink: 0 }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
                 Deleting…
-                <style>{"@keyframes gw-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"}</style>
               </>
-            ) : "Delete"}
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
+                {confirmLabel}
+              </>
+            )}
           </button>
         </div>
       </div>
+      <style>{`
+        @keyframes gwc-fade { from { opacity:0; } to { opacity:1; } }
+        @keyframes gwc-pop  { from { opacity:0; transform:scale(0.95) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
+        @keyframes gw-spin  { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+      `}</style>
     </div>
   );
 }

@@ -631,8 +631,8 @@ export default function CreateTaskModal({
                                         Optional — visible in task chat
                                     </span>
                                 </label>
-                                <input ref={imageInputRef} type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif" multiple style={{ display: "none" }} onChange={handleImagePick} />
-                                <input ref={pdfInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={handlePdfPick} />
+                                <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImagePick} />
+                                <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" multiple style={{ display: "none" }} onChange={handlePdfPick} />
 
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                     <button type="button" onClick={() => imageInputRef.current?.click()} disabled={uploadingFiles}

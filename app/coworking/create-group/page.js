@@ -541,6 +541,7 @@ export default function CreateGroupPage() {
   const [modal, setModal] = useState(null); // null | "create" | { type:"edit"|"add"|"members", group }
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [successToast, setSuccessToast] = useState(null); // { message } | null
   const unsubRef = useRef(null);
 
   useEffect(() => {
@@ -590,10 +591,13 @@ export default function CreateGroupPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const groupName = deleteTarget.name || "Group";
     setDeleting(true);
     try {
       await apiFetch(`/cowork/group/${deleteTarget.groupId}`, { method: "DELETE" });
       setDeleteTarget(null);
+      setSuccessToast({ message: `"${groupName}" deleted successfully` });
+      setTimeout(() => setSuccessToast(null), 2500);
     } catch (e) { alert(e.message); }
     finally { setDeleting(false); }
   };
@@ -756,7 +760,29 @@ export default function CreateGroupPage() {
         message={`Permanently delete "${deleteTarget?.name}"? All messages will be lost. This cannot be undone.`}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
+        busy={deleting}
       />
+
+      {/* ── Success Toast ──────────────────────────────────────── */}
+      {successToast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24,
+          background: "#0F172A", color: "#fff",
+          padding: "12px 18px", borderRadius: 10,
+          boxShadow: "0 8px 30px rgba(0,0,0,0.22), 0 0 0 1px rgba(255,255,255,0.06)",
+          display: "flex", alignItems: "center", gap: 10,
+          fontSize: 13, fontWeight: 500, zIndex: 9999,
+          animation: "gwc-toast-in 0.25s cubic-bezier(0.4,0,0.2,1)",
+          fontFamily: "'Inter','DM Sans',sans-serif",
+          maxWidth: 320,
+        }}>
+          <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#16A34A", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </div>
+          {successToast.message}
+          <style>{`@keyframes gwc-toast-in { from { opacity:0; transform:translateY(12px) scale(0.96); } to { opacity:1; transform:translateY(0) scale(1); } }`}</style>
+        </div>
+      )}
     </>
   );
 }

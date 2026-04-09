@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
@@ -189,7 +190,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
     const picked = Array.from(e.target.files || []);
     e.target.value = "";
     setFiles(prev => [...prev, ...picked.filter(f =>
-      f.type.startsWith("image/") || f.type === "application/pdf"
+      f.type.startsWith("image/") || !f.type.startsWith("image/")  // accept all non-executable files
     ).map(f => ({ file: f, uploading: false, done: false, result: null }))]);
   };
 
@@ -596,7 +597,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     Attach files
                   </button>
                   <input ref={fileRef} type="file" multiple style={{ display: "none" }}
-                    accept="image/*,application/pdf" onChange={handleFilePick} />
+                    accept="image/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" onChange={handleFilePick} />
                 </div>
 
                 {/* Send button */}
@@ -955,7 +956,200 @@ function NavIcon({ name, size = 20 }) {
 export default function CoworkingShell({ role, employeeName, employeeId, title, children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { notifications, unread, unreadDm, markRead } = useCoworkNotifications(employeeId || "");
+  const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
+
+  // ── Per-section unread badge counts ──────────────────────────────────────
+  // ALL 4 sections (Tasks, Messages, Groups, Meetings) use independent strategies:
+  //   Tasks    → per-task onSnapshot on chat subcollection, readBy-based (live decrement)
+  //   Messages → per-conversation onSnapshot on messages subcollection, readBy-based
+  //   Groups   → per-group onSnapshot on messages subcollection, readBy-based
+  //   Meetings → notification-based (meet_scheduled / cancelled / updated events)
+  // Each decrements as messages are actually read: 3 → 2 → 1 → 0
+
+  const MEET_NOTIF_TYPES = new Set(["meet_scheduled", "meet_cancelled", "meet_updated"]);
+  const meetingUnreadCount = notifications.filter(n => !n.read && MEET_NOTIF_TYPES.has(n.type)).length;
+
+  // ── Tasks: per-task chat onSnapshot ──────────────────────────────────────
+  const [taskChatUnreadCount, setTaskChatUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!employeeId || !role) return;
+    const taskUnsubs = [];
+    const taskCountMap = {};
+    const recalc = () => setTaskChatUnreadCount(Object.values(taskCountMap).reduce((s, n) => s + n, 0));
+
+    const run = async () => {
+      let taskIds = new Set();
+      try {
+        if (role === "ceo") {
+          const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId)));
+          snap.forEach(d => { if (!d.data().createdByTl) taskIds.add(d.id); });
+        } else if (role === "tl") {
+          const [s1, s2] = await Promise.all([
+            getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId))),
+            getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId))),
+          ]);
+          s1.forEach(d => taskIds.add(d.id));
+          s2.forEach(d => taskIds.add(d.id));
+        } else {
+          const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId)));
+          snap.forEach(d => taskIds.add(d.id));
+        }
+      } catch (e) { console.error("task badge:", e); return; }
+
+      taskIds.forEach(taskId => {
+        const unsub = onSnapshot(
+          query(collection(firebaseDb, "cowork_tasks", taskId, "chat"), orderBy("createdAt", "asc")),
+          snap => {
+            taskCountMap[taskId] = snap.docs.filter(d => {
+              const data = d.data();
+              return data.senderId !== employeeId && !(data.readBy || []).includes(employeeId);
+            }).length;
+            recalc();
+          },
+          () => { taskCountMap[taskId] = 0; recalc(); }
+        );
+        taskUnsubs.push(unsub);
+      });
+    };
+    run();
+    return () => taskUnsubs.forEach(u => u());
+  }, [employeeId, role]);
+
+  // ── Messages: per-conversation message onSnapshot ─────────────────────────
+  // Listens to each conversation's messages directly so readBy changes
+  // fire immediately and the badge decrements in real time.
+  const [dmUnreadCount, setDmUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!employeeId) return;
+    const convUnsubs = [];
+    const convCountMap = {};
+    const recalcDm = () => setDmUnreadCount(Object.values(convCountMap).reduce((s, n) => s + n, 0));
+    let convListenerUnsub = null;
+
+    // Watch the conversation list, then watch each conversation's messages
+    convListenerUnsub = onSnapshot(
+      query(collection(firebaseDb, "cowork_direct_messages"), where("participantIds", "array-contains", employeeId)),
+      convSnap => {
+        // For each conversation, set up a per-message listener if not already
+        convSnap.docs.forEach(convDoc => {
+          const cid = convDoc.id;
+          if (convCountMap[cid] !== undefined) return; // already watching
+          convCountMap[cid] = 0;
+          const unsub = onSnapshot(
+            query(collection(firebaseDb, "cowork_direct_messages", cid, "messages"), where("senderId", "!=", employeeId)),
+            msgSnap => {
+              convCountMap[cid] = msgSnap.docs.filter(d => !(d.data().readBy || []).includes(employeeId)).length;
+              recalcDm();
+            },
+            () => { convCountMap[cid] = 0; recalcDm(); }
+          );
+          convUnsubs.push(unsub);
+        });
+      },
+      () => { }
+    );
+    return () => { convListenerUnsub?.(); convUnsubs.forEach(u => u()); };
+  }, [employeeId]);
+
+  // ── Groups: per-group message onSnapshot ──────────────────────────────────
+  const [groupUnreadCount, setGroupUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!employeeId) return;
+    const grpUnsubs = [];
+    const grpCountMap = {};
+    const recalcGrp = () => setGroupUnreadCount(Object.values(grpCountMap).reduce((s, n) => s + n, 0));
+    let grpListenerUnsub = null;
+
+    grpListenerUnsub = onSnapshot(
+      query(collection(firebaseDb, "cowork_groups"), where("memberIds", "array-contains", employeeId), where("deleted", "==", false)),
+      grpSnap => {
+        grpSnap.docs.forEach(grpDoc => {
+          const gid = grpDoc.id;
+          if (grpCountMap[gid] !== undefined) return;
+          grpCountMap[gid] = 0;
+          const unsub = onSnapshot(
+            query(collection(firebaseDb, "cowork_groups", gid, "messages"), where("senderId", "!=", employeeId)),
+            msgSnap => {
+              grpCountMap[gid] = msgSnap.docs.filter(d => !(d.data().readBy || []).includes(employeeId)).length;
+              recalcGrp();
+            },
+            () => { grpCountMap[gid] = 0; recalcGrp(); }
+          );
+          grpUnsubs.push(unsub);
+        });
+      },
+      () => { }
+    );
+    return () => { grpListenerUnsub?.(); grpUnsubs.forEach(u => u()); };
+  }, [employeeId]);
+
+  // ── Notes reminder badge — count notes whose reminder fires within 30 min ─
+  // Re-evaluates every 60 seconds so the badge appears/disappears automatically.
+  const [notesAlertCount, setNotesAlertCount] = useState(0);
+  useEffect(() => {
+    if (!employeeId) return;
+    const notesQ = query(
+      collection(firebaseDb, "cowork_notes"),
+      where("ownerId", "==", employeeId)
+    );
+    const checkReminders = (snap) => {
+      const now = Date.now();
+      const count = snap.docs.filter(d => {
+        const r = d.data().reminder;
+        if (!r) return false;
+        const ms = new Date(r).getTime();
+        // Within next 30 minutes AND not yet overdue
+        return ms > now && ms <= now + 30 * 60 * 1000;
+      }).length;
+      setNotesAlertCount(count);
+    };
+    // Real-time listener for note changes
+    const unsub = onSnapshot(notesQ, checkReminders, () => { });
+    // Also re-check every 60 seconds — reminders can enter the 30-min window over time
+    const tick = setInterval(() => {
+      getDocs(notesQ).then(checkReminders).catch(() => { });
+    }, 60 * 1000);
+    return () => { unsub(); clearInterval(tick); };
+  }, [employeeId]);
+
+  // ── Received requests badge — count requests sent TO this user ───────────
+  // Uses localStorage to track which request IDs have been "seen" (panel opened).
+  // Decrements as user opens requests, same as the internal RequestSidebarPanel logic.
+  const [reqUnreadCount, setReqUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!employeeId) return;
+    const q = query(
+      collection(firebaseDb, "cowork_requests"),
+      where("toId", "==", employeeId)
+    );
+    const unsub = onSnapshot(q, snap => {
+      try {
+        const seen = new Set(JSON.parse(localStorage.getItem("req_seen_ids") || "[]"));
+        const unseen = snap.docs.filter(d => !seen.has(d.id)).length;
+        setReqUnreadCount(unseen);
+      } catch {
+        setReqUnreadCount(0);
+      }
+    }, () => { });
+    return () => unsub();
+  }, [employeeId]);
+
+  // Clear request badge when panel is opened
+  const handleOpenReqPanel = () => {
+    setReqPanelOpen(true);
+    // Mark all current received requests as seen in localStorage
+    try {
+      const q2 = query(collection(firebaseDb, "cowork_requests"), where("toId", "==", employeeId));
+      getDocs(q2).then(snap => {
+        const allIds = snap.docs.map(d => d.id);
+        const existing = JSON.parse(localStorage.getItem("req_seen_ids") || "[]");
+        const merged = [...new Set([...existing, ...allIds])];
+        localStorage.setItem("req_seen_ids", JSON.stringify(merged));
+        setReqUnreadCount(0);
+      }).catch(() => { });
+    } catch { }
+  };
+
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
@@ -1025,9 +1219,26 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     return pathname.startsWith(path);
   };
 
+  // Map nav path → notification types to clear when user visits that section
+  const SECTION_NOTIF_TYPES = {
+    "/coworking/tasks": [
+      "task_assigned", "task_update", "task_confirmed", "task_started",
+      "task_chat", "task_forwarded", "daily_report", "deadline_changed",
+      "completion_submitted", "completion_tl_approved", "completion_rejected",
+      "completion_ceo_approved", "completion_ceo_rejected",
+    ],
+    "/coworking/direct-messages": ["direct_message"],
+    "/coworking/create-group": ["group_message", "group_added"],
+    "/coworking/schedule-meet": ["meet_scheduled", "meet_cancelled", "meet_updated"],
+  };
+
   const handleNav = (path) => {
     router.push(path);
     if (isMobile) setMobileOpen(false);
+    // Clear notification-based badges for the section being navigated to
+    const types = SECTION_NOTIF_TYPES[path];
+    if (types) markSectionRead(types);
+    // Tasks badge decrements naturally via readBy updates when user reads each chat.
   };
 
   const handleSignOut = async () => {
@@ -1591,9 +1802,31 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               >
                 <NavIcon name={item.icon} size={18} />
                 <span>{item.label}</span>
-                {item.id === "messages" && unreadDm > 0 && (
-                  <span className="cw-nav-badge">{unreadDm > 9 ? "9+" : unreadDm}</span>
-                )}
+                {(() => {
+                  // Badge counts:
+                  // messages → real-time DM readBy count
+                  // groups   → real-time group message readBy count
+                  // tasks    → notification-based (task events)
+                  // meetings → notification-based (meet events)
+                  // All badges use real-time readBy-based counts so they decrement
+                  // as messages are actually read — 3 → 2 → 1 → 0
+                  const cnt =
+                    item.id === "messages" ? dmUnreadCount        // per-message readBy live
+                      : item.id === "groups" ? groupUnreadCount     // per-message readBy live
+                        : item.id === "tasks" ? taskChatUnreadCount  // per-message readBy live
+                          : item.id === "meetings" ? meetingUnreadCount   // notification-based
+                            : 0;
+                  if (cnt <= 0) return null;
+                  const bg =
+                    item.id === "tasks" ? "#8B5CF6"
+                      : item.id === "groups" ? "#0891B2"
+                        : "#EF4444";
+                  return (
+                    <span className="cw-nav-badge" style={{ background: bg }}>
+                      {cnt > 99 ? "99+" : cnt > 9 ? "9+" : cnt}
+                    </span>
+                  );
+                })()}
               </div>
             ))}
           </nav>
@@ -1628,6 +1861,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 className="cw-topbar-icon-btn"
                 title="Notes"
                 onClick={() => setNotesPanelOpen(true)}
+                style={{ position: "relative" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -1636,12 +1870,36 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   <line x1="16" y1="17" x2="8" y2="17" />
                   <polyline points="10 9 9 9 8 9" />
                 </svg>
+                {notesAlertCount > 0 && (
+                  <span style={{ position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: "#EF4444", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "1.5px solid #fff", lineHeight: 1, pointerEvents: "none", letterSpacing: "-0.02em" }}>
+                    {notesAlertCount > 9 ? "9+" : notesAlertCount}
+                  </span>
+                )}
               </button>
 
               <div style={{ position: "relative" }}>
-                <button className="cw-topbar-icon-btn" title="Notifications" onClick={() => setNotifOpen(!notifOpen)}>
+                <button className="cw-topbar-icon-btn" title="Notifications" onClick={() => setNotifOpen(!notifOpen)} style={{ position: "relative" }}>
                   <NavIcon name="bell" size={18} />
-                  {unread > 0 && <span className="cw-topbar-notif-dot" />}
+                  {unread > 0 && (
+                    <span style={{
+                      position: "absolute",
+                      top: -4, right: -6,
+                      minWidth: 16, height: 16,
+                      borderRadius: 8,
+                      background: "#EF4444",
+                      color: "#fff",
+                      fontSize: 9.5,
+                      fontWeight: 800,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      padding: "0 4px",
+                      border: "1.5px solid #fff",
+                      lineHeight: 1,
+                      pointerEvents: "none",
+                      letterSpacing: "-0.02em",
+                    }}>
+                      {unread > 99 ? "99+" : unread > 9 ? "9+" : unread}
+                    </span>
+                  )}
                 </button>
 
                 {notifOpen && (
@@ -1696,13 +1954,18 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               <button
                 className="cw-topbar-icon-btn"
                 title="Requests"
-                onClick={() => setReqPanelOpen(true)}
+                onClick={handleOpenReqPanel}
                 style={{ position: "relative" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
                   <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
                 </svg>
+                {reqUnreadCount > 0 && (
+                  <span style={{ position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: "#EF4444", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "1.5px solid #fff", lineHeight: 1, pointerEvents: "none", letterSpacing: "-0.02em" }}>
+                    {reqUnreadCount > 9 ? "9+" : reqUnreadCount}
+                  </span>
+                )}
               </button>
               <div className="cw-topbar-avatar" title={employeeName}>
                 {initials(employeeName)}

@@ -209,7 +209,7 @@ export default function MediaMessageInput({
             {/* Input row */}
             <div style={s.inputRow}>
                 <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
-                <input ref={pdfRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }} onChange={handlePDF} />
+                <input ref={pdfRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" style={{ display: "none" }} onChange={handlePDF} />
 
                 <div style={s.toolBtns}>
                     <ToolBtn onClick={() => imageRef.current?.click()} disabled={disabled || recording || uploading} title="Attach image">

@@ -151,7 +151,7 @@ export default function DailyReportModal({ task, currentEmployeeId, onClose, onS
                             <p style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 500, color: "#202124" }}>Click or drag images here</p>
                             <p style={{ margin: 0, fontSize: 12, color: "#80868b" }}>JPG, PNG, WebP · max 10MB · uploaded to Cloudinary</p>
                         </div>
-                        <input ref={imgRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={addImages} />
+                        <input ref={imgRef} type="file" accept={ACCEPT_IMAGES} multiple style={{ display: "none" }} onChange={addImages} />
                         {images.length > 0 && (
                             <div style={s.imgGrid}>
                                 {images.map((img, i) => (
@@ -173,7 +173,7 @@ export default function DailyReportModal({ task, currentEmployeeId, onClose, onS
                     <div style={s.field}>
                         <label style={s.label}>PDF Documents (optional)</label>
                         <button type="button" onClick={() => pdfRef.current?.click()} style={s.pdfAddBtn}>📄 Add PDF files</button>
-                        <input ref={pdfRef} type="file" accept=".pdf,application/pdf" multiple style={{ display: "none" }} onChange={addPdfs} />
+                        <input ref={pdfRef} type="file" accept={ACCEPT_DOCS} multiple style={{ display: "none" }} onChange={addPdfs} />
                         {pdfs.length > 0 && (
                             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
                                 {pdfs.map((p, i) => (

@@ -70,6 +70,14 @@ function isOverdue(reminderISO) {
     return new Date(reminderISO).getTime() < Date.now();
 }
 
+// Returns true if reminder is between now and 30 minutes from now (upcoming alert)
+function isWithin30Min(reminderISO) {
+    if (!reminderISO) return false;
+    const ms = new Date(reminderISO).getTime();
+    const now = Date.now();
+    return ms > now && ms <= now + 30 * 60 * 1000;
+}
+
 // ── NotesSidebarPanel ─────────────────────────────────────────────────────────
 export default function NotesSidebarPanel({ employeeId, employeeName, onClose, initialTab = "create" }) {
     const [tab, setTab] = useState(initialTab);
@@ -143,7 +151,7 @@ export default function NotesSidebarPanel({ employeeId, employeeName, onClose, i
         const picked = Array.from(e.target.files || []);
         e.target.value = "";
         setFiles(prev => [...prev, ...picked
-            .filter(f => f.type.startsWith("image/") || f.type === "application/pdf")
+            .filter(f => true) // accept all file types
             .map(f => ({ file: f, uploading: false, done: false, result: null }))
         ]);
     };
@@ -289,6 +297,7 @@ export default function NotesSidebarPanel({ employeeId, employeeName, onClose, i
     // ── NoteCard — clean card style like image 2 ────────────────────────────────
     function NoteCard({ note }) {
         const overdue = isOverdue(note.reminder);
+        const within30 = isWithin30Min(note.reminder); // red dot alert: reminder in ≤30 min
         const bg = note.color && note.color !== "none" ? note.color : "#fff";
         const images = (note.attachments || []).filter(a => a.type === "image");
         const pdfs = (note.attachments || []).filter(a => a.type !== "image");
@@ -314,7 +323,19 @@ export default function NotesSidebarPanel({ employeeId, employeeName, onClose, i
                             {note.title}
                         </span>
                     </div>
-                    <NoteMenu note={note} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {/* Red pulsing dot: reminder within 30 minutes */}
+                        {within30 && !overdue && (
+                            <span title="Reminder in less than 30 minutes" style={{
+                                width: 8, height: 8, borderRadius: "50%",
+                                background: "#EF4444",
+                                display: "inline-block", flexShrink: 0,
+                                boxShadow: "0 0 0 0 rgba(239,68,68,0.4)",
+                                animation: "ns-pulse 1.4s ease-in-out infinite",
+                            }} />
+                        )}
+                        <NoteMenu note={note} />
+                    </div>
                 </div>
 
                 {/* Description */}
@@ -335,10 +356,12 @@ export default function NotesSidebarPanel({ employeeId, employeeName, onClose, i
 
                 {/* Reminder */}
                 {note.reminder && (
-                    <div style={{ fontSize: 11, fontWeight: 500, color: overdue ? "#DC2626" : "#6B7280", marginBottom: 8 }}>
-                        {overdue ? "⏰ Overdue · " : "🔔 "}{fmtDateTime(note.reminder)}
+                    <div style={{ fontSize: 11, fontWeight: 500, color: overdue ? "#DC2626" : within30 ? "#DC2626" : "#6B7280", marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                        {overdue ? "⏰ Overdue · " : within30 ? "🔴 " : "🔔 "}{fmtDateTime(note.reminder)}
+                        {within30 && !overdue && <span style={{ fontSize: 10, fontWeight: 700, color: "#EF4444", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 4, padding: "1px 5px" }}>Soon</span>}
                     </div>
                 )}
+                <style>{`@keyframes ns-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow:0 0 0 5px rgba(239,68,68,0); } }`}</style>
 
                 {/* Image thumbnails — small boxes, click to open lightbox */}
                 {images.length > 0 && (
@@ -629,7 +652,7 @@ export default function NotesSidebarPanel({ employeeId, employeeName, onClose, i
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
                                         Attach files
                                     </button>
-                                    <input ref={fileRef} type="file" multiple style={{ display: "none" }} accept="image/*,application/pdf" onChange={handleFilePick} />
+                                    <input ref={fileRef} type="file" multiple style={{ display: "none" }} accept="image/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" onChange={handleFilePick} />
                                 </div>
 
                                 {/* Save button */}

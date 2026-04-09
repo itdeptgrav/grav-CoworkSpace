@@ -43,6 +43,8 @@ interface UseCoworkNotificationsReturn {
   // unreadDm: only unread direct_message notifications — use this for Messages badge
   unreadDm: number;
   markRead: () => Promise<void>;
+  // markSectionRead: marks only notifications matching the given types as read
+  markSectionRead: (types: string[]) => Promise<void>;
 }
 
 // ─── Push helpers (kept internal, no separate hook needed) ────────────────────
@@ -353,7 +355,39 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
     }
   }, [employeeId]);
 
-  return { notifications, unread, unreadDm, markRead };
+  // ── 4. Mark only a specific section's notifications as read ──────────────
+  const markSectionRead = useCallback(async (types: string[]) => {
+    if (!employeeId || !types.length) return;
+    try {
+      // Optimistic: mark matching unread notifications as read in state
+      setNotifications(prev => prev.map(n =>
+        !n.read && types.includes(n.type) ? { ...n, read: true } : n
+      ));
+      setUnread(prev => Math.max(0, prev - notifications.filter(n => !n.read && types.includes(n.type)).length));
+      setUnreadDm(prev => types.includes("direct_message")
+        ? Math.max(0, prev - notifications.filter(n => !n.read && n.type === "direct_message").length)
+        : prev
+      );
+
+      // Write to Firestore in background
+      const q = query(
+        collection(firebaseDb, "cowork_notifications"),
+        where("recipientEmployeeId", "==", employeeId),
+        where("read", "==", false)
+      );
+      const snap = await getDocs(q);
+      const toMark = snap.docs.filter(d => types.includes(d.data().type));
+      if (toMark.length > 0) {
+        const batch = writeBatch(firebaseDb);
+        toMark.forEach(d => batch.update(d.ref, { read: true }));
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("[CoWork] markSectionRead failed:", e);
+    }
+  }, [employeeId, notifications]);
+
+  return { notifications, unread, unreadDm, markRead, markSectionRead };
 }
 
 // ─── REST fallback ────────────────────────────────────────────────────────────

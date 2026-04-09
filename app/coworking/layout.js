@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useCoworkAuth } from "../../hooks/useCoworkAuth";
 import CoworkingShell from "../../components/coworking/layout/CoworkingShell";
 import { GwSpinner } from "../../components/coworking/shared/CoworkShared";
+import TopLoadingBar from "../../components/coworking/shared/TopLoadingBar";
 
 function PageLoadingFallback() {
     return (
@@ -44,10 +45,13 @@ export default function CoworkingLayout({ children }) {
     };
 
     return (
-        <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title={getPageTitle()}>
-            <Suspense fallback={<PageLoadingFallback />}>
-                {children}
-            </Suspense>
-        </CoworkingShell>
+        <>
+            <TopLoadingBar />
+            <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title={getPageTitle()}>
+                <Suspense fallback={<PageLoadingFallback />}>
+                    {children}
+                </Suspense>
+            </CoworkingShell>
+        </>
     );
 }
