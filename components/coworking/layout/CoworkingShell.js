@@ -1,7 +1,6 @@
 "use client";
 import React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useFCMToken } from "../../../hooks/useFCMToken";
 import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
@@ -956,7 +955,6 @@ function NavIcon({ name, size = 20 }) {
 
 export default function CoworkingShell({ role, employeeName, employeeId, title, children }) {
   const pathname = usePathname();
-  useFCMToken(employeeId || null);
   const router = useRouter();
   const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
 
@@ -1183,6 +1181,50 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   }, [notifOpen]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
+  // ── PWA Install prompt ────────────────────────────────────
+  const [canInstall, setCanInstall] = React.useState(false);
+  const [isInstalled, setIsInstalled] = React.useState(false);
+  const deferredPromptRef = React.useRef(null);
+
+  React.useEffect(() => {
+    // Already running as installed PWA — hide button
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setIsInstalled(true);
+      return;
+    }
+    // Check if prompt was captured before React mounted (from layout.js script)
+    if (window.__pwaInstallPrompt) {
+      deferredPromptRef.current = window.__pwaInstallPrompt;
+      setCanInstall(true);
+    }
+
+    const handler = (e) => {
+      e.preventDefault();
+      deferredPromptRef.current = e;
+      window.__pwaInstallPrompt = e;
+      setCanInstall(true);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", () => {
+      setIsInstalled(true);
+      setCanInstall(false);
+      deferredPromptRef.current = null;
+    });
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    const prompt = deferredPromptRef.current;
+    if (!prompt) return;
+    await prompt.prompt();
+    const { outcome } = await prompt.userChoice;
+    if (outcome === "accepted") {
+      setIsInstalled(true);
+      setCanInstall(false);
+    }
+    deferredPromptRef.current = null;
+  };
   useEffect(() => {
     const handler = (e) => {
       setNotesPanelOpen(true);
@@ -1831,9 +1873,55 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 })()}
               </div>
             ))}
+
+            {/* ── Download App — always show until installed ── */}
+            {!isInstalled && canInstall && (
+              <div style={{ margin: "8px 10px 4px", position: "relative" }}>
+                {/* Pulsing attention ring */}
+                <div style={{
+                  position: "absolute", inset: -2, borderRadius: 12,
+                  border: "2px solid #3B82F6",
+                  animation: "install-pulse 2s ease-in-out infinite",
+                  pointerEvents: "none",
+                }} />
+                <button
+                  onClick={handleInstall}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+                    background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
+                    boxShadow: "0 4px 14px rgba(37,99,235,0.45)",
+                    fontFamily: "inherit", transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
+                  onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
+                >
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>Download App</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>
+                      {canInstall ? "Click to install now ✓" : "Install on your device"}
+                    </div>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+
+
+              </div>
+            )}
+            <style>{`@keyframes install-pulse { 0%,100% { opacity:0.6; transform:scale(1); } 50% { opacity:1; transform:scale(1.01); } }`}</style>
           </nav>
 
           <div className="cw-sidebar-footer">
+
             <div className="cw-user-card">
               <div className="cw-user-avatar">{initials(employeeName)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -1969,6 +2057,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </span>
                 )}
               </button>
+
               <div className="cw-topbar-avatar" title={employeeName}>
                 {initials(employeeName)}
               </div>
