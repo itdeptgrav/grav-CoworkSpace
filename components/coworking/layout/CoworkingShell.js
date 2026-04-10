@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useFCMToken } from "../../../hooks/useFCMToken";
 import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
@@ -955,6 +956,7 @@ function NavIcon({ name, size = 20 }) {
 
 export default function CoworkingShell({ role, employeeName, employeeId, title, children }) {
   const pathname = usePathname();
+  useFCMToken(employeeId || null);
   const router = useRouter();
   const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
 

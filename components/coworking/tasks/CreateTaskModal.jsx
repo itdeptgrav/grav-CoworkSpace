@@ -7,6 +7,7 @@
  * formal typography, proper field hierarchy.
  */
 "use client";
+import React from "react";
 import { useState, useEffect, useRef } from "react";
 import { createTask, listAllEmployees, uploadImage, uploadPDF } from "../../../lib/mediaUploadApi";
 import DeadlineBadge from "./DeadlineBadge";
@@ -17,6 +18,160 @@ import { collection, doc, setDoc, updateDoc, serverTimestamp, increment } from "
 const emptySubtask = () => ({
     title: "", description: "", notes: "", dueDate: "", priority: "medium", assigneeIds: [],
 });
+
+
+// ── DateTimePicker — professional date+time selector ──────────────────────────
+function DateTimePicker({ value, onChange, label = "Deadline", style: extraStyle = {} }) {
+    // value is stored as "YYYY-MM-DDTHH:mm" (datetime-local format)
+    const [showPicker, setShowPicker] = React.useState(false);
+    const [date, setDate] = React.useState("");
+    const [time, setTime] = React.useState("09:00");
+    const pickerRef = React.useRef(null);
+
+    // Parse incoming value
+    React.useEffect(() => {
+        if (value) {
+            const [d, t] = value.includes("T") ? value.split("T") : [value, "09:00"];
+            setDate(d || "");
+            setTime(t?.slice(0, 5) || "09:00");
+        } else {
+            setDate(""); setTime("09:00");
+        }
+    }, [value]);
+
+    // Close on outside click
+    React.useEffect(() => {
+        if (!showPicker) return;
+        const handler = (e) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowPicker(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [showPicker]);
+
+    const commit = (d, t) => {
+        if (d) onChange(t ? `${d}T${t}` : d);
+        else onChange("");
+    };
+
+    const clear = (e) => { e.stopPropagation(); onChange(""); setShowPicker(false); };
+
+    // Format display
+    const displayText = (() => {
+        if (!value) return null;
+        const dt = new Date(value);
+        if (isNaN(dt.getTime())) return value;
+        const dateStr = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+        const timeStr = dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+        return `${dateStr} · ${timeStr}`;
+    })();
+
+    // Quick time presets
+    const TIME_PRESETS = [
+        { label: "9:00 AM", value: "09:00" }, { label: "10:00 AM", value: "10:00" },
+        { label: "12:00 PM", value: "12:00" }, { label: "2:00 PM", value: "14:00" },
+        { label: "5:00 PM", value: "17:00" }, { label: "6:00 PM", value: "18:00" },
+        { label: "EOD", value: "23:59" },
+    ];
+
+    const FONT = "'Inter','DM Sans',-apple-system,sans-serif";
+
+    return (
+        <div style={{ position: "relative", ...extraStyle }} ref={pickerRef}>
+            {/* Trigger button */}
+            <button type="button"
+                onClick={() => setShowPicker(p => !p)}
+                style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 8,
+                    padding: "8px 11px", border: `1.5px solid ${showPicker ? "#3B82F6" : "#E2E8F0"}`,
+                    borderRadius: 8, background: "#fff", cursor: "pointer", fontFamily: FONT,
+                    boxShadow: showPicker ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
+                    transition: "all 0.15s", textAlign: "left",
+                }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={value ? "#3B82F6" : "#94A3B8"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+                <span style={{ flex: 1, fontSize: 13, color: value ? "#0F172A" : "#94A3B8", fontWeight: value ? 500 : 400 }}>
+                    {displayText || "Set date & time"}
+                </span>
+                {value && (
+                    <span onClick={clear} style={{ fontSize: 14, color: "#94A3B8", lineHeight: 1, padding: "0 2px", cursor: "pointer" }}>×</span>
+                )}
+            </button>
+
+            {/* Picker dropdown */}
+            {showPicker && (
+                <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 9999,
+                    background: "#fff", borderRadius: 12, padding: 16,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06)",
+                    width: 280, fontFamily: FONT,
+                    animation: "dtp-pop 0.12s cubic-bezier(0.4,0,0.2,1)",
+                }}>
+                    <style>{`@keyframes dtp-pop { from { opacity:0; transform:translateY(-4px) scale(0.97); } to { opacity:1; transform:translateY(0) scale(1); } }`}</style>
+
+                    {/* Date section */}
+                    <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Date</div>
+                        <input type="date"
+                            value={date}
+                            min={new Date().toISOString().split("T")[0]}
+                            onChange={e => { setDate(e.target.value); commit(e.target.value, time); }}
+                            style={{
+                                width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0",
+                                borderRadius: 7, fontSize: 13, color: "#0F172A", fontFamily: FONT,
+                                outline: "none", boxSizing: "border-box", cursor: "pointer",
+                            }}
+                        />
+                    </div>
+
+                    {/* Time section */}
+                    <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Time</div>
+                        {/* Preset buttons */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
+                            {TIME_PRESETS.map(p => (
+                                <button key={p.value} type="button"
+                                    onClick={() => { setTime(p.value); commit(date, p.value); }}
+                                    style={{
+                                        padding: "4px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                        border: `1.5px solid ${time === p.value ? "#3B82F6" : "#E2E8F0"}`,
+                                        background: time === p.value ? "#EFF6FF" : "#F8FAFC",
+                                        color: time === p.value ? "#1D4ED8" : "#475569",
+                                        cursor: "pointer", fontFamily: FONT, transition: "all 0.1s",
+                                    }}>
+                                    {p.label}
+                                </button>
+                            ))}
+                        </div>
+                        {/* Manual time input */}
+                        <input type="time"
+                            value={time}
+                            onChange={e => { setTime(e.target.value); commit(date, e.target.value); }}
+                            style={{
+                                width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0",
+                                borderRadius: 7, fontSize: 13, color: "#0F172A", fontFamily: FONT,
+                                outline: "none", boxSizing: "border-box",
+                            }}
+                        />
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                        <button type="button" onClick={clear}
+                            style={{ padding: "6px 12px", border: "1.5px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", color: "#64748B", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: FONT }}>
+                            Clear
+                        </button>
+                        <button type="button" onClick={() => setShowPicker(false)}
+                            style={{ padding: "6px 14px", border: "none", borderRadius: 7, background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                            Done
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
 
 export default function CreateTaskModal({
     onClose,
@@ -339,8 +494,22 @@ export default function CreateTaskModal({
                                             </div>
                                             <div style={s.field}>
                                                 <label style={s.label}>Deadline</label>
-                                                <input type="date" className="ctm-input" style={s.input} value={row.dueDate}
-                                                    onChange={e => updateRow(i, "dueDate", e.target.value)} />
+                                                <div style={{ display: "flex", gap: 6 }}>
+                                                    <input type="date" className="ctm-input" style={{ ...s.input, flex: 1 }}
+                                                        value={row.dueDate ? row.dueDate.split("T")[0] : ""}
+                                                        onChange={e => {
+                                                            const d = e.target.value;
+                                                            const t = row.dueDate?.split("T")[1] || "09:00";
+                                                            updateRow(i, "dueDate", d ? `${d}T${t}` : "");
+                                                        }} />
+                                                    <input type="time" className="ctm-input" style={{ ...s.input, width: 90, flexShrink: 0 }}
+                                                        value={row.dueDate ? (row.dueDate.split("T")[1] || "09:00") : "09:00"}
+                                                        disabled={!row.dueDate}
+                                                        onChange={e => {
+                                                            const d = row.dueDate?.split("T")[0];
+                                                            if (d) updateRow(i, "dueDate", `${d}T${e.target.value}`);
+                                                        }} />
+                                                </div>
                                             </div>
                                         </div>
 
@@ -506,8 +675,22 @@ export default function CreateTaskModal({
                             <div style={{ display: "flex", gap: 16 }}>
                                 <div style={{ flex: 1, ...s.field }}>
                                     <label style={s.label}>Deadline</label>
-                                    <input type="date" className="ctm-input" style={s.input}
-                                        value={form.dueDate} onChange={e => set("dueDate", e.target.value)} />
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                        <input type="date" className="ctm-input" style={{ ...s.input, flex: 1 }}
+                                            value={form.dueDate ? form.dueDate.split("T")[0] : ""}
+                                            onChange={e => {
+                                                const d = e.target.value;
+                                                const t = form.dueDate?.split("T")[1] || "09:00";
+                                                set("dueDate", d ? `${d}T${t}` : "");
+                                            }} />
+                                        <input type="time" className="ctm-input" style={{ ...s.input, width: 100, flexShrink: 0 }}
+                                            value={form.dueDate ? (form.dueDate.split("T")[1] || "09:00") : "09:00"}
+                                            disabled={!form.dueDate}
+                                            onChange={e => {
+                                                const d = form.dueDate?.split("T")[0];
+                                                if (d) set("dueDate", `${d}T${e.target.value}`);
+                                            }} />
+                                    </div>
                                     {form.dueDate && <div style={{ marginTop: 4 }}><DeadlineBadge dueDate={form.dueDate} /></div>}
                                 </div>
                                 <div style={{ flex: 1, ...s.field }}>

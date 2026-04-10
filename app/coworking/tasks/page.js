@@ -1017,6 +1017,7 @@ export default function TasksPage() {
   const [filterEmployee, setFilterEmployee] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterDeadline, setFilterDeadline] = useState(""); // "tomorrow" | "week" | "month"
   const [filterOpen, setFilterOpen] = useState(false);
   const [employeeMapFull, setEmployeeMapFull] = useState(new Map());
 
@@ -2486,13 +2487,29 @@ export default function TasksPage() {
                 return name.toLowerCase().includes(el);
               });
             })();
-            // Date range filter (dueDate or startDate)
+            // Deadline quick filter: tomorrow / week / month
             const matchDate = (() => {
-              if (!filterDateFrom && !filterDateTo) return true;
+              if (!filterDeadline && !filterDateFrom && !filterDateTo) return true;
               const td = t.dueDate || t.startDate;
               if (!td) return false;
               const tMs = new Date(td).getTime();
               if (isNaN(tMs)) return false;
+              if (filterDeadline) {
+                const now = new Date(); now.setHours(0, 0, 0, 0);
+                const tom = new Date(now); tom.setDate(tom.getDate() + 1);
+                if (filterDeadline === "tomorrow") {
+                  const tomEnd = new Date(tom); tomEnd.setHours(23, 59, 59, 999);
+                  return tMs >= tom.getTime() && tMs <= tomEnd.getTime();
+                }
+                if (filterDeadline === "week") {
+                  const weekEnd = new Date(now); weekEnd.setDate(weekEnd.getDate() + 7); weekEnd.setHours(23, 59, 59, 999);
+                  return tMs >= tom.getTime() && tMs <= weekEnd.getTime();
+                }
+                if (filterDeadline === "month") {
+                  const monthEnd = new Date(now); monthEnd.setDate(monthEnd.getDate() + 30); monthEnd.setHours(23, 59, 59, 999);
+                  return tMs >= tom.getTime() && tMs <= monthEnd.getTime();
+                }
+              }
               if (filterDateFrom && tMs < new Date(filterDateFrom).getTime()) return false;
               if (filterDateTo && tMs > new Date(filterDateTo + "T23:59:59").getTime()) return false;
               return true;
@@ -2715,8 +2732,8 @@ export default function TasksPage() {
               )}
               {/* ── FILTER BAR (new — sits between project info and stats tabs) ── */}
               {(() => {
-                const hasFilter = !!(filterDept || filterEmployee || filterDateFrom || filterDateTo);
-                const clearAll = () => { setFilterDept(""); setFilterEmployee(""); setFilterDateFrom(""); setFilterDateTo(""); };
+                const hasFilter = !!(filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo);
+                const clearAll = () => { setFilterDept(""); setFilterEmployee(""); setFilterDeadline(""); setFilterDateFrom(""); setFilterDateTo(""); };
                 // ── CSV Export ──
                 const doExport = () => {
                   const allRows = [];
@@ -2747,27 +2764,94 @@ export default function TasksPage() {
                 };
                 return (
                   <div style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
-                    {/* Row 1: Filter toggle + active chips + Export button */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", flexWrap: "wrap" }}>
-                      <button
-                        onClick={() => setFilterOpen(p => !p)}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", border: "1px solid var(--border)", borderRadius: 6, background: hasFilter ? "var(--p-lt)" : "var(--bg)", color: hasFilter ? "var(--p)" : "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", position: "relative", whiteSpace: "nowrap" }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-                        Filters
-                        {hasFilter && <span style={{ position: "absolute", top: 3, right: 3, width: 6, height: 6, borderRadius: "50%", background: "var(--p)" }} />}
-                      </button>
-                      {/* Active filter chips */}
-                      <div style={{ display: "flex", gap: 4, flex: 1, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
-                        {filterDept && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Dept: {filterDept}<button onClick={() => setFilterDept("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
-                        {filterEmployee && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Person: {filterEmployee}<button onClick={() => setFilterEmployee("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
-                        {(filterDateFrom || filterDateTo) && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px 2px 10px", borderRadius: 99, background: "var(--p-lt)", border: "1px solid var(--p)", color: "var(--p)", fontSize: 10, fontWeight: 600 }}>Date: {filterDateFrom || "…"} → {filterDateTo || "…"}<button onClick={() => { setFilterDateFrom(""); setFilterDateTo(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--p)", fontSize: 13, lineHeight: 1, padding: 0, fontWeight: 700 }}>×</button></span>}
-                        {hasFilter && <button onClick={clearAll} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: 10, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0 }}>Clear all</button>}
+                    {/* Single filter bar: Dept pills | Person | Deadline | Export */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", flexWrap: "wrap" }}>
+
+                      {/* ── Dept pills ── */}
+                      {(() => {
+                        const deptSet = new Set();
+                        allTasks.filter(t => !t.parentTaskId).forEach(t => {
+                          if (t.department) deptSet.add(t.department);
+                          (t.assigneeIds || []).forEach(aid => {
+                            const emp = employeeMapFull.get(aid);
+                            if (emp?.department) deptSet.add(emp.department);
+                          });
+                        });
+                        const depts = ["All", ...Array.from(deptSet).sort()];
+                        return (
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", flex: 1, minWidth: 0 }}>
+                            {depts.map(dept => {
+                              const isAll = dept === "All";
+                              const active = isAll ? !filterDept : filterDept === dept;
+                              return (
+                                <button key={dept}
+                                  onClick={() => setFilterDept(isAll ? "" : (filterDept === dept ? "" : dept))}
+                                  style={{
+                                    display: "inline-flex", alignItems: "center",
+                                    padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+                                    cursor: "pointer", fontFamily: "var(--font)", whiteSpace: "nowrap",
+                                    background: active ? "var(--p)" : "#fff",
+                                    color: active ? "#fff" : "var(--text-2)",
+                                    border: active ? "1.5px solid var(--p)" : "1.5px solid var(--border)",
+                                    transition: "all 0.12s",
+                                  }}
+                                >{dept}</button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+
+                      {/* divider */}
+                      <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
+
+                      {/* ── Person dropdown ── */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Person</span>
+                        <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}
+                          style={{ padding: "4px 8px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 11, fontWeight: 500, color: filterEmployee ? "var(--p)" : "var(--text-2)", fontFamily: "var(--font)", outline: "none", background: "#fff", cursor: "pointer", maxWidth: 130 }}
+                        >
+                          <option value="">All people</option>
+                          {(() => {
+                            const seen = new Set(); const opts = [];
+                            allTasks.forEach(t => (t.assigneeIds || []).forEach(aid => {
+                              if (!seen.has(aid)) { seen.add(aid); opts.push({ id: aid, name: employeeMap?.get(aid) || t.assigneeNameMap?.[aid] || aid }); }
+                            }));
+                            return opts.sort((a, b) => a.name.localeCompare(b.name)).map(o => <option key={o.id} value={o.name}>{o.name}</option>);
+                          })()}
+                        </select>
                       </div>
-                      {/* Export CSV — always visible */}
-                      <button
-                        onClick={doExport}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface)", color: "var(--text-2)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0, whiteSpace: "nowrap" }}
+
+                      {/* divider */}
+                      <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
+
+                      {/* ── Deadline pills ── */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Deadline</span>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {[{ key: "tomorrow", label: "Tomorrow" }, { key: "week", label: "Week" }, { key: "month", label: "Month" }].map(({ key, label }) => {
+                            const active = filterDeadline === key;
+                            return (
+                              <button key={key} onClick={() => setFilterDeadline(active ? "" : key)}
+                                style={{
+                                  padding: "4px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", whiteSpace: "nowrap", transition: "all 0.12s",
+                                  background: active ? "var(--p)" : "#fff", color: active ? "#fff" : "var(--text-2)",
+                                  border: active ? "1.5px solid var(--p)" : "1.5px solid var(--border)",
+                                }}
+                              >{label}</button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* divider */}
+                      <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
+
+                      {hasFilter && <button onClick={clearAll} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, whiteSpace: "nowrap", flexShrink: 0 }}>Clear</button>}
+
+                      {/* ── Export CSV ── */}
+                      <button onClick={doExport}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text-2)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0, whiteSpace: "nowrap" }}
                       >
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
                         Export CSV
@@ -2853,25 +2937,7 @@ export default function TasksPage() {
                               })}
                             </div>
                           </div>
-                          {/* ── Other filters: Person Name + Date range ── */}
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8 }}>
-                            {[
-                              { label: "Person Name", val: filterEmployee, set: setFilterEmployee, ph: "e.g. Ramesh", type: "text" },
-                              { label: "Date From", val: filterDateFrom, set: setFilterDateFrom, ph: "", type: "date" },
-                              { label: "Date To", val: filterDateTo, set: setFilterDateTo, ph: "", type: "date" },
-                            ].map(f => (
-                              <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                                <label style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)" }}>{f.label}</label>
-                                <input
-                                  type={f.type}
-                                  value={f.val}
-                                  onChange={e => f.set(e.target.value)}
-                                  placeholder={f.ph}
-                                  style={{ padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, color: "var(--text-1)", fontFamily: "var(--font)", outline: "none", background: "#fff" }}
-                                />
-                              </div>
-                            ))}
-                          </div>
+                          {/* Person Name and Deadline pills are in the always-visible filter bar above */}
                         </div>
                       );
                     })()}
@@ -2892,7 +2958,7 @@ export default function TasksPage() {
                     {[1, 2, 3, 4].map(i => (<div key={i} className="gv-skel-row"><div className="gv-skeleton gv-skel-circle" /><div className="gv-skel-lines"><div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} /><div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} /></div></div>))}
                   </div>
                 ) : filteredRoots.length === 0 ? (
-                  <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch || filterDept || filterEmployee || filterDateFrom || filterDateTo ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch && !filterDept && !filterEmployee ? "Click + Add Task to start" : "Try adjusting search or filters"}</p></div>
+                  <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch || filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch && !filterDept && !filterEmployee && !filterDeadline ? "Click + Add Task to start" : "Try adjusting search or filters"}</p></div>
                 ) : (
                   (() => {
                     // ── Split filteredRoots into two sections ──────────────
@@ -3009,7 +3075,7 @@ export default function TasksPage() {
                           <SectionBox
                             sectionKey="assigned"
                             title="Assigned to me"
-                            icon=""
+                            icon="📥"
                             accentColor="#5B5EF4"
                             accentBg="#F5F3FF"
                             tasks={assignedToMe}
@@ -3021,7 +3087,7 @@ export default function TasksPage() {
                           <SectionBox
                             sectionKey="created"
                             title="Created by me"
-                            icon=""
+                            icon="✏️"
                             accentColor="#0891B2"
                             accentBg="#F0F9FF"
                             tasks={createdByMe}

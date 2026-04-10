@@ -10,26 +10,34 @@ export function getDeadlineInfo(dueDate) {
     const due = new Date(dueDate).getTime();
     const diff = due - now;
     const twoDays = 2 * 24 * 60 * 60 * 1000;
+    // Show time only if a time component is present (not midnight/default)
+    const hasTime = dueDate.includes("T") && !/T00:00/.test(dueDate);
+    const timeStr = hasTime
+        ? new Date(dueDate).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+        : null;
+    const dateStr = new Date(dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+    const fullStr = timeStr ? `${dateStr}, ${timeStr}` : dateStr;
 
-    if (diff < 0) return {
-        status: "overdue",
-        color: "#d93025", bg: "#fce8e6",
-        label: `Overdue by ${Math.ceil(Math.abs(diff) / 86400000)}d`,
-        icon: "🔴",
-    };
+    if (diff < 0) {
+        const absMs = Math.abs(diff);
+        const overdueLabel = absMs < 3600000
+            ? `Overdue by ${Math.ceil(absMs / 60000)}m`
+            : absMs < 86400000
+                ? `Overdue by ${Math.ceil(absMs / 3600000)}h`
+                : `Overdue by ${Math.ceil(absMs / 86400000)}d`;
+        return { status: "overdue", color: "#d93025", bg: "#fce8e6", label: overdueLabel, icon: "🔴" };
+    }
     if (diff < twoDays) return {
-        status: "near",
-        color: "#b06000", bg: "#fef7e0",
-        label: diff < 86400000
-            ? `Due in ${Math.ceil(diff / 3600000)}h`
-            : `Due tomorrow`,
-        icon: "🟠",
+        status: "near", color: "#b06000", bg: "#fef7e0", icon: "🟠",
+        label: diff < 3600000
+            ? `Due in ${Math.ceil(diff / 60000)}m`
+            : diff < 86400000
+                ? `Due in ${Math.ceil(diff / 3600000)}h`
+                : `Due tomorrow${timeStr ? " · " + timeStr : ""}`,
     };
     return {
-        status: "safe",
-        color: "#1e8e3e", bg: "#e6f4ea",
-        label: `Due ${new Date(dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`,
-        icon: "🟢",
+        status: "safe", color: "#1e8e3e", bg: "#e6f4ea", icon: "🟢",
+        label: `Due ${fullStr}`,
     };
 }
 
