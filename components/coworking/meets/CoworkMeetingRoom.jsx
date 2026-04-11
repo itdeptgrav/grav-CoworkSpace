@@ -58,7 +58,8 @@ export default function CoworkMeetingRoom() {
 
     const recording = useMeetingRecording({
         meetId, employeeId,
-        firstName: (employeeName || "").split(" ")[0],
+        // Use full name sanitized — avoids collision when two people share first name
+        firstName: (employeeName || "Unknown").replace(/[^a-zA-Z0-9]/g, "").slice(0, 20) || employeeId,
         isHost,
     });
 

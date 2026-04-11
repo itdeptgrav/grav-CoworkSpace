@@ -88,7 +88,7 @@ const STATUS_COLORS = {
 };
 
 /* ─── RequestSidebarPanel ─── */
-function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null, highlightReqId = null }) {
+function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null, highlightReqId = null, onOpenChat = null, activeChatReqId = null, chatThreads = {}, chatInput = {}, setChatInput = () => { }, sendChatMsg = () => { } }) {
   const [tab, setTab] = useState(initialTab); // "compose" | "received" | "sent"
   const [employees, setEmployees] = useState([]);
   // compose form
@@ -114,9 +114,6 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const [loadingList, setLoadingList] = useState(false);
   const [respondingId, setRespondingId] = useState(null);
   const [respondMsg, setRespondMsg] = useState("");
-  const [chatOpenId, setChatOpenId] = useState(null); // which request has chat open
-  const [chatThreads, setChatThreads] = useState({}); // reqId -> messages[]
-  const [chatInput, setChatInput] = useState({});
   const chatEndRefs = useRef({});
   const reqItemRefs = useRef({});
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
@@ -286,42 +283,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
     }
   };
 
-  // Open chat thread for a request
-  const openChat = (reqId) => {
-    setChatOpenId(prev => prev === reqId ? null : reqId);
-    if (!chatThreads[reqId]) {
-      // listen to cowork_requests/{reqId}/chat subcollection
-      const q = query(
-        collection(firebaseDb, "cowork_requests", reqId, "chat"),
-        orderBy("createdAt", "asc")
-      );
-      const unsub = onSnapshot(q, snap => {
-        const msgs = snap.docs.map(d => ({
-          id: d.id, ...d.data(),
-          createdAt: d.data().createdAt?.seconds
-            ? new Date(d.data().createdAt.seconds * 1000).toISOString()
-            : d.data().createdAt
-        }));
-        setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
-        setTimeout(() => chatEndRefs.current[reqId]?.scrollIntoView({ behavior: "smooth" }), 40);
-      }, () => { });
-      // store unsub — we won't clean up for simplicity (panel close will unmount)
-    }
-  };
 
-  const sendChatMsg = async (reqId) => {
-    const text = (chatInput[reqId] || "").trim();
-    if (!text) return;
-    setChatInput(prev => ({ ...prev, [reqId]: "" }));
-    const msgId = crypto.randomUUID();
-    await setDoc(doc(collection(firebaseDb, "cowork_requests", reqId, "chat"), msgId), {
-      messageId: msgId, reqId,
-      senderId: employeeId, senderName: employeeName,
-      text, createdAt: serverTimestamp(),
-    });
-    // update request updatedAt so it surfaces
-    await updateDoc(doc(firebaseDb, "cowork_requests", reqId), { updatedAt: serverTimestamp() });
-  };
 
   const handleRespond = async (reqId, status) => {
     setRespondingId(reqId);
@@ -638,7 +600,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
               const isExpanded = respondingId === req.id;
               return (
-                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
+                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
                   <div className="cw-req-card-head">
                     <ReqAvatar name={req.fromName || "?"} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -707,11 +669,12 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         </button>
                       )}
                     </div>
-                    <button onClick={() => openChat(req.id)}
+                    <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
                       style={{
                         display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
-                        border: "1px solid #E4E7EC", borderRadius: 6, background: chatOpenId === req.id ? "#EBF3FE" : "#F9FAFB",
-                        color: chatOpenId === req.id ? "#1A73E8" : "#667085",
+                        border: "1px solid #E4E7EC", borderRadius: 6,
+                        background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB",
+                        color: activeChatReqId === req.id ? "#1A73E8" : "#667085",
                         fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
                       }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
@@ -749,8 +712,8 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     </div>
                   )}
 
-                  {/* Inline chat thread */}
-                  {chatOpenId === req.id && (
+                  {/* Inline chat thread — only used when no side panel (fallback) */}
+                  {!onOpenChat && chatOpenId === req.id && (
                     <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
                       <div style={{
                         padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
@@ -827,7 +790,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             ) : sent2.map(req => {
               const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
               return (
-                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
+                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
                   <div className="cw-req-card-head">
                     <ReqAvatar name={req.toName || "?"} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -862,18 +825,19 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     </div>
                   )}
                   <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-                    <button onClick={() => openChat(req.id)}
+                    <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
                       style={{
                         display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
-                        border: "1px solid #E4E7EC", borderRadius: 6, background: chatOpenId === req.id ? "#EBF3FE" : "#F9FAFB",
-                        color: chatOpenId === req.id ? "#1A73E8" : "#667085",
+                        border: "1px solid #E4E7EC", borderRadius: 6,
+                        background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB",
+                        color: activeChatReqId === req.id ? "#1A73E8" : "#667085",
                         fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
                       }}>
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
                       Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
                     </button>
                   </div>
-                  {chatOpenId === req.id && (
+                  {!onOpenChat && chatOpenId === req.id && (
                     <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
                       <div style={{
                         padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
@@ -1152,6 +1116,68 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
+  const [activeChatReqId, setActiveChatReqId] = useState(null);
+  const [activeChatReq, setActiveChatReq] = useState(null); // full request object for header
+  const [chatThreads, setChatThreads] = useState({});
+  const [chatInput, setChatInput] = useState({});
+  const [chatUploading, setChatUploading] = useState({});
+  const chatEndRefs = useRef({});
+
+  const openChatForReq = (reqId, req) => {
+    setActiveChatReqId(prev => prev === reqId ? null : reqId);
+    setActiveChatReq(prev => prev?.id === reqId ? null : (req || null));
+    if (!chatThreads[reqId]) {
+      const q = query(collection(firebaseDb, "cowork_requests", reqId, "chat"), orderBy("createdAt", "asc"));
+      onSnapshot(q, snap => {
+        const msgs = snap.docs.map(d => ({
+          id: d.id, ...d.data(),
+          createdAt: d.data().createdAt?.seconds
+            ? new Date(d.data().createdAt.seconds * 1000).toISOString()
+            : d.data().createdAt,
+        }));
+        setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
+        setTimeout(() => chatEndRefs.current[reqId]?.scrollIntoView({ behavior: "smooth" }), 60);
+      }, () => { });
+    }
+  };
+
+  const sendChatMsg = async (reqId, attachments = []) => {
+    const text = (chatInput[reqId] || "").trim();
+    if (!text && attachments.length === 0) return;
+    setChatInput(prev => ({ ...prev, [reqId]: "" }));
+    const msgId = crypto.randomUUID();
+    await setDoc(doc(collection(firebaseDb, "cowork_requests", reqId, "chat"), msgId), {
+      messageId: msgId, reqId,
+      senderId: employeeId, senderName: employeeName,
+      text, attachments, createdAt: serverTimestamp(),
+    });
+    await updateDoc(doc(firebaseDb, "cowork_requests", reqId), { updatedAt: serverTimestamp() });
+  };
+
+  const deleteReqChatMsg = async (reqId, msgId) => {
+    try {
+      const { deleteDoc, doc: fsDoc } = await import("firebase/firestore");
+      await deleteDoc(fsDoc(firebaseDb, "cowork_requests", reqId, "chat", msgId));
+    } catch (e) { console.error("delete msg:", e); }
+  };
+
+  const handleChatFilePick = async (reqId, files) => {
+    if (!files?.length) return;
+    setChatUploading(prev => ({ ...prev, [reqId]: true }));
+    try {
+      const uploaded = await Promise.all(Array.from(files).map(async f => {
+        if (f.type.startsWith("image/")) {
+          const r = await uploadImageCld(f);
+          return { url: r.url, name: f.name, type: "image", size: f.size };
+        } else {
+          const r = await uploadPdfBackend(f);
+          return { url: r.url, name: f.name, type: "file", size: f.size };
+        }
+      }));
+      await sendChatMsg(reqId, uploaded);
+    } catch (e) { console.error("chat upload:", e); }
+    finally { setChatUploading(prev => ({ ...prev, [reqId]: false })); }
+  };
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
   const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
@@ -1562,6 +1588,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           overflow: hidden;
           animation: cw-popup-in 0.15s ease;
         }
+        .req-chat-msg-wrap:hover .req-msg-del-btn { display: flex !important; }
         @keyframes cw-popup-in {
           from { opacity: 0; transform: translateY(-6px); }
           to { opacity: 1; transform: translateY(0); }
@@ -1716,10 +1743,13 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           box-shadow: -8px 0 32px rgba(0,0,0,0.12);
           z-index: 500;
           display: flex;
-          flex-direction: column;
+          flex-direction: row;
           transform: translateX(100%);
           transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
         }
+        .cw-req-panel.chat-open { width: 820px; }
+        .cw-req-panel-left { width: 480px; min-width: 480px; display: flex; flex-direction: column; border-right: 1px solid #E4E7EC; }
+        .cw-req-panel-chat { flex: 1; display: flex; flex-direction: column; background: #F8FAFC; }
         .cw-req-panel.open { transform: translateX(0); }
         .cw-req-panel-overlay {
           display: none;
@@ -1874,7 +1904,34 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               </div>
             ))}
 
-
+            {/* ── Download App — always visible, not clickable (display only) ── */}
+            {!isInstalled && (
+              <div style={{ margin: "8px 10px 4px" }}>
+                <div style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 12px", borderRadius: 10,
+                  background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
+                  boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
+                  pointerEvents: "none",  /* NOT clickable */
+                  userSelect: "none",
+                }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>Download App</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>Install on your device</div>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </div>
+              </div>
+            )}
           </nav>
 
           <div className="cw-sidebar-footer">
@@ -2027,16 +2084,149 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         </div>
       </div>
       {/* ── Universal Request Sidebar Panel ── */}
-      <div className={`cw-req-panel-overlay${reqPanelOpen ? " show" : ""}`} onClick={() => setReqPanelOpen(false)} />
-      <div className={`cw-req-panel${reqPanelOpen ? " open" : ""}`}>
-        <RequestSidebarPanel
-          employeeId={employeeId}
-          employeeName={employeeName}
-          onClose={() => setReqPanelOpen(false)}
-          initialTab={reqPanelInitialTab}
-          prefilledTask={reqPanelContext}
-          highlightReqId={highlightReqId}
-        />
+      <div className={`cw-req-panel-overlay${reqPanelOpen ? " show" : ""}`} onClick={() => { setReqPanelOpen(false); setActiveChatReqId(null); }} />
+      <div className={`cw-req-panel${reqPanelOpen ? " open" : ""}${activeChatReqId ? " chat-open" : ""}`}>
+        {/* Left: Request list */}
+        <div className="cw-req-panel-left">
+          <RequestSidebarPanel
+            employeeId={employeeId}
+            employeeName={employeeName}
+            onClose={() => { setReqPanelOpen(false); setActiveChatReqId(null); }}
+            initialTab={reqPanelInitialTab}
+            prefilledTask={reqPanelContext}
+            highlightReqId={highlightReqId}
+            onOpenChat={openChatForReq}
+            activeChatReqId={activeChatReqId}
+            chatThreads={chatThreads}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            sendChatMsg={sendChatMsg}
+          />
+        </div>
+
+        {/* Right: Chat panel — slides in when a chat is opened */}
+        {activeChatReqId && (() => {
+          const reqId = activeChatReqId;
+          const msgs = chatThreads[reqId] || [];
+          const uploading = chatUploading[reqId];
+          return (
+            <div className="cw-req-panel-chat">
+              {/* Chat header */}
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid #E4E7EC", background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1D21", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {activeChatReq?.subject || "Chat Thread"}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                    {activeChatReq?.fromName || activeChatReq?.toName ? (
+                      <>
+                        <span style={{ width: 14, height: 14, borderRadius: "50%", background: "#1A73E8", color: "#fff", fontSize: 8, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {(activeChatReq?.fromName || activeChatReq?.toName || "?")[0].toUpperCase()}
+                        </span>
+                        {activeChatReq?.fromName || activeChatReq?.toName}
+                      </>
+                    ) : "Request conversation"}
+                  </div>
+                </div>
+                <button onClick={() => setActiveChatReqId(null)} style={{ width: 26, height: 26, border: "1px solid #E4E7EC", borderRadius: 6, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#667085" }}>
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                {msgs.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "#9AA0A6", fontSize: 12, marginTop: 40 }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, display: "block", margin: "0 auto 8px" }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                    No messages yet
+                  </div>
+                ) : msgs.map((msg, mi) => {
+                  const isMe = msg.senderId === employeeId;
+                  return (
+                    <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+                      {!isMe && <div style={{ fontSize: 10, color: "#9AA0A6", marginBottom: 3, fontWeight: 600 }}>{msg.senderName}</div>}
+                      {msg.text && (
+                        <div style={{ position: "relative", maxWidth: "80%" }} className="req-chat-msg-wrap">
+                          <div style={{ padding: "8px 12px", borderRadius: isMe ? "12px 12px 2px 12px" : "12px 12px 12px 2px", background: isMe ? "#1A73E8" : "#fff", color: isMe ? "#fff" : "#1A1D21", fontSize: 13, lineHeight: 1.5, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", border: isMe ? "none" : "1px solid #E4E7EC" }}>
+                            {msg.text}
+                          </div>
+                          {isMe && (
+                            <button
+                              onClick={() => { if (window.confirm("Delete this message?")) deleteReqChatMsg(reqId, msg.id); }}
+                              className="req-msg-del-btn"
+                              title="Delete message"
+                              style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#EF4444", border: "1.5px solid #fff", cursor: "pointer", display: "none", alignItems: "center", justifyContent: "center", padding: 0 }}
+                            >
+                              <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {/* Attachments */}
+                      {(msg.attachments || []).map((att, ai) => (
+                        <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer"
+                          style={{ display: "flex", alignItems: "center", gap: 7, maxWidth: "80%", marginTop: 4, padding: "8px 12px", borderRadius: 8, background: isMe ? "#1558b0" : "#fff", border: isMe ? "none" : "1px solid #E4E7EC", color: isMe ? "#fff" : "#1A73E8", fontSize: 12, fontWeight: 500, textDecoration: "none", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+                          {att.type === "image" ? (
+                            <img src={att.url} alt={att.name} style={{ width: 120, height: 80, objectFit: "cover", borderRadius: 6 }} />
+                          ) : (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
+                            </>
+                          )}
+                        </a>
+                      ))}
+                      <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 3 }}>
+                        {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={el => chatEndRefs.current[reqId] = el} />
+              </div>
+
+              {/* Input bar */}
+              <div style={{ padding: "10px 12px", borderTop: "1px solid #E4E7EC", background: "#fff", flexShrink: 0 }}>
+                {uploading && (
+                  <div style={{ fontSize: 11, color: "#1A73E8", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                    <svg style={{ animation: "gw-spin 0.8s linear infinite" }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                    Uploading…
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                  {/* Attach button */}
+                  <button
+                    onClick={() => { const inp = document.getElementById(`req-chat-file-${reqId}`); inp?.click(); }}
+                    disabled={uploading}
+                    style={{ width: 34, height: 34, border: "1.5px solid #E4E7EC", borderRadius: 8, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#667085", flexShrink: 0 }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
+                  </button>
+                  <input id={`req-chat-file-${reqId}`} type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar" style={{ display: "none" }} onChange={e => handleChatFilePick(reqId, e.target.files)} />
+
+                  {/* Text input */}
+                  <textarea
+                    value={chatInput[reqId] || ""}
+                    onChange={e => setChatInput(prev => ({ ...prev, [reqId]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(reqId); } }}
+                    placeholder="Type a message…"
+                    rows={1}
+                    style={{ flex: 1, padding: "8px 12px", border: "1.5px solid #E4E7EC", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1A1D21", resize: "none", lineHeight: 1.5 }}
+                  />
+
+                  {/* Send button */}
+                  <button
+                    onClick={() => sendChatMsg(reqId)}
+                    disabled={uploading || (!chatInput[reqId]?.trim())}
+                    style={{ width: 34, height: 34, background: "#1A73E8", border: "none", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: (!chatInput[reqId]?.trim() && !uploading) ? 0.5 : 1 }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Notes Sidebar Panel ── */}
