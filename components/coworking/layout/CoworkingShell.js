@@ -1904,34 +1904,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               </div>
             ))}
 
-            {/* ── Download App — always visible, not clickable (display only) ── */}
-            {!isInstalled && (
-              <div style={{ margin: "8px 10px 4px" }}>
-                <div style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 12px", borderRadius: 10,
-                  background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-                  boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
-                  pointerEvents: "none",  /* NOT clickable */
-                  userSelect: "none",
-                }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                  </div>
-                  <div style={{ flex: 1, textAlign: "left" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>Download App</div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>Install on your device</div>
-                  </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                </div>
-              </div>
-            )}
+
           </nav>
 
           <div className="cw-sidebar-footer">
