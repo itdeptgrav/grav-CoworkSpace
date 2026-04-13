@@ -144,6 +144,81 @@ const TAB_ICONS = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ── Animated pipeline steps shown during Gemini generation ──────────────────
+function GeneratingSteps() {
+    const [activeStep, setActiveStep] = useState(0);
+    const steps = [
+        { icon: "📥", label: "Fetching audio recordings", duration: 8000 },
+        { icon: "⬆️", label: "Uploading to Gemini API", duration: 18000 },
+        { icon: "🧠", label: "Gemini analyzing conversation", duration: 40000 },
+        { icon: "✍️", label: "Extracting tasks & insights", duration: 15000 },
+        { icon: "✅", label: "Finalizing summary", duration: null },
+    ];
+
+    useEffect(() => {
+        let step = 0;
+        const advance = () => {
+            if (step < steps.length - 1) {
+                step++;
+                setActiveStep(step);
+                if (steps[step].duration) {
+                    setTimeout(advance, steps[step].duration);
+                }
+            }
+        };
+        const t = setTimeout(advance, steps[0].duration || 3000);
+        return () => clearTimeout(t);
+    }, []);
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 340 }}>
+            {steps.map((step, i) => {
+                const isDone = i < activeStep;
+                const isActive = i === activeStep;
+                return (
+                    <div key={i} style={{
+                        display: "flex", alignItems: "center", gap: 12,
+                        padding: "10px 14px", borderRadius: 10,
+                        background: isDone ? "#F0FDF4" : isActive ? "#EFF6FF" : "#F8FAFC",
+                        border: `1px solid ${isDone ? "#BBF7D0" : isActive ? "#BFDBFE" : "#E2E8F0"}`,
+                        transition: "all 0.4s ease",
+                        opacity: i > activeStep ? 0.4 : 1,
+                    }}>
+                        {/* Status icon */}
+                        <div style={{
+                            width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isDone ? "#16A34A" : isActive ? "#2563EB" : "#E2E8F0"
+                        }}>
+                            {isDone ? (
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                            ) : isActive ? (
+                                <div style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", animation: "_spin 0.7s linear infinite" }} />
+                            ) : (
+                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#9CA3AF" }} />
+                            )}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: isActive ? 600 : 500, color: isDone ? "#15803D" : isActive ? "#1D4ED8" : "#9CA3AF" }}>
+                                {step.icon} {step.label}
+                            </div>
+                            {isActive && (
+                                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2, display: "flex", gap: 3 }}>
+                                    {[0, 1, 2].map(j => (
+                                        <span key={j} style={{
+                                            width: 4, height: 4, borderRadius: "50%", background: "#2563EB", display: "inline-block",
+                                            animation: `_dot 1.2s ease-in-out ${j * 0.2}s infinite`
+                                        }} />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
     const [phase, setPhase] = useState("loading");
     const [summary, setSummary] = useState(null);
@@ -646,12 +721,24 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                         )}
 
                         {phase === "generating" && (
-                            <div className="M-center">
-                                <div className="M-spin M-spin-md" style={{ marginBottom: 14 }} />
-                                <div className="M-state-title">Analyzing audio recordings</div>
-                                <div className="M-state-sub" style={{ marginTop: 5 }}>
-                                    Downloading files · Sending to Gemini · Extracting insights<br />
-                                    <span style={{ color: "#2563EB", fontWeight: 600 }}>This takes 20–60 seconds</span>
+                            <div className="M-center" style={{ gap: 0, padding: "20px 0" }}>
+                                {/* Animated spinner with Gemini star icon */}
+                                <div style={{ position: "relative", width: 64, height: 64, marginBottom: 22 }}>
+                                    <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid #EFF6FF" }} />
+                                    <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid transparent", borderTopColor: "#2563EB", animation: "_spin 0.9s linear infinite" }} />
+                                    <div style={{ position: "absolute", inset: 8, borderRadius: "50%", background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                                    </div>
+                                </div>
+
+                                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>Generating with Gemini AI</div>
+                                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 24 }}>Analyzing your meeting audio…</div>
+
+                                {/* Animated pipeline steps */}
+                                <GeneratingSteps />
+
+                                <div style={{ marginTop: 20, fontSize: 12, color: "#94A3B8" }}>
+                                    Typically takes <strong style={{ color: "#2563EB" }}>20–90 seconds</strong> depending on recording length
                                 </div>
                             </div>
                         )}

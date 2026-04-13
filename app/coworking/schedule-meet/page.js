@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { listMeets, cancelMeet, updateMeet } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
 
 function getMeetStatus(meet) {
@@ -594,12 +594,47 @@ export default function MeetingsPage() {
   }, [user, loading, router]);
 
   useEffect(() => {
-    if (!user) return;
-    listMeets()
-      .then(d => setMeets(d.meets || []))
-      .catch(() => { })
-      .finally(() => setFetching(false));
-  }, [user]);
+    if (!user || !employeeId) return;
+    // Real-time listener — picks up meetings created from DM/Group chat instantly
+    let q;
+    if (role === "ceo") {
+      q = query(collection(firebaseDb, "cowork_scheduled_meets"));
+    } else if (role === "tl") {
+      // TL sees meetings they created or are participant in
+      // Use two separate listeners merged
+      q = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("participants", "array-contains", employeeId));
+    } else {
+      q = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("participants", "array-contains", employeeId));
+    }
+    const unsub = onSnapshot(q, snap => {
+      let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // For TL — also fetch meetings they created (second query not possible with onSnapshot easily)
+      // We handle this by including createdBy check client-side after fetch
+      setMeets(docs);
+      setFetching(false);
+    }, () => {
+      // Fallback to API if snapshot fails
+      listMeets().then(d => setMeets(d.meets || [])).catch(() => { }).finally(() => setFetching(false));
+    });
+    // For TL — also listen to meetings they created (createdBy)
+    let unsubCreated = null;
+    if (role === "tl") {
+      const qCreated = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("createdBy", "==", employeeId));
+      unsubCreated = onSnapshot(qCreated, snap => {
+        const createdDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setMeets(prev => {
+          const map = new Map(prev.map(m => [m.meetId || m.id, m]));
+          createdDocs.forEach(m => map.set(m.meetId || m.id, m));
+          return Array.from(map.values());
+        });
+        setFetching(false);
+      }, () => { });
+    }
+    return () => { unsub(); if (unsubCreated) unsubCreated(); };
+  }, [user, employeeId, role]);
 
   // Load employee names from Firestore for avatar tooltips
   useEffect(() => {

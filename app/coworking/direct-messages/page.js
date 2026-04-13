@@ -11,9 +11,27 @@ import {
   serverTimestamp, writeBatch, arrayUnion,
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
+import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
+import { cancelMeet, updateMeet } from "../../../lib/coworkApi";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
 import { GwSpinner } from "../../../components/coworking/shared/CoworkShared";
-import { firebaseDb } from "../../../lib/coworkFirebase";
+import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
+import {
+  collection as fsCollection, query as fsQuery, where as fsWhere,
+  onSnapshot as fsOnSnapshot, doc as fsDoc, updateDoc as fsUpdateDoc,
+} from "firebase/firestore";
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+async function apiFetch(path, opts = {}) {
+  const token = await firebaseAuth.currentUser?.getIdToken();
+  const res = await fetch(`${BASE_URL}/cowork${path}`, {
+    ...opts,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+  });
+  const d = await res.json();
+  if (!res.ok) throw new Error(d.error || "Failed");
+  return d;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function convId(a, b) { return [a, b].sort().join("_"); }
@@ -166,7 +184,82 @@ function DocCard({ att, isMe, onDl }) {
 }
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
-function Bubble({ msg, isMe, showAvatar, onImg, onDl }) {
+// ── ThreadRequestCard — shows a request inline in chat ──────────────────────
+const STATUS_COLORS = {
+  pending: { bg: "#FFF7ED", color: "#C2410C", border: "#FED7AA" },
+  approved: { bg: "#F0FDF4", color: "#15803D", border: "#BBF7D0" },
+  rejected: { bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" },
+};
+const PRI_COLORS = {
+  urgent: { bg: "#FEF2F2", color: "#B91C1C" },
+  high: { bg: "#FFF7ED", color: "#C2410C" },
+  medium: { bg: "#FFFBEB", color: "#92400E" },
+  low: { bg: "#F0FDF4", color: "#15803D" },
+};
+
+// ── Collapsible requests bar — small pill, expands as floating panel ──────────
+function ThreadRequestsBar({ requests, employeeId, employeeName }) {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const pending = requests.filter(r => r.status === "pending").length;
+
+  return (
+    <div ref={panelRef} style={{ position: "relative", flexShrink: 0 }}>
+      {/* Pill trigger */}
+      <button
+        onClick={() => setOpen(p => !p)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 8,
+          padding: "6px 14px", background: open ? "#FAF5FF" : "#F8FAFC",
+          border: "none", borderBottom: `1px solid ${open ? "#E9D5FF" : "#E5E7EB"}`,
+          cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#7C3AED", flex: 1, textAlign: "left" }}>
+          {requests.length} Request{requests.length !== 1 ? "s" : ""}
+        </span>
+        {pending > 0 && (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99, background: "#FEF3C7", color: "#D97706", border: "1px solid #FDE68A" }}>
+            {pending} pending
+          </span>
+        )}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2.5" strokeLinecap="round" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", flexShrink: 0 }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {/* Floating dropdown panel */}
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 200,
+          background: "#fff", border: "1px solid #E9D5FF", borderTop: "none",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          maxHeight: "60vh", overflowY: "auto",
+          padding: "8px",
+          display: "flex", flexDirection: "column", gap: 6,
+        }}>
+          {requests.map(req => (
+            <ThreadRequestCard key={req.id} req={req} employeeId={employeeId} employeeName={employeeName} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
 
   // ── Meeting invite card ──────────────────────────────────────────────────────
@@ -257,6 +350,33 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl }) {
               >
                 {isLiveNow ? "🔴 Join Live Meeting" : "🎥 Join Meeting"}
               </a>
+
+              {/* Host-only: Summary, Edit, Cancel */}
+              {isHost && md.meetId && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  {onViewSummary && (
+                    <button onClick={() => onViewSummary(md.meetId, md.meetTitle)}
+                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /></svg>
+                      Summary
+                    </button>
+                  )}
+                  {onEdit && (
+                    <button onClick={() => onEdit({ meetId: md.meetId, title: md.meetTitle, description: md.description, dateTime: md.dateTime, participants: [] })}
+                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                      Edit
+                    </button>
+                  )}
+                  {onCancel && isMe && (
+                    <button onClick={() => onCancel(md.meetId, md.meetTitle)}
+                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -342,6 +462,17 @@ function Av({ name, size = 40 }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function DirectMessagesPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
+  const isCeoOrTl = role === "ceo" || role === "tl";
+  const [showMeetModal, setShowMeetModal] = useState(false);
+  const [meetForm, setMeetForm] = useState({ title: "", dateTime: "", description: "" });
+  const [meetBusy, setMeetBusy] = useState(false);
+  const [meetError, setMeetError] = useState("");
+  const [summaryModal, setSummaryModal] = useState(null); // { meetId, meetTitle }
+  const [threadRequests, setThreadRequests] = useState([]); // requests linked to this DM thread
+  const [editModal, setEditModal] = useState(null);       // meet object
+  const [editError, setEditError] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [cancellingId, setCancellingId] = useState(null);
   const router = useRouter();
 
   const [conversations, setConversations] = useState([]);
@@ -494,6 +625,18 @@ export default function DirectMessagesPage() {
     a.click(); document.body.removeChild(a);
   };
 
+  // ── Thread request listener — MUST be before any early return (Rules of Hooks)
+  useEffect(() => {
+    if (!employeeId || !selectedPerson?.employeeId) { setThreadRequests([]); return; }
+    const cid = convId(employeeId, selectedPerson.employeeId);
+    const unsub = onSnapshot(
+      query(collection(firebaseDb, "cowork_requests"), where("threadId", "==", cid)),
+      snap => setThreadRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))),
+      () => { }
+    );
+    return () => unsub();
+  }, [employeeId, selectedPerson?.employeeId]);
+
   if (loading || !user) return null;
 
   // Derived data
@@ -532,6 +675,73 @@ export default function DirectMessagesPage() {
     if (ds && ds !== lastDate) { withSep.push({ _sep: true, label: ds }); lastDate = ds; }
     withSep.push({ ...msg, isMe: msg.senderId === employeeId, showAvatar: i === 0 || messages[i - 1]?.senderId !== msg.senderId });
   });
+
+  const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
+
+  const handleCancelMeet = async (meetId, meetTitle) => {
+    if (!window.confirm(`Cancel meeting "${meetTitle}"? This cannot be undone.`)) return;
+    setCancellingId(meetId);
+    try { await cancelMeet(meetId); }
+    catch (e) { alert(e.message || "Failed to cancel meeting"); }
+    finally { setCancellingId(null); }
+  };
+
+  const handleEditSave = async (updated) => {
+    if (!editModal) return;
+    setEditError("");
+    if (!updated.title?.trim()) { setEditError("Title is required."); return; }
+    if (!updated.dateTime) { setEditError("Date and time is required."); return; }
+    setEditSaving(true);
+    try {
+      await updateMeet(editModal.meetId, {
+        title: updated.title.trim(), description: updated.description || "",
+        dateTime: updated.dateTime, googleMeetLink: updated.googleMeetLink || null,
+        participants: updated.participants || [],
+      });
+      setEditModal(null);
+    } catch (e) { setEditError(e.message || "Failed to save."); }
+    finally { setEditSaving(false); }
+  };
+
+  const handleCreateMeeting = async () => {
+    if (!meetForm.title.trim()) { setMeetError("Title is required"); return; }
+    if (!meetForm.dateTime) { setMeetError("Date and time is required"); return; }
+    if (!selectedPerson) return;
+    setMeetBusy(true); setMeetError("");
+    try {
+      const result = await apiFetch("/schedule-meet/create", {
+        method: "POST",
+        body: JSON.stringify({
+          title: meetForm.title.trim(),
+          description: meetForm.description.trim() || "",
+          dateTime: meetForm.dateTime,
+          googleMeetLink: null,
+          participants: [selectedPerson.employeeId],
+        }),
+      });
+      const meetId = result?.meet?.meetId || result?.meetId;
+      const joinCode = result?.meet?.joinCode || result?.joinCode || "";
+      // Send invite message in this conversation
+      const cid = convId(employeeId, selectedPerson.employeeId);
+      const convRef = doc(firebaseDb, "cowork_direct_messages", cid);
+      const msgsRef = collection(convRef, "messages");
+      const msgId = crypto.randomUUID();
+      await setDoc(doc(msgsRef, msgId), {
+        messageId: msgId, senderId: employeeId, senderName: employeeName,
+        text: `Meeting Invitation: ${meetForm.title.trim()}`,
+        messageType: "meeting_invite", type: "meeting_invite",
+        meetingData: { meetId, joinCode, meetTitle: meetForm.title.trim(), description: meetForm.description.trim(), dateTime: meetForm.dateTime },
+        readBy: [employeeId], createdAt: serverTimestamp(),
+      });
+      await updateDoc(convRef, {
+        lastMessage: { text: `📹 Meeting invite: ${meetForm.title.trim()}`, senderId: employeeId, senderName: employeeName, messageType: "meeting_invite", sentAt: serverTimestamp() },
+        updatedAt: serverTimestamp(),
+      });
+      setShowMeetModal(false);
+      setMeetForm({ title: "", dateTime: "", description: "" });
+    } catch (e) { setMeetError(e.message); }
+    finally { setMeetBusy(false); }
+  };
 
   const roleChip = r => r === "ceo" ? { bg: "#FEF3C7", color: "#92400E", label: "CEO" }
     : r === "tl" ? { bg: "#F0FDF4", color: "#166534", label: "Team Lead" }
@@ -695,7 +905,36 @@ export default function DirectMessagesPage() {
                     <span className="dm-pill mono">{selectedPerson.employeeId}</span>
                   </div>
                 </div>
+
+                {/* Request button */}
+                <button onClick={() => {
+                  window.dispatchEvent(new CustomEvent("openRequestPanel", {
+                    detail: {
+                      tab: "compose",
+                      threadContext: { type: "dm", threadId: convId(employeeId, selectedPerson.employeeId), recipientId: selectedPerson.employeeId, recipientName: selectedPerson.name }
+                    }
+                  }));
+                }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9, border: "1.5px solid #E9D5FF", background: "#FAF5FF", color: "#7C3AED", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                    <line x1="12" y1="8" x2="12" y2="12" /><line x1="10" y1="10" x2="14" y2="10" />
+                  </svg>
+                  Request
+                </button>
+
+                {/* Schedule Meeting button — CEO/TL only */}
+                {isCeoOrTl && (
+                  <button onClick={() => { setShowMeetModal(true); setMeetError(""); }}
+                    style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9, border: "1.5px solid #BFDBFE", background: "#EFF6FF", color: "#1D4ED8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" />
+                    </svg>
+                    Schedule Meeting
+                  </button>
+                )}
               </div>
+
+
 
               {/* Messages */}
               <div className="dm-msgs">
@@ -707,16 +946,33 @@ export default function DirectMessagesPage() {
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
                     <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
                   </div>
-                ) : withSep.map((item, i) => {
-                  if (item._sep) return (
-                    <div key={"sep" + i} className="dm-datesep">
-                      <span className="dm-datesep-label">{item.label}</span>
-                    </div>
-                  );
-                  return (
-                    <Bubble key={item.messageId || item.id || i} msg={item} isMe={item.isMe} showAvatar={item.showAvatar} onImg={setLightbox} onDl={dlFile} />
-                  );
-                })}
+                ) : (() => {
+                  // Merge requests into message timeline by createdAt
+                  const reqItems = threadRequests.map(r => ({
+                    _isReq: true, id: r.id, req: r,
+                    _ts: r.createdAt?.seconds || 0,
+                  }));
+                  const msgItems = withSep.map(m => ({
+                    ...m, _ts: m.createdAt ? (typeof m.createdAt === 'string' ? new Date(m.createdAt).getTime() / 1000 : (m.createdAt?.seconds || 0)) : 0
+                  }));
+                  const combined = [...msgItems, ...reqItems].sort((a, b) => a._ts - b._ts);
+
+                  return combined.map((item, i) => {
+                    if (item._sep) return (
+                      <div key={"sep" + i} className="dm-datesep">
+                        <span className="dm-datesep-label">{item.label}</span>
+                      </div>
+                    );
+                    if (item._isReq) return (
+                      <div key={item.id} style={{ padding: "0 4px", marginBottom: 8 }}>
+                        <ThreadRequestCard req={item.req} employeeId={employeeId} />
+                      </div>
+                    );
+                    return (
+                      <Bubble key={item.messageId || item.id || i} msg={item} isMe={item.isMe} showAvatar={item.showAvatar} onImg={setLightbox} onDl={dlFile} isHost={isCeoOrTl} onViewSummary={handleViewSummary} onCancel={handleCancelMeet} onEdit={setEditModal} />
+                    );
+                  });
+                })()}
                 <div ref={endRef} />
               </div>
 
@@ -728,6 +984,119 @@ export default function DirectMessagesPage() {
           )}
         </div>
       </div>
+
+      {/* ── Meeting Summary Modal ── */}
+      {summaryModal && (
+        <MeetingSummaryModal
+          meetId={summaryModal.meetId}
+          meetTitle={summaryModal.meetTitle}
+          onClose={() => setSummaryModal(null)}
+        />
+      )}
+
+      {/* ── Edit Meeting Modal ── */}
+      {editModal && (
+        <div onClick={e => { if (e.target === e.currentTarget) setEditModal(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
+          <div style={{ background: "#fff", borderRadius: 16, width: "min(440px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", fontFamily: "inherit", overflow: "hidden" }}>
+            <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>✏️ Edit Meeting</div>
+              <button onClick={() => setEditModal(null)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+            <div style={{ padding: "16px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {editError && <div style={{ padding: "8px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 7, fontSize: 12, color: "#B91C1C" }}>{editError}</div>}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Title</label>
+                <input value={editModal.title || ""} onChange={e => setEditModal(p => ({ ...p, title: e.target.value }))}
+                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Date</label>
+                  <input type="date" value={editModal.dateTime ? editModal.dateTime.split("T")[0] : ""}
+                    onChange={e => setEditModal(p => ({ ...p, dateTime: `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` }))}
+                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Time</label>
+                  <input type="time" value={editModal.dateTime ? (editModal.dateTime.split("T")[1] || "09:00") : "09:00"}
+                    onChange={e => { const d = editModal.dateTime?.split("T")[0]; if (d) setEditModal(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }}
+                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Description</label>
+                <textarea value={editModal.description || ""} onChange={e => setEditModal(p => ({ ...p, description: e.target.value }))} rows={2}
+                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ padding: "0 22px 20px", display: "flex", gap: 10 }}>
+              <button onClick={() => setEditModal(null)} style={{ flex: 1, padding: "10px 0", border: "1.5px solid #E2E8F0", borderRadius: 9, background: "#F8FAFC", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={() => handleEditSave(editModal)} disabled={editSaving}
+                style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: editSaving ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: editSaving ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {editSaving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Schedule Meeting Modal ── */}
+      {showMeetModal && selectedPerson && (
+        <div onClick={e => { if (e.target === e.currentTarget) setShowMeetModal(false); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
+          <div style={{ background: "#fff", borderRadius: 16, width: "min(440px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", fontFamily: "inherit", overflow: "hidden" }}>
+            <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>📅 Schedule Meeting</div>
+                <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>with {selectedPerson.name}</div>
+              </div>
+              <button onClick={() => setShowMeetModal(false)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+            <div style={{ padding: "16px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+              {meetError && <div style={{ padding: "8px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 7, fontSize: 12, color: "#B91C1C" }}>{meetError}</div>}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Meeting Title *</label>
+                <input value={meetForm.title} onChange={e => setMeetForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. Project Review" autoFocus
+                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Date</label>
+                  <input type="date" value={meetForm.dateTime ? meetForm.dateTime.split("T")[0] : ""}
+                    onChange={e => setMeetForm(p => ({ ...p, dateTime: e.target.value ? `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` : "" }))}
+                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Time</label>
+                  <input type="time" value={meetForm.dateTime ? (meetForm.dateTime.split("T")[1] || "09:00") : "09:00"} disabled={!meetForm.dateTime}
+                    onChange={e => { const d = meetForm.dateTime?.split("T")[0]; if (d) setMeetForm(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }}
+                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", opacity: meetForm.dateTime ? 1 : 0.4 }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Description</label>
+                <textarea value={meetForm.description} onChange={e => setMeetForm(p => ({ ...p, description: e.target.value }))} placeholder="Agenda…" rows={2}
+                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ padding: "10px 12px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1D4ED8" }}>
+                👤 <strong>{selectedPerson.name}</strong> will be invited automatically
+              </div>
+            </div>
+            <div style={{ padding: "0 22px 20px", display: "flex", gap: 10 }}>
+              <button onClick={() => setShowMeetModal(false)} style={{ flex: 1, padding: "10px 0", border: "1.5px solid #E2E8F0", borderRadius: 9, background: "#F8FAFC", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleCreateMeeting} disabled={meetBusy || !meetForm.title.trim() || !meetForm.dateTime}
+                style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: meetBusy || !meetForm.title.trim() || !meetForm.dateTime ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: meetBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {meetBusy ? "Scheduling…" : "Schedule Meeting"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -929,4 +1298,84 @@ const CSS = `
 @media (min-width: 1280px) {
   .dm-left { width: 360px; min-width: 360px; }
 }
-`;
+`
+// ── Request Card — professional, like meeting invite ─────────────────────────
+const REQ_STATUS_COLORS = {
+  pending: { color: "#D97706", bg: "#FEF3C7", border: "#FDE68A" },
+  approved: { color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0" },
+  rejected: { color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
+};
+const REQ_PRI_COLOR = { urgent: "#DC2626", high: "#D97706", medium: "#6366F1", low: "#6B7280" };
+const REQ_PRI_BG = { urgent: "#FEF2F2", high: "#FEF3C7", medium: "#EEF2FF", low: "#F9FAFB" };
+
+function ThreadRequestCard({ req, employeeId }) {
+  const sc = REQ_STATUS_COLORS[req.status] || REQ_STATUS_COLORS.pending;
+  const isFromMe = req.fromId === employeeId;
+  const isToMe = req.toId === employeeId;
+
+  const fire = (extra) => window.dispatchEvent(new CustomEvent("openRequestPanel", {
+    detail: { tab: isToMe ? "received" : "sent", requestId: req.id, ...extra }
+  }));
+
+  return (
+    <div style={{ display: "flex", justifyContent: isFromMe ? "flex-end" : "flex-start", width: "100%", marginBottom: 4 }}>
+      <div style={{ maxWidth: 280, width: "100%", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", border: "1px solid #E2E8F0", background: "#fff" }}>
+        {/* Header — dark like meeting card */}
+        <div style={{ background: "#1E293B", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>Request</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 1 }}>from {req.fromName}</div>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 99, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}`, flexShrink: 0, whiteSpace: "nowrap" }}>{req.status}</span>
+          {req.priority && <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, color: REQ_PRI_COLOR[req.priority], background: REQ_PRI_BG[req.priority], flexShrink: 0 }}>{req.priority}</span>}
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "10px 14px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{req.subject}</div>
+          {req.message && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>{req.message}</div>}
+          {req.dueDate && <div style={{ fontSize: 11, color: "#D97706", fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+          {req.type && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "#F1F5F9", color: "#475569", fontWeight: 600, border: "1px solid #E2E8F0", alignSelf: "flex-start" }}>{req.type}</span>}
+          {req.attachments?.length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {req.attachments.map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 5, textDecoration: "none", fontWeight: 500 }}>
+                  📎 {(att.name || "File").slice(0, 18)}
+                </a>
+              ))}
+            </div>
+          )}
+          {req.responseMessage && (
+            <div style={{ padding: "5px 9px", background: "#F8FAFC", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "2px solid #CBD5E1" }}>
+              <strong>Response:</strong> {req.responseMessage}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            {isToMe && req.status === "pending" && (
+              <button onClick={() => fire({ openRespond: true })}
+                style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "none", background: "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                ✓ Respond
+              </button>
+            )}
+            <button onClick={() => fire({ openChat: true })}
+              style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              💬 Chat
+            </button>
+            <button onClick={() => fire({})}
+              style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              View →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+;

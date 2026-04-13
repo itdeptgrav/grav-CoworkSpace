@@ -1326,12 +1326,11 @@ export default function TasksPage() {
       // The backend already filters correctly, but we re-apply here as defence-in-depth
       // to prevent any flash of wrong tasks if the backend fallback (/task/list) is used.
       if (role === "ceo") {
-        // CEO: ONLY tasks CEO personally created. TL-created tasks are completely hidden.
+        // CEO sees tasks they created OR tasks assigned to them (e.g. by a TL)
         tasks = tasks.filter(t => {
-          if (t.createdByTl === true && t.assignedBy !== employeeId) return false;
-          return t.assignedBy === employeeId
-            || t.createdByCeo === true
-            || t.assignedByRole === "ceo";
+          const assignedToMe = (t.assigneeIds || []).includes(employeeId);
+          const createdByMe = t.assignedBy === employeeId || t.createdByCeo === true || t.assignedByRole === "ceo";
+          return assignedToMe || createdByMe;
         });
       } else if (role === "employee") {
         // Employee: ONLY tasks directly assigned to them. No parent tasks they weren't assigned to.
@@ -1896,7 +1895,7 @@ export default function TasksPage() {
     // Build a role-appropriate Firestore query so we never pull unrelated tasks
     let taskQuery;
     if (role === "ceo") {
-      // CEO: only tasks they created
+      // CEO: tasks they created (second listener added below for assigned-to-CEO)
       taskQuery = query(tasksRef, where("assignedBy", "==", employeeId), orderBy("updatedAt", "desc"), limit(100));
     } else if (role === "tl") {
       // TL sees tasks they created (separate listener below handles assigned-to-TL)
@@ -1906,14 +1905,27 @@ export default function TasksPage() {
       taskQuery = query(tasksRef, where("assigneeIds", "array-contains", employeeId), orderBy("updatedAt", "desc"), limit(100));
     }
 
+    // For CEO: also listen to tasks assigned TO the CEO (by TL etc.)
+    let unsubCeoAssigned = null;
+    if (role === "ceo") {
+      const qAssigned = query(tasksRef, where("assigneeIds", "array-contains", employeeId), orderBy("updatedAt", "desc"), limit(100));
+      unsubCeoAssigned = onSnapshot(qAssigned, snap => {
+        if (snap.empty) return;
+        setAllTasks(prev => {
+          const map = new Map(prev.map(t => [t.taskId, t]));
+          snap.docs.forEach(d => { map.set(d.id, { ...d.data(), taskId: d.id }); });
+          return [...map.values()];
+        });
+      }, () => { });
+    }
+
     // Helper: apply the same visibility filter used in loadAllTasks
     const applyVisibilityFilter = (taskData) => {
       if (role === "ceo") {
-        // Hide any task the CEO didn’t create, or that was created by TL
-        if (taskData.createdByTl === true && taskData.assignedBy !== employeeId) return false;
-        return taskData.assignedBy === employeeId
-          || taskData.createdByCeo === true
-          || taskData.assignedByRole === "ceo";
+        // CEO sees tasks they created OR tasks assigned to them
+        const assignedToMe = (taskData.assigneeIds || []).includes(employeeId);
+        const createdByMe = taskData.assignedBy === employeeId || taskData.createdByCeo === true || taskData.assignedByRole === "ceo";
+        return assignedToMe || createdByMe;
       }
       // TL and Employee: the Firestore query already scopes correctly
       return true;
@@ -1978,6 +1990,7 @@ export default function TasksPage() {
     return () => {
       unsub();
       if (unsubTlAssigned) unsubTlAssigned();
+      if (unsubCeoAssigned) unsubCeoAssigned();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId, role]);

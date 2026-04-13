@@ -5,12 +5,19 @@ import { signOut } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../../lib/coworkUtils";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import NotesSidebarPanel from "../notes/NotesSidebarPanel";
+import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMeetingStore";
+import dynamic from "next/dynamic";
+
+// Dynamically import LiveKit (browser-only) for PiP room
+const LiveKitRoom = dynamic(() => import("@livekit/components-react").then(m => m.LiveKitRoom), { ssr: false });
+const RoomAudioRenderer = dynamic(() => import("@livekit/components-react").then(m => m.RoomAudioRenderer), { ssr: false });
+const useLocalParticipant = dynamic ? null : null; // accessed via window event instead
 
 import {
   collection, doc, setDoc, updateDoc, getDocs, getDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp,
+  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch,
 } from "firebase/firestore";
 
 
@@ -88,7 +95,7 @@ const STATUS_COLORS = {
 };
 
 /* ─── RequestSidebarPanel ─── */
-function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null, highlightReqId = null, onOpenChat = null, activeChatReqId = null, chatThreads = {}, chatInput = {}, setChatInput = () => { }, sendChatMsg = () => { } }) {
+function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "received", prefilledTask = null, highlightReqId = null, openRespondId = null, onOpenChat = null, activeChatReqId = null, chatThreads = {}, chatInput = {}, setChatInput = () => { }, sendChatMsg = () => { }, threadContext = null }) {
   const [tab, setTab] = useState(initialTab); // "compose" | "received" | "sent"
   const [employees, setEmployees] = useState([]);
   // compose form
@@ -117,6 +124,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const chatEndRefs = useRef({});
   const reqItemRefs = useRef({});
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
+  // Section collapse state — pending open by default, responded closed
+  const [pendingOpen, setPendingOpen] = useState(true);
+  const [respondedOpen, setRespondedOpen] = useState(false);
 
   // Scroll to highlighted request when panel opens
   useEffect(() => {
@@ -124,6 +134,17 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
     const el = reqItemRefs.current[highlightReqId];
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [highlightReqId, received]);
+
+  // Auto-open respond form when triggered from chat card
+  useEffect(() => {
+    if (!openRespondId) return;
+    setRespondingId(openRespondId);
+    setRespondMsg("");
+    setTimeout(() => {
+      const el = reqItemRefs.current[openRespondId];
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }, [openRespondId]);
   const [seenIds, setSeenIds] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("req_seen_ids") || "[]")); } catch { return new Set(); }
   });
@@ -140,6 +161,22 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
       setSelectedTaskObj({ taskId: prefilledTask.taskId, title: prefilledTask.taskTitle || prefilledTask.taskId });
     }
   }, [prefilledTask]);
+
+  // Pre-fill recipient + switch to compose when opened from DM/Group
+  useEffect(() => {
+    if (threadContext?.recipientId) {
+      setToIds([threadContext.recipientId]);
+      setTab("compose");
+    }
+  }, [threadContext?.recipientId]);
+
+  // Pre-fill ALL group members when recipientIds array is passed (group request button)
+  useEffect(() => {
+    if (threadContext?.recipientIds?.length > 0) {
+      setToIds(threadContext.recipientIds);
+      setTab("compose");
+    }
+  }, [JSON.stringify(threadContext?.recipientIds)]);
   // Task autocomplete — simple getDocs with client-side filter, no composite index needed
   useEffect(() => {
     if (!taskQuery.trim() || taskQuery.length < 2) { setTaskSuggestions([]); return; }
@@ -170,13 +207,26 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
     });
     const qR = query(collection(firebaseDb, "cowork_requests"), where("toId", "==", employeeId));
     const unsubR = onSnapshot(qR, snap => {
-      setReceived(sortByDate(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+      setReceived(prev => {
+        const map = new Map(prev.map(r => [r.id, r]));
+        snap.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
+        return sortByDate([...map.values()]);
+      });
     }, err => console.error("received listener:", err));
+    // Also catch group requests where this employee is in the toIds array
+    const qRGroup = query(collection(firebaseDb, "cowork_requests"), where("toIds", "array-contains", employeeId));
+    const unsubRGroup = onSnapshot(qRGroup, snap => {
+      setReceived(prev => {
+        const map = new Map(prev.map(r => [r.id, r]));
+        snap.docs.forEach(d => map.set(d.id, { id: d.id, ...d.data() }));
+        return sortByDate([...map.values()]);
+      });
+    }, err => console.error("received group listener:", err));
     const qS = query(collection(firebaseDb, "cowork_requests"), where("fromId", "==", employeeId));
     const unsubS = onSnapshot(qS, snap => {
       setSent2(sortByDate(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     }, err => console.error("sent listener:", err));
-    return () => { unsubR(); unsubS(); };
+    return () => { unsubR(); unsubRGroup(); unsubS(); };
   }, [employeeId]);
 
   const toggleRecipient = (id) => {
@@ -215,18 +265,23 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         uploaded.push(result);
         setFiles([...updFiles]);
       }
-      // Create one request doc per recipient
-      for (const toId of toIds) {
-        const toEmp = employees.find(e => e.employeeId === toId);
+      // ── For GROUP thread: create ONE shared request doc for all members ──
+      // ── For DM / individual: keep one doc per recipient (existing behaviour) ──
+      if (threadContext?.type === "group" && threadContext?.threadId) {
         const reqId = crypto.randomUUID();
+        const toNames = toIds.map(id => employees.find(e => e.employeeId === id)?.name || id);
         await setDoc(doc(firebaseDb, "cowork_requests", reqId), {
           requestId: reqId,
           taskId: taskRef || null,
           taskTitle: selectedTaskObj?.title || taskRef || null,
           fromId: employeeId,
           fromName: employeeName,
-          toId,
-          toName: toEmp?.name || toId,
+          // Store first recipient for backwards-compat display, full list in toIds array
+          toId: toIds[0] || null,
+          toName: toNames[0] || null,
+          toIds,
+          toNames,
+          isGroupRequest: true,
           subject: subject.trim(),
           message: msg.trim(),
           type,
@@ -235,22 +290,68 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           attachments: uploaded,
           status: "pending",
           responseMessage: "",
+          threadType: "group",
+          threadId: threadContext.threadId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        // Firestore notification (no dueDate field — keep separate from deadline tracker)
-        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
-        await setDoc(notifRef, {
-          recipientEmployeeId: toId,
-          type: "request",
-          title: `New request from ${employeeName}`,
-          body: subject.trim(),
-          fromId: employeeId,
-          fromName: employeeName,
-          requestId: reqId,
-          read: false,
-          createdAt: serverTimestamp(),
-        });
+        // Notify each recipient individually (but only ONE request doc exists)
+        const batch = writeBatch(firebaseDb);
+        for (const toId of toIds) {
+          const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+          batch.set(notifRef, {
+            recipientEmployeeId: toId,
+            type: "request",
+            title: `New group request from ${employeeName}`,
+            body: subject.trim(),
+            fromId: employeeId,
+            fromName: employeeName,
+            requestId: reqId,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        }
+        await batch.commit();
+      } else {
+        // Create one request doc per recipient (DM / task context)
+        for (const toId of toIds) {
+          const toEmp = employees.find(e => e.employeeId === toId);
+          const reqId = crypto.randomUUID();
+          await setDoc(doc(firebaseDb, "cowork_requests", reqId), {
+            requestId: reqId,
+            taskId: taskRef || null,
+            taskTitle: selectedTaskObj?.title || taskRef || null,
+            fromId: employeeId,
+            fromName: employeeName,
+            toId,
+            toName: toEmp?.name || toId,
+            subject: subject.trim(),
+            message: msg.trim(),
+            type,
+            priority,
+            dueDate: dueDate || null,
+            attachments: uploaded,
+            status: "pending",
+            responseMessage: "",
+            threadType: threadContext?.type || null,
+            threadId: threadContext?.threadId || null,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          // Firestore notification
+          const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+          await setDoc(notifRef, {
+            recipientEmployeeId: toId,
+            type: "request",
+            title: `New request from ${employeeName}`,
+            body: subject.trim(),
+            fromId: employeeId,
+            fromName: employeeName,
+            requestId: reqId,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        }
       }
       // ── Post system message to task chat if this request is linked to a task ──
       if (taskRef) {
@@ -596,182 +697,174 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>No requests yet</div>
                 <div style={{ fontSize: 12 }}>Requests sent to you appear here</div>
               </div>
-            ) : received.map(req => {
-              const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
-              const isExpanded = respondingId === req.id;
-              return (
-                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
-                  <div className="cw-req-card-head">
-                    <ReqAvatar name={req.fromName || "?"} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span className="cw-req-sender">{req.fromName || "Unknown"}</span>
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
-                          color: sc.color, background: sc.bg
-                        }}>{req.status}</span>
+            ) : (() => {
+              const pendingReqs = received.filter(r => r.status === "pending");
+              const respondedReqs = received.filter(r => r.status !== "pending");
+
+              const renderCard = (req) => {
+                const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
+                const isExpanded = respondingId === req.id;
+                return (
+                  <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
+                    <div className="cw-req-card-head">
+                      <ReqAvatar name={req.fromName || "?"} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span className="cw-req-sender">{req.fromName || "Unknown"}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, color: sc.color, background: sc.bg }}>{req.status}</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
                       </div>
-                      <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
-                    </div>
-                    {req.priority && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-                        color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB",
-                        border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33`
-                      }}>
-                        {req.priority}
-                      </span>
-                    )}
-                  </div>
-                  {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
-                  {req.taskId && (
-                    <div className="cw-req-task-chip">
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
-                      {req.taskId} {req.taskTitle ? `· ${req.taskTitle}` : ""}
-                    </div>
-                  )}
-                  <div className="cw-req-msg">{req.message}</div>
-                  {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
-                  {req.type && <div style={{ marginTop: 5 }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "#F3F4F6", color: "#374151", fontWeight: 600, border: "1px solid #E5E7EB" }}>{req.type}</span></div>}
-                  {req.attachments?.length > 0 && (
-                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
-                      {req.attachments.map((att, i) => (
-                        <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
-                          style={{
-                            display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px",
-                            borderRadius: 6, background: "#EFF6FF", border: "1px solid #BFDBFE",
-                            fontSize: 10, color: "#1A73E8", textDecoration: "none", fontWeight: 600
-                          }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            {att.type === "image"
-                              ? <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>
-                              : <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></>
-                            }
-                          </svg> {att.name || "File"}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {req.responseMessage && (
-                    <div style={{
-                      marginTop: 8, padding: "6px 10px", background: "#F9FAFB", borderRadius: 6,
-                      fontSize: 11, color: "#374151", borderLeft: "3px solid #E4E7EC"
-                    }}>
-                      <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span>{req.responseMessage}
-                    </div>
-                  )}
-                  {/* Chat thread toggle */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {req.status === "pending" && !isExpanded && (
-                        <button className="cw-req-btn cw-req-btn-resolve" onClick={() => { setRespondingId(req.id); setRespondMsg(""); }}>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Respond
-                        </button>
+                      {req.priority && (
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5, color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB", border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33` }}>
+                          {req.priority}
+                        </span>
                       )}
                     </div>
-                    <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
-                        border: "1px solid #E4E7EC", borderRadius: 6,
-                        background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB",
-                        color: activeChatReqId === req.id ? "#1A73E8" : "#667085",
-                        fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
-                      }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                      Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                    {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
+                    {req.taskId && (
+                      <div className="cw-req-task-chip">
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" /></svg>
+                        {req.taskId} {req.taskTitle ? `· ${req.taskTitle}` : ""}
+                      </div>
+                    )}
+                    <div className="cw-req-msg">{req.message}</div>
+                    {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+                    {req.type && <div style={{ marginTop: 5 }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "#F3F4F6", color: "#374151", fontWeight: 600, border: "1px solid #E5E7EB" }}>{req.type}</span></div>}
+                    {req.attachments?.length > 0 && (
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 7 }}>
+                        {req.attachments.map((att, i) => (
+                          <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 10, color: "#1A73E8", textDecoration: "none", fontWeight: 600 }}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              {att.type === "image" ? <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></> : <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></>}
+                            </svg> {att.name || "File"}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {req.responseMessage && (
+                      <div style={{ marginTop: 8, padding: "6px 10px", background: "#F9FAFB", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "3px solid #E4E7EC" }}>
+                        <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span>{req.responseMessage}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {req.status === "pending" && !isExpanded && (
+                          <button className="cw-req-btn cw-req-btn-resolve" onClick={() => { setRespondingId(req.id); setRespondMsg(""); }}>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Respond
+                          </button>
+                        )}
+                      </div>
+                      <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 9px", border: "1px solid #E4E7EC", borderRadius: 6, background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB", color: activeChatReqId === req.id ? "#1A73E8" : "#667085", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                        Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                      </button>
+                    </div>
+                    {req.status === "pending" && isExpanded && (
+                      <div style={{ marginTop: 8 }}>
+                        <textarea placeholder="Optional response message…" value={respondMsg} onChange={e => setRespondMsg(e.target.value)}
+                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E4E7EC", borderRadius: 7, fontSize: 12, fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box", minHeight: 60, background: "#F9FAFB", color: "#1A1D21" }} />
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          <button className="cw-req-btn cw-req-btn-resolve" onClick={() => handleRespond(req.id, "approved")}>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Approve
+                          </button>
+                          <button className="cw-req-btn cw-req-btn-reject" onClick={() => handleRespond(req.id, "rejected")}>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg> Reject
+                          </button>
+                          <button onClick={() => { setRespondingId(null); setRespondMsg(""); }}
+                            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: "1px solid #E4E7EC", background: "#F9FAFB", color: "#667085" }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                    {!onOpenChat && chatOpenId === req.id && (
+                      <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{ padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC", fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em" }}>Chat Thread</div>
+                        <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, background: "#fff" }}>
+                          {(chatThreads[req.id] || []).length === 0 ? (
+                            <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet. Start the conversation.</div>
+                          ) : (chatThreads[req.id] || []).map((msg, mi) => {
+                            const isMe = msg.senderId === employeeId;
+                            return (
+                              <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+                                {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
+                                <div style={{ maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px", background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5 }}>{msg.text}</div>
+                                <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}</div>
+                              </div>
+                            );
+                          })}
+                          <div ref={el => chatEndRefs.current[req.id] = el} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
+                          <input value={chatInput[req.id] || ""} onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }} placeholder="Type a message…"
+                            style={{ flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6, fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1A1D21" }} />
+                          <button onClick={() => sendChatMsg(req.id)} style={{ padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center" }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              return (
+                <>
+                  {/* ── PENDING section ── */}
+                  <div style={{ borderBottom: "1px solid #F1F5F9" }}>
+                    <button
+                      onClick={() => setPendingOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: pendingOpen ? "#EFF6FF" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: pendingOpen ? "1px solid #BFDBFE" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        Pending Requests
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: pendingReqs.length > 0 ? "#DC2626" : "#9AA0A6", background: pendingReqs.length > 0 ? "#FEF2F2" : "#F1F5F9", border: `1px solid ${pendingReqs.length > 0 ? "#FECACA" : "#E2E8F0"}`, borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {pendingReqs.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: pendingOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
                     </button>
+                    {pendingOpen && (
+                      <div>
+                        {pendingReqs.length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No pending requests</div>
+                        ) : pendingReqs.map(req => renderCard(req))}
+                      </div>
+                    )}
                   </div>
 
-                  {req.status === "pending" && isExpanded && (
-                    <div style={{ marginTop: 8 }}>
-                      <textarea
-                        placeholder="Optional response message…"
-                        value={respondMsg}
-                        onChange={e => setRespondMsg(e.target.value)}
-                        style={{
-                          width: "100%", padding: "7px 10px", border: "1.5px solid #E4E7EC",
-                          borderRadius: 7, fontSize: 12, fontFamily: "inherit", resize: "vertical",
-                          outline: "none", boxSizing: "border-box", minHeight: 60,
-                          background: "#F9FAFB", color: "#1A1D21"
-                        }}
-                      />
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <button className="cw-req-btn cw-req-btn-resolve" onClick={() => handleRespond(req.id, "approved")}>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Approve
-                        </button>
-                        <button className="cw-req-btn cw-req-btn-reject" onClick={() => handleRespond(req.id, "rejected")}>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg> Reject
-                        </button>
-                        <button onClick={() => { setRespondingId(null); setRespondMsg(""); }}
-                          style={{
-                            padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                            cursor: "pointer", fontFamily: "inherit", border: "1px solid #E4E7EC",
-                            background: "#F9FAFB", color: "#667085"
-                          }}>Cancel</button>
+                  {/* ── RESPONDED section ── */}
+                  <div>
+                    <button
+                      onClick={() => setRespondedOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: respondedOpen ? "#F0FDF4" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: respondedOpen ? "1px solid #BBF7D0" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        Responded
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {respondedReqs.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: respondedOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {respondedOpen && (
+                      <div>
+                        {respondedReqs.length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No responded requests</div>
+                        ) : respondedReqs.map(req => renderCard(req))}
                       </div>
-                    </div>
-                  )}
-
-                  {/* Inline chat thread — only used when no side panel (fallback) */}
-                  {!onOpenChat && chatOpenId === req.id && (
-                    <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
-                      <div style={{
-                        padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
-                        fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em"
-                      }}>
-                        Chat Thread
-                      </div>
-                      <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, background: "#fff" }}>
-                        {(chatThreads[req.id] || []).length === 0 ? (
-                          <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet. Start the conversation.</div>
-                        ) : (chatThreads[req.id] || []).map((msg, mi) => {
-                          const isMe = msg.senderId === employeeId;
-                          return (
-                            <div key={msg.id || mi} style={{
-                              display: "flex", flexDirection: "column",
-                              alignItems: isMe ? "flex-end" : "flex-start"
-                            }}>
-                              {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
-                              <div style={{
-                                maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
-                                background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21",
-                                fontSize: 12, lineHeight: 1.5
-                              }}>
-                                {msg.text}
-                              </div>
-                              <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
-                                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div ref={el => chatEndRefs.current[req.id] = el} />
-                      </div>
-                      <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
-                        <input
-                          value={chatInput[req.id] || ""}
-                          onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))}
-                          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }}
-                          placeholder="Type a message…"
-                          style={{
-                            flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6,
-                            fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff",
-                            color: "#1A1D21"
-                          }}
-                        />
-                        <button onClick={() => sendChatMsg(req.id)}
-                          style={{
-                            padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none",
-                            borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center"
-                          }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                </>
               );
-            })}
+            })()}
           </div>
         )}
 
@@ -1117,11 +1210,60 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
+  // ── PiP Meeting state — subscribed to module-level store (persists across navigation)
+  const [pipMeeting, setPipMeetingState] = useState(() => {
+    const s = getPipMeeting();
+    return s.isActive ? s : null;
+  });
+  const [pipCollapsed, setPipCollapsed] = useState(false);
+  const [pipPos, setPipPos] = useState({ x: null, y: null });
+  const pipDragRef = useRef(null);
+  const pipDragStateRef = useRef(null);
+  const [pipMicOn, setPipMicOn] = useState(true);
+  const [pipCamOn, setPipCamOn] = useState(false); // cam default off in pip
   const [activeChatReq, setActiveChatReq] = useState(null); // full request object for header
   const [chatThreads, setChatThreads] = useState({});
   const [chatInput, setChatInput] = useState({});
   const [chatUploading, setChatUploading] = useState({});
   const chatEndRefs = useRef({});
+
+  // ── PiP: subscribe to module-level store (persists across page navigations)
+  useEffect(() => {
+    const unsub = subscribePip((state) => {
+      if (state.isActive) {
+        setPipMeetingState(state);
+        setPipCollapsed(false);
+        setPipPos(pos => pos.x === null ? { x: window.innerWidth - 320, y: window.innerHeight - 220 } : pos);
+      } else {
+        setPipMeetingState(null);
+        setPipCollapsed(false);
+        setPipPos({ x: null, y: null });
+      }
+    });
+    return unsub;
+  }, []);
+
+  const handlePipDragStart = (e) => {
+    const el = pipDragRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    pipDragStateRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    const onMove = (e2) => {
+      if (!pipDragStateRef.current) return;
+      const dx = e2.clientX - pipDragStateRef.current.startX;
+      const dy = e2.clientY - pipDragStateRef.current.startY;
+      const newX = Math.max(0, Math.min(window.innerWidth - 300, pipDragStateRef.current.origX + dx));
+      const newY = Math.max(0, Math.min(window.innerHeight - 180, pipDragStateRef.current.origY + dy));
+      setPipPos({ x: newX, y: newY });
+    };
+    const onUp = () => {
+      pipDragStateRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   const openChatForReq = (reqId, req) => {
     setActiveChatReqId(prev => prev === reqId ? null : reqId);
@@ -1181,6 +1323,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
   const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
+  const [reqPanelThreadContext, setReqPanelThreadContext] = useState(null); // { type, threadId, recipientId, recipientName }
+  const [reqPanelOpenRespondId, setReqPanelOpenRespondId] = useState(null);
   const [highlightReqId, setHighlightReqId] = useState(null);
 
   // Allow any page to open the request panel via custom event
@@ -1192,6 +1336,24 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       else setReqPanelContext(null);
       if (e.detail?.requestId) setHighlightReqId(e.detail.requestId);
       else setHighlightReqId(null);
+      if (e.detail?.threadContext) setReqPanelThreadContext(e.detail.threadContext);
+      else setReqPanelThreadContext(null);
+      // openChat: open panel AND immediately open chat for that request
+      // openRespond: open panel and auto-expand respond form
+      if (e.detail?.openRespond && e.detail?.requestId) {
+        setReqPanelOpenRespondId(e.detail.requestId);
+        setHighlightReqId(e.detail.requestId);
+      }
+      if (e.detail?.openChat && e.detail?.requestId) {
+        // Use the proper openChatForReq logic inline
+        const reqId = e.detail.requestId;
+        setActiveChatReqId(reqId);
+        const q2 = query(collection(firebaseDb, "cowork_requests", reqId, "chat"), orderBy("createdAt", "asc"));
+        onSnapshot(q2, snap => {
+          const msgs = snap.docs.map(d => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.seconds ? new Date(d.data().createdAt.seconds * 1000).toISOString() : d.data().createdAt }));
+          setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
+        }, () => { });
+      }
     };
     window.addEventListener("openRequestPanel", handler);
     return () => window.removeEventListener("openRequestPanel", handler);
@@ -1748,6 +1910,21 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
         }
         .cw-req-panel.chat-open { width: 820px; }
+        .cw-notes-panel {
+          position: fixed;
+          top: 0; right: 0; bottom: 0;
+          width: 480px;
+          max-width: 100vw;
+          background: #fff;
+          border-left: 1px solid #E4E7EC;
+          box-shadow: -8px 0 32px rgba(0,0,0,0.12);
+          z-index: 500;
+          display: flex;
+          flex-direction: column;
+          transform: translateX(100%);
+          transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+        }
+        .cw-notes-panel.open { transform: translateX(0); }
         .cw-req-panel-left { width: 480px; min-width: 480px; display: flex; flex-direction: column; border-right: 1px solid #E4E7EC; }
         .cw-req-panel-chat { flex: 1; display: flex; flex-direction: column; background: #F8FAFC; }
         .cw-req-panel.open { transform: translateX(0); }
@@ -1904,7 +2081,34 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               </div>
             ))}
 
-
+            {/* ── Download App — always visible, not clickable (display only) ── */}
+            {!isInstalled && (
+              <div style={{ margin: "8px 10px 4px" }}>
+                <div style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 12px", borderRadius: 10,
+                  background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
+                  boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
+                  pointerEvents: "none",  /* NOT clickable */
+                  userSelect: "none",
+                }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>Download App</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>Install on your device</div>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </div>
+              </div>
+            )}
           </nav>
 
           <div className="cw-sidebar-footer">
@@ -2064,7 +2268,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           <RequestSidebarPanel
             employeeId={employeeId}
             employeeName={employeeName}
-            onClose={() => { setReqPanelOpen(false); setActiveChatReqId(null); }}
+            onClose={() => { setReqPanelOpen(false); setActiveChatReqId(null); setReqPanelThreadContext(null); }}
             initialTab={reqPanelInitialTab}
             prefilledTask={reqPanelContext}
             highlightReqId={highlightReqId}
@@ -2074,6 +2278,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             chatInput={chatInput}
             setChatInput={setChatInput}
             sendChatMsg={sendChatMsg}
+            threadContext={reqPanelThreadContext}
+            openRespondId={reqPanelOpenRespondId}
           />
         </div>
 
@@ -2204,7 +2410,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
       {/* ── Notes Sidebar Panel ── */}
       <div className={`cw-req-panel-overlay${notesPanelOpen ? " show" : ""}`} onClick={() => setNotesPanelOpen(false)} />
-      <div className={`cw-req-panel${notesPanelOpen ? " open" : ""}`}>
+      <div className={`cw-notes-panel${notesPanelOpen ? " open" : ""}`}>
         <NotesSidebarPanel
           employeeId={employeeId}
           employeeName={employeeName}
@@ -2212,6 +2418,117 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           initialTab="create"
         />
       </div>
+
+      {/* ── PiP Meeting — persistent LiveKit room + floating box ── */}
+      {pipMeeting?.isActive && pipMeeting?.token && (
+        <>
+          {/* Hidden LiveKit room — stays connected across all page navigations */}
+          <div style={{ position: "fixed", width: 1, height: 1, top: -9999, left: -9999, overflow: "hidden", opacity: 0, pointerEvents: "none", zIndex: -1 }}>
+            <LiveKitRoom
+              token={pipMeeting.token}
+              serverUrl={pipMeeting.serverUrl}
+              data-lk-theme="default"
+              video={false}
+              audio={pipMicOn}
+              onDisconnected={() => { clearPipMeeting(); }}
+            >
+              <RoomAudioRenderer />
+            </LiveKitRoom>
+          </div>
+
+          {/* Floating PiP box */}
+          <div
+            ref={pipDragRef}
+            style={{
+              position: "fixed",
+              left: pipPos.x !== null ? pipPos.x : "auto",
+              right: pipPos.x !== null ? "auto" : 24,
+              top: pipPos.y !== null ? pipPos.y : "auto",
+              bottom: pipPos.y !== null ? "auto" : 24,
+              zIndex: 9999,
+              width: pipCollapsed ? 220 : 300,
+              borderRadius: 14, overflow: "hidden",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.45)",
+              background: "#111827", border: "1px solid rgba(255,255,255,0.15)",
+              userSelect: "none",
+            }}
+          >
+            {/* Drag handle */}
+            <div onMouseDown={handlePipDragStart}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#0F172A", cursor: "grab", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0, boxShadow: "0 0 6px #EF4444" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#F1F5F9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pipMeeting.title || "Meeting"}
+              </span>
+              {/* Collapse */}
+              <button onClick={() => setPipCollapsed(p => !p)}
+                style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.1)", color: "#CBD5E1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  {pipCollapsed ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+                </svg>
+              </button>
+              {/* Restore */}
+              <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}`)}
+                title="Return to full meeting"
+                style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(37,99,235,0.4)", color: "#93C5FD", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            {!pipCollapsed && (
+              <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Status */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94A3B8" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
+                  Connected · {pipMeeting.title}
+                </div>
+
+                {/* Mic / Cam toggle buttons */}
+                <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                  {/* Mic */}
+                  <button onClick={() => setPipMicOn(p => !p)}
+                    title={pipMicOn ? "Mute mic" : "Unmute mic"}
+                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipMicOn ? "rgba(255,255,255,0.12)" : "#DC2626", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                    {pipMicOn
+                      ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                      : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6" /><path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                    }
+                    {pipMicOn ? "Mic On" : "Muted"}
+                  </button>
+                  {/* Cam */}
+                  <button onClick={() => setPipCamOn(p => !p)}
+                    title={pipCamOn ? "Stop camera" : "Start camera"}
+                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipCamOn ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)", color: pipCamOn ? "#fff" : "#94A3B8", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, border: "1px solid rgba(255,255,255,0.1)" }}>
+                    {pipCamOn
+                      ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+                      : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 01-2 2H3a2 2 0 01-2-2V7a2 2 0 012-2h2m5.66 0H14a2 2 0 012 2v3.34l1 1L23 7v10" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
+                    }
+                    {pipCamOn ? "Cam On" : "Cam Off"}
+                  </button>
+                </div>
+
+                {/* Open / Leave */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}`)}
+                    style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+                    Open Meeting
+                  </button>
+                  <button
+                    onClick={() => { if (window.confirm("Leave the meeting?")) clearPipMeeting(); }}
+                    style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#DC2626", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                    Leave
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }

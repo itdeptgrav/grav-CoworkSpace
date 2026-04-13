@@ -25,48 +25,121 @@ if (typeof document !== "undefined" && !document.getElementById("mb-styles")) {
     document.head.appendChild(el);
 }
 
-export default function MessageBubble({ msg, isMe, showSender = true, showAvatar = true }) {
+export default function MessageBubble({ msg, isMe, showSender = true, showAvatar = true, isHost = false, onViewSummary = null, onEdit = null, onCancel = null }) {
     const [pdfOpen, setPdfOpen] = useState(false);
     const [imgOpen, setImgOpen] = useState(null);
 
     /* ── Meeting invite card ─────────────────────────────── */
     if (msg.messageType === "meeting_invite") {
         const md = msg.meetingData || {};
+        const meetId = md.meetId;
+        const joinCode = md.joinCode;
         return (
             <div style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start", margin: "10px 0" }}>
-                <div style={{
-                    background: "linear-gradient(135deg,#1A73E8,#0D47A1)",
-                    borderRadius: 16, padding: "16px 18px",
-                    maxWidth: 320, width: "100%",
-                    boxShadow: "0 4px 16px rgba(26,115,232,0.3)",
-                    fontFamily: "'Google Sans','Roboto',sans-serif",
-                }}>
-                    {/* Header */}
+                <div style={{ background: "linear-gradient(135deg,#15803D,#166534)", borderRadius: 16, padding: "16px 18px", maxWidth: 320, width: "100%", boxShadow: "0 4px 20px rgba(21,128,61,0.35)", fontFamily: "inherit" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                         <div style={{ width: 36, height: 36, background: "rgba(255,255,255,0.2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
-                            </svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
                         </div>
-                        <div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Meeting Invitation</div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>📅 MEETING INVITATION</div>
                             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)" }}>from {msg.senderName}</div>
                         </div>
                     </div>
-
-                    {/* Meeting details */}
-                    <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "12px 14px", marginBottom: 12, backdropFilter: "blur(4px)" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 6 }}>{md.meetTitle || "CoWork Meeting"}</div>
+                    <div style={{ background: "rgba(255,255,255,0.12)", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 6 }}>{md.meetTitle || "CoWork Meeting"}</div>
                         {md.description && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", marginBottom: 8, lineHeight: 1.5 }}>{md.description}</div>}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "rgba(255,255,255,0.85)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, color: "rgba(255,255,255,0.9)" }}>
                             {md.dateTime && <span>📅 {new Date(md.dateTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>}
-                            <span>🔑 Code: <strong style={{ fontFamily: "monospace", letterSpacing: 2 }}>{md.meetId}</strong></span>
+                            {joinCode && <span>🔑 Join Code: <strong style={{ fontFamily: "monospace", letterSpacing: 3 }}>{joinCode}</strong></span>}
                         </div>
                     </div>
+                    {/* Join Meeting button */}
+                    {meetId && (
+                        <a href={`/coworking/cowork-meeting/${meetId}`}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", padding: "11px 0", background: "#fff", color: "#15803D", borderRadius: 10, fontSize: 13, fontWeight: 700, textDecoration: "none", boxSizing: "border-box" }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
+                            Join Meeting
+                        </a>
+                    )}
 
-                    {/* Footer note */}
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textAlign: "center" }}>
-                        Click Join Meeting to participate
+                    {/* Host-only actions: Summary, Edit, Cancel */}
+                    {meetId && isHost && (
+                        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                            {onViewSummary && (
+                                <button onClick={() => onViewSummary(meetId, md.meetTitle)}
+                                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: "rgba(255,255,255,0.15)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
+                                    Summary
+                                </button>
+                            )}
+                            {onEdit && (
+                                <button onClick={() => onEdit({ meetId, title: md.meetTitle, description: md.description, dateTime: md.dateTime, participants: [] })}
+                                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: "rgba(255,255,255,0.15)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                    Edit
+                                </button>
+                            )}
+                            {onCancel && isMe && (
+                                <button onClick={() => onCancel(meetId, md.meetTitle)}
+                                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: "rgba(220,38,38,0.35)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textAlign: "right", marginTop: 8 }}>
+                        {msg.createdAt?.seconds ? new Date(msg.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    /* ── Task created notification card ────────────────── */
+    if (msg.messageType === "task_created") {
+        const td = msg.taskData || {};
+        return (
+            <div style={{ display: "flex", justifyContent: "center", margin: "10px 0", width: "100%" }}>
+                <div style={{
+                    width: "min(320px, 92%)",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    border: "1.5px solid #BFDBFE",
+                    boxShadow: "0 2px 10px rgba(37,99,235,0.10)",
+                    background: "#fff",
+                }}>
+                    {/* Header */}
+                    <div style={{ background: "linear-gradient(135deg, #1D4ED8, #2563EB)", padding: "10px 14px", display: "flex", alignItems: "center", gap: 9 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 12l2 2 4-4" /></svg>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>📋 Task Created</div>
+                            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: 1 }}>by {td.createdBy || msg.senderName}</div>
+                        </div>
+                        <span style={{ fontSize: 9, fontFamily: "monospace", color: "rgba(255,255,255,0.65)", background: "rgba(0,0,0,0.2)", padding: "2px 7px", borderRadius: 5 }}>{td.taskId || ""}</span>
+                    </div>
+                    {/* Body */}
+                    <div style={{ padding: "10px 14px 12px" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>{td.title || msg.text}</div>
+                        {td.description && <div style={{ fontSize: 11, color: "#64748B", lineHeight: 1.5, marginBottom: 6 }}>{td.description}</div>}
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                            {td.priority && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 5, color: { low: "#16A34A", medium: "#D97706", high: "#DC2626" }[td.priority] || "#64748B", background: { low: "#F0FDF4", medium: "#FFFBEB", high: "#FEF2F2" }[td.priority] || "#F8FAFC", textTransform: "uppercase" }}>{td.priority}</span>}
+                            {td.dueDate && <span style={{ fontSize: 9, color: "#64748B", fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>⏰ {new Date(td.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>}
+                            {td.assigneeCount > 0 && <span style={{ fontSize: 9, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 5, padding: "2px 7px", fontWeight: 600 }}>{td.assigneeCount} assigned</span>}
+                        </div>
+                        {td.taskId && (
+                            <a href={`/coworking/tasks`}
+                                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 0", background: "#2563EB", color: "#fff", borderRadius: 8, fontSize: 11, fontWeight: 600, textDecoration: "none", width: "100%", boxSizing: "border-box" }}>
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                                Open Task
+                            </a>
+                        )}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#94A3B8", textAlign: "right", padding: "0 14px 8px" }}>
+                        {msg.createdAt ? new Date(typeof msg.createdAt === "string" ? msg.createdAt : msg.createdAt?.seconds * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
                     </div>
                 </div>
             </div>

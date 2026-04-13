@@ -156,8 +156,39 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     employeeIdRef.current = employeeId;
 
     // ── setMuted — called by MuteWatcher every 500ms ──────────────────────────
+    // When muted → PAUSE MediaRecorder (no audio captured at hardware level)
+    // When unmuted → RESUME MediaRecorder (audio capture restarts)
+    const prevMutedRef = useRef(null); // null = not yet initialized
+
     const setMuted = useCallback((muted) => {
+        const wasMuted = isMutedRef.current;
         isMutedRef.current = muted;
+
+        // Only act on transitions, not every 500ms poll
+        if (prevMutedRef.current === muted) return;
+        prevMutedRef.current = muted;
+
+        const recorder = mediaRecorderRef.current;
+        if (!recorder) return;
+
+        if (muted && recorder.state === "recording") {
+            // Muted → pause recording so no audio is captured
+            try {
+                recorder.pause();
+                console.log("[Recording] ⏸ Mic muted — MediaRecorder paused");
+            } catch (e) {
+                // Some browsers don't support pause() — fallback: chunks discarded by isMutedRef check
+                console.warn("[Recording] pause() not supported, using chunk discard fallback");
+            }
+        } else if (!muted && recorder.state === "paused") {
+            // Unmuted → resume recording
+            try {
+                recorder.resume();
+                console.log("[Recording] ▶️  Mic unmuted — MediaRecorder resumed");
+            } catch (e) {
+                console.warn("[Recording] resume() not supported");
+            }
+        }
     }, []);
 
     // ── Flush chunks to server ────────────────────────────────────────────────
@@ -209,14 +240,19 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
 
             const recorder = new MediaRecorder(stream, { mimeType });
             recorder.ondataavailable = (e) => {
-                // Record audio regardless of mute state
-                // (muted = LiveKit mutes the track, mic still captures silence)
-                if (e.data && e.data.size > 0) {
+                // Only collect audio when mic is NOT muted
+                // When muted, MediaRecorder still captures from raw mic stream —
+                // we must skip those chunks ourselves
+                if (e.data && e.data.size > 0 && !isMutedRef.current) {
                     bufferedChunksRef.current.push(e.data);
                 }
             };
             recorder.onerror = (e) => console.error("[MediaRecorder] Error:", e.error);
             recorder.start(1000);
+            // If already muted when recording starts, pause immediately
+            if (isMutedRef.current) {
+                try { recorder.pause(); } catch (_) { }
+            }
 
             mediaRecorderRef.current = recorder;
             setIsRecording(true);
@@ -250,6 +286,10 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
 
         const recorder = mediaRecorderRef.current;
         if (recorder && recorder.state !== "inactive") {
+            // If paused (muted), resume briefly to finalize — then stop
+            if (recorder.state === "paused") {
+                try { recorder.resume(); } catch (_) { }
+            }
             recorder.stop();
             recorder.stream?.getTracks().forEach(t => t.stop());
         }
