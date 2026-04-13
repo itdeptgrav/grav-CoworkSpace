@@ -591,15 +591,18 @@ export default function DirectMessagesPage() {
     const opt = { messageId: tempId, threadType: "direct", threadId: cid, senderId: employeeId, senderName: employeeName, text: text || "", attachments: attachments || [], messageType: rt, type: rt, readBy: [employeeId], status: "sending", temp: true, sending: true, error: false, createdAt: new Date().toISOString() };
     setMessages(prev => [...prev, opt]);
     try {
-      const messageId = crypto.randomUUID();
-      pendingMapRef.current.set(tempId, messageId);
-      const convRef = doc(firebaseDb, "cowork_direct_messages", cid);
-      const msgsRef = collection(firebaseDb, "cowork_direct_messages", cid, "messages");
-      const snap = await getDoc(convRef);
-      if (!snap.exists()) await setDoc(convRef, { conversationId: cid, participantIds: [employeeId, selectedPerson.employeeId].sort(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-      await setDoc(doc(msgsRef, messageId), { messageId, threadType: "direct", threadId: cid, senderId: employeeId, senderName: employeeName, text: text || "", attachments: attachments || [], messageType: rt, type: rt, readBy: [employeeId], status: "sent", createdAt: serverTimestamp() });
-      const preview = rt === "image" ? "\u{1F4F7} Photo" : rt === "pdf" ? "\u{1F4C4} Document" : rt === "voice" ? "\u{1F3A4} Voice" : (text || "").slice(0, 80);
-      await updateDoc(convRef, { lastMessage: { text: preview, senderId: employeeId, senderName: employeeName, messageType: rt, sentAt: serverTimestamp() }, updatedAt: serverTimestamp() });
+      // Route through backend so FCM push + email fire correctly
+      const result = await apiFetch("/direct-message/send", {
+        method: "POST",
+        body: JSON.stringify({
+          toEmployeeId: selectedPerson.employeeId,
+          text: text || "",
+          attachments: attachments || [],
+          messageType: rt,
+        }),
+      });
+      const messageId = result.messageData?.messageId || result.messageId;
+      if (messageId) pendingMapRef.current.set(tempId, messageId);
       setMessages(prev => prev.filter(m => m.messageId !== tempId));
       pendingMapRef.current.delete(tempId);
     } catch (err) {

@@ -66,11 +66,12 @@ const STATUS = {
 };
 
 const COMP = {
-  submitted: { label: "Awaiting TL Review", color: "#D97706", bg: "#FEF3C7", icon: "⏳" },
+  submitted: { label: "Awaiting Review", color: "#D97706", bg: "#FEF3C7", icon: "⏳" },
   tl_approved: { label: "TL Approved · CEO Review", color: "#5B5EF4", bg: "#EDEDFE", icon: "✓" },
-  tl_rejected: { label: "TL Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" },
+  tl_rejected: { label: "Rejected — Revise Work", color: "#EF4444", bg: "#FEF2F2", icon: "✕" },
+  tl_final_approved: { label: "Approved — Complete!", color: "#16A34A", bg: "#DCFCE7", icon: "🏆" },
   ceo_approved: { label: "Approved — Complete!", color: "#16A34A", bg: "#DCFCE7", icon: "🏆" },
-  ceo_rejected: { label: "CEO Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" }
+  ceo_rejected: { label: "CEO Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" },
 };
 
 const PRI = {
@@ -614,7 +615,18 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages }) {
   const st = STATUS[task.status] || STATUS.open;
-  const comp = task.completionStatus ? COMP[task.completionStatus] : null;
+  // Derive comp label — for "submitted" status, show flow-appropriate label
+  const _compBase = task.completionStatus ? COMP[task.completionStatus] : null;
+  const comp = _compBase ? {
+    ..._compBase,
+    label: (task.completionStatus === "submitted" && task.reviewFlow === "ceo_direct")
+      ? "Awaiting CEO Review"
+      : (task.completionStatus === "submitted" && task.reviewFlow === "tl_final")
+        ? "Awaiting TL Final Review"
+        : (task.completionStatus === "submitted")
+          ? "Awaiting TL Review"
+          : _compBase.label,
+  } : null;
   const pri = task.priority ? (PRI[task.priority] || PRI.medium) : PRI.medium;
 
   const createdDate = task.createdAt
@@ -817,16 +829,24 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
               {isAssignee && task.status === "in_progress" && (
                 <button className="gv-wf-btn gv-wf-report" onClick={() => handleAction("report")}>Daily Report</button>
               )}
-              {isAssignee && task.status === "in_progress" && !["submitted", "tl_approved", "ceo_approved"].includes(task.completionStatus) && (
+              {isAssignee && task.status === "in_progress" && !["submitted", "tl_approved", "tl_final_approved", "ceo_approved", "ceo_direct_approved"].includes(task.completionStatus) && (
                 <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>Submit for Review</button>
               )}
               {isTL && task.status === "pending_tl_approval" && task.assigneeIds?.includes(employeeId) && (
                 <button className="gv-wf-btn" style={{ background: "#EDEDFE", color: "#5B5EF4", borderColor: "rgba(91,94,244,.3)" }} disabled={actionBusy} onClick={() => handleAction("approve_tl")}>⭐ Approve Task</button>
               )}
-              {(isTL || isCEO) && task.completionStatus === "submitted" && (
-                <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>Review Submission</button>
+              {/* TL Review: show when submitted AND (flow is tl_final or tl_then_ceo) */}
+              {isTL && task.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(task.reviewFlow) && (
+                <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>
+                  {task.reviewFlow === "tl_final" ? "✅ Final Review" : "Review Submission"}
+                </button>
               )}
-              {isCEO && task.completionStatus === "tl_approved" && (
+              {/* CEO Review Direct: show when submitted AND flow is ceo_direct */}
+              {isCEO && task.completionStatus === "submitted" && task.reviewFlow === "ceo_direct" && (
+                <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("review_completion")}>CEO Final Review</button>
+              )}
+              {/* CEO Final Review: show after TL approved in tl_then_ceo flow */}
+              {isCEO && task.completionStatus === "tl_approved" && task.reviewFlow === "tl_then_ceo" && (
                 <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("ceo_review")}>CEO Final Approval</button>
               )}
             </div>
@@ -2024,7 +2044,8 @@ export default function TasksPage() {
 
   const grouped = groupByDate(chatMessages);
   const getModalTask = () => activeModal ? (allTaskMap.get(activeModal.taskId) || activeModal.task || task) : task;
-  const rootOnlyTasks = allTasks.filter(t => !t.parentTaskId);
+  // For employees: count all their assigned tasks; for CEO/TL: count root tasks only
+  const rootOnlyTasks = role === "employee" ? allTasks : allTasks.filter(t => !t.parentTaskId);
   const stats = {
     total: rootOnlyTasks.filter(t => t.status !== "done").length,
     open: rootOnlyTasks.filter(t => t.status === "open").length,
@@ -2474,7 +2495,11 @@ export default function TasksPage() {
 
 
 
-          const rootTasks = allTasks.filter(t => !t.parentTaskId);
+          // For employees: show ALL tasks assigned to them (including forwarded subtasks)
+          // For CEO/TL: show only root tasks (they see full hierarchy via subtask expansion)
+          const rootTasks = role === "employee"
+            ? allTasks
+            : allTasks.filter(t => !t.parentTaskId);
           const filteredRoots = rootTasks.filter(t => {
             const q = listSearch.toLowerCase();
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
@@ -2651,7 +2676,9 @@ export default function TasksPage() {
                       ...(!isCEO ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(!isCEO ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO ? [{ l: "Edit Deadline", a: () => { setActiveModal({ type: "deadline", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
-                      ...(isCEO && ["submitted", "tl_approved"].includes(t.completionStatus) ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO && t.completionStatus === "submitted" && t.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isTL && t.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(t.reviewFlow) ? [{ l: "Review Submission", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO && t.completionStatus === "tl_approved" && t.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", a: () => { setActiveModal({ type: "ceo_review", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO ? [{ l: "Delete Task", d: true, a: () => { setSelectedTask(t); setShowDeleteConf(true); setRowMenuOpen(null); } }] : []),
                     ].map((item, i) => (
                       <button key={i} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, color: item.d ? "var(--danger)" : "var(--text-2)", textAlign: "left", borderRadius: 6, fontFamily: "var(--font)", transition: "background 0.1s" }}
@@ -3680,7 +3707,9 @@ export default function TasksPage() {
               ...(!isCEO ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
               ...(!isCEO ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
               ...(isCEO ? [{ l: "Edit Deadline", icon: <Calendar />, a: () => { setActiveModal({ type: "deadline", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(isCEO && ["submitted", "tl_approved"].includes(sheetTask.completionStatus) ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(isCEO && sheetTask.completionStatus === "submitted" && sheetTask.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(isTL && sheetTask.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(sheetTask.reviewFlow) ? [{ l: "Review Submission", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(isCEO && sheetTask.completionStatus === "tl_approved" && sheetTask.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", icon: <CheckCircle />, a: () => { setActiveModal({ type: "ceo_review", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
             ].map((item, i) => (
               <button key={i} className="gv-row-menu-sheet-item" onClick={item.a}>
                 <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>{item.icon}</span>

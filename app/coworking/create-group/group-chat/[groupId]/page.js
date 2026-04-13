@@ -378,51 +378,24 @@ export default function GroupChatPage() {
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Show immediately
+    // 1. Show immediately (optimistic)
     setMessages(prev => [...prev, optimistic]);
 
     try {
-      const messageId = crypto.randomUUID();
-      pendingMapRef.current.set(tempId, messageId); // register before write
-      const groupRef = doc(firebaseDb, "cowork_groups", groupId);
-      const msgsRef = collection(firebaseDb, "cowork_groups", groupId, "messages");
-
-      const messageData = {
-        messageId,
-        threadType: "group",
-        threadId: groupId,
-        senderId: employeeId,
-        senderName: employeeName,
-        text: text || "",
-        attachments: attachments || [],
-        messageType: resolvedType,
-        type: resolvedType,
-        readBy: [employeeId],
-        createdAt: serverTimestamp(),
-      };
-
-      // 2. Write message to Firestore
-      await setDoc(doc(msgsRef, messageId), messageData);
-
-      // 3. Update group's lastMessage preview
-      const previewText =
-        resolvedType === "image" ? "📷 Image"
-          : resolvedType === "pdf" ? "📄 Document"
-            : resolvedType === "voice" ? "🎤 Voice note"
-              : (text || "").slice(0, 80);
-
-      await updateDoc(groupRef, {
-        lastMessage: {
-          text: previewText,
-          senderId: employeeId,
-          senderName: employeeName,
+      // 2. Route through backend so FCM push + email fire for all members
+      const result = await apiFetch(`/group/${groupId}/message`, {
+        method: "POST",
+        body: JSON.stringify({
+          text: text || "",
+          attachments: attachments || [],
           messageType: resolvedType,
-          sentAt: serverTimestamp(),
-        },
-        updatedAt: serverTimestamp(),
+        }),
       });
 
-      // 4. Remove temp immediately; onSnapshot handles confirmed message
+      const messageId = result.message?.messageId || result.messageId;
+      if (messageId) pendingMapRef.current.set(tempId, messageId);
+
+      // 3. Remove temp; onSnapshot handles confirmed message
       setMessages(prev => prev.filter(m => m.messageId !== tempId));
       pendingMapRef.current.delete(tempId);
 
@@ -771,6 +744,11 @@ export default function GroupChatPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* ── Thread Requests — collapsible pill ── */}
+        {threadRequests.length > 0 && (
+          <GroupRequestsBar requests={threadRequests} employeeId={employeeId} employeeName={employeeName} isCeoOrTl={isCeoOrTl} />
         )}
 
         {/* ── Pinned Task Panel — fixed above chat, not scrollable away ── */}

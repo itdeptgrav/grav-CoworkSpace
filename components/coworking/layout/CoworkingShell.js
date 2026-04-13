@@ -396,6 +396,48 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         responseMessage: respondMsg.trim(),
         updatedAt: serverTimestamp(),
       });
+
+      // Notify the request sender via Firestore notification + backend FCM push
+      try {
+        const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+        if (reqDoc.exists()) {
+          const req = reqDoc.data();
+          const notifType = status === "approved" ? "request_approved" : "request_rejected";
+          const notifTitle = status === "approved"
+            ? `Request approved: ${req.subject || ""}`
+            : `Request rejected: ${req.subject || ""}`;
+          const notifBody = respondMsg.trim() || (status === "approved" ? "Your request was approved." : "Your request was rejected.");
+
+          // In-app notification
+          const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+          await setDoc(notifRef, {
+            recipientEmployeeId: req.fromId,
+            type: notifType,
+            title: notifTitle,
+            body: notifBody,
+            fromId: employeeId,
+            fromName: employeeName,
+            requestId: reqId,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+
+          // Backend FCM push (works on closed iPhone)
+          await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipientId: req.fromId,
+              title: notifTitle,
+              body: notifBody,
+              type: notifType,
+              subject: req.subject,
+              responseMessage: respondMsg.trim(),
+            }),
+          }).catch(() => { }); // non-blocking
+        }
+      } catch (e) { console.error("[respond notify]", e); }
+
       setRespondMsg(""); setRespondingId(null);
     } catch (e) {
       console.error(e);

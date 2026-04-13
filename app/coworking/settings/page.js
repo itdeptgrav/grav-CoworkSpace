@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
-import { changePassword } from "../../../lib/coworkApi";
+import { changePassword, changeEmail } from "../../../lib/coworkApi";
 
 export default function SettingsPage() {
   const { user, role, employeeId, employeeName, passwordChanged, tempPassword, loading } = useCoworkAuth();
@@ -15,6 +15,29 @@ export default function SettingsPage() {
   const [showNew, setShowNew] = useState(false);
   const [showConf, setShowConf] = useState(false);
   const [strength, setStrength] = useState(0); // 0-4
+
+  // ── Email change state (CEO only) ──
+  const [newEmail, setNewEmail] = useState("");
+  const [emailPw, setEmailPw] = useState("");       // optional new password alongside email change
+  const [showEmailPw, setShowEmailPw] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState("");
+  const [emailError, setEmailError] = useState("");
+
+  const handleEmailChange = async (e) => {
+    e.preventDefault();
+    setEmailError(""); setEmailSuccess("");
+    if (!newEmail.trim()) { setEmailError("Email is required."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail.trim())) { setEmailError("Enter a valid email address."); return; }
+    if (emailPw && emailPw.length < 6) { setEmailError("Password must be at least 6 characters."); return; }
+    setEmailBusy(true);
+    try {
+      const result = await changeEmail({ newEmail: newEmail.trim(), newPassword: emailPw || undefined });
+      setEmailSuccess(result.message || "Email updated successfully.");
+      setNewEmail(""); setEmailPw("");
+    } catch (e) { setEmailError(e.message); }
+    finally { setEmailBusy(false); }
+  };
 
   useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading]);
   if (loading || !user) return null;
@@ -568,6 +591,92 @@ export default function SettingsPage() {
               </form>
             </div>
           </div>
+
+          {/* ── CEO ONLY: CHANGE EMAIL (+ optional password) CARD ── */}
+          {role === "ceo" && (
+            <div className="stg-card stg-col-full" style={{ maxWidth: 480 }}>
+              <div className="stg-card-head">
+                <div className="stg-card-icon" style={{ background: "#FAF5FF" }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                    <polyline points="22,6 12,13 2,6" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="stg-card-title">Change Login Email</p>
+                  <p className="stg-card-sub">Update your login email — all data stays intact</p>
+                </div>
+              </div>
+              <div className="stg-card-body">
+
+                {emailError && (
+                  <div className="stg-alert stg-alert-err">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+                    {emailError}
+                  </div>
+                )}
+                {emailSuccess && (
+                  <div className="stg-alert stg-alert-ok">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                    {emailSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handleEmailChange}>
+                  <div className="stg-field">
+                    <label className="stg-label">New Email Address</label>
+                    <div className="stg-input-wrap">
+                      <input
+                        type="email"
+                        className="stg-input"
+                        value={newEmail}
+                        onChange={e => setNewEmail(e.target.value)}
+                        placeholder="Enter new email address"
+                        autoComplete="email"
+                        style={{ paddingRight: 14 }}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="stg-field">
+                    <label className="stg-label">
+                      New Password <span style={{ color: "#CBD5E1", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>(optional — leave blank to keep current)</span>
+                    </label>
+                    <div className="stg-input-wrap">
+                      <input
+                        type={showEmailPw ? "text" : "password"}
+                        className="stg-input"
+                        value={emailPw}
+                        onChange={e => setEmailPw(e.target.value)}
+                        placeholder="Leave blank to keep current password"
+                        autoComplete="new-password"
+                      />
+                      <button type="button" className="stg-eye" onClick={() => setShowEmailPw(p => !p)}>
+                        <EyeIcon open={showEmailPw} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#FAF5FF", border: "1px solid #E9D5FF", borderRadius: 8, padding: "10px 13px", marginBottom: 4 }}>
+                    <p style={{ fontSize: 12, color: "#6D28D9", margin: 0, lineHeight: 1.55 }}>
+                      <strong>All your data stays intact</strong> — tasks, messages, meetings and history remain unchanged. Only your login email (and optionally password) will be updated.
+                    </p>
+                  </div>
+
+                  <div className="stg-submit-row">
+                    <button type="submit" disabled={emailBusy || !newEmail.trim()} className="stg-submit" style={{ background: "#7C3AED" }}>
+                      {emailBusy ? (
+                        <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "stg-spin 0.8s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Saving…</>
+                      ) : (
+                        <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg> Update Email</>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
