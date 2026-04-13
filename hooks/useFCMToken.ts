@@ -51,12 +51,17 @@ export function useFCMToken(employeeId: string | null) {
 
                 console.log("[FCM] Token obtained:", token.slice(0, 20) + "...");
 
-                // 4. Save token to Firestore cowork_fcm_tokens/{employeeId}
+                // 4. Save token to Firestore — use arrayUnion so multiple devices/browsers
+                //    all get notifications (laptop + Android phone = 2 tokens, both fire)
+                const { arrayUnion } = await import("firebase/firestore");
                 await setDoc(
                     doc(firebaseDb, "cowork_fcm_tokens", employeeId),
                     {
                         employeeId,
-                        token,
+                        // Store array of tokens — one per device/browser
+                        tokens: arrayUnion(token),
+                        // Keep latest token for quick single-device lookup
+                        latestToken: token,
                         updatedAt: serverTimestamp(),
                         platform: "web",
                         userAgent: navigator.userAgent.slice(0, 100),

@@ -9,6 +9,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import NotesSidebarPanel from "../notes/NotesSidebarPanel";
 import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMeetingStore";
 import dynamic from "next/dynamic";
+import { useFCMToken } from "../../../hooks/useFCMToken";
+import { usePushNotifications } from "../../../hooks/usePushNotifications";
 
 // Dynamically import LiveKit (browser-only) for PiP room
 const LiveKitRoom = dynamic(() => import("@livekit/components-react").then(m => m.LiveKitRoom), { ssr: false });
@@ -1015,6 +1017,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const router = useRouter();
   const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
 
+  // ── Push notifications — FCM token registration + foreground/background push ──
+  // useFCMToken:         registers this device with FCM so backend can push when app is closed
+  // usePushNotifications: listens to cowork_notifications and fires native OS alerts
+  useFCMToken(employeeId || null);
+  usePushNotifications(employeeId || null);
+
   // ── Per-section unread badge counts ──────────────────────────────────────
   // ALL 4 sections (Tasks, Messages, Groups, Meetings) use independent strategies:
   //   Tasks    → per-task onSnapshot on chat subcollection, readBy-based (live decrement)
@@ -1373,6 +1381,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   // ── PWA Install prompt ────────────────────────────────────
   const [canInstall, setCanInstall] = React.useState(false);
   const [isInstalled, setIsInstalled] = React.useState(false);
+  const [showIosGuide, setShowIosGuide] = React.useState(false);
   const deferredPromptRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -2081,17 +2090,56 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               </div>
             ))}
 
-            {/* ── Download App — always visible, not clickable (display only) ── */}
+            {/* ── Install App button ── */}
             {!isInstalled && (
               <div style={{ margin: "8px 10px 4px" }}>
-                <div style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 12px", borderRadius: 10,
-                  background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-                  boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
-                  pointerEvents: "none",  /* NOT clickable */
-                  userSelect: "none",
-                }}>
+                {/* iOS: show step-by-step instruction panel */}
+                {showIosGuide && (
+                  <div style={{
+                    marginBottom: 8, padding: "12px 14px",
+                    background: "#F0FDF4", border: "1.5px solid #86EFAC",
+                    borderRadius: 10, fontSize: 11, color: "#166534", lineHeight: 1.7,
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 12 }}>📱 Install on iPhone/iPad:</div>
+                    <div>1. Open this site in <strong>Safari</strong></div>
+                    <div>2. Tap the <strong>Share</strong> button (□↑)</div>
+                    <div>3. Tap <strong>"Add to Home Screen"</strong></div>
+                    <div>4. Tap <strong>Add</strong> (top right)</div>
+                    <div style={{ marginTop: 6, color: "#15803D", fontWeight: 600 }}>
+                      ✅ Then open from home screen for notifications!
+                    </div>
+                    <button onClick={() => setShowIosGuide(false)}
+                      style={{ marginTop: 8, fontSize: 10, color: "#16A34A", background: "none", border: "1px solid #86EFAC", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontFamily: "inherit" }}>
+                      Got it ✓
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                    if (isIos) {
+                      // iOS: can't trigger install programmatically — show step guide
+                      setShowIosGuide(p => !p);
+                    } else if (canInstall) {
+                      // Android/Desktop: trigger native browser install prompt
+                      handleInstall();
+                    } else {
+                      // Prompt already used or not available — show manual hint
+                      alert("To install: tap the browser menu (⋮) → \"Add to Home Screen\" or \"Install App\"");
+                    }
+                  }}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 12px", borderRadius: 10, border: "none",
+                    background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
+                    boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
+                    cursor: "pointer", fontFamily: "inherit",
+                    transition: "opacity 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = "0.9"}
+                  onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                >
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -2100,12 +2148,26 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                     </svg>
                   </div>
                   <div style={{ flex: 1, textAlign: "left" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>Download App</div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>Install on your device</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>
+                      {canInstall ? "Install App" : "Download App"}
+                    </div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>
+                      {canInstall ? "Tap to install — get notifications" : "Install on your device"}
+                    </div>
                   </div>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
+                </button>
+              </div>
+            )}
+            {/* Already installed — show confirmation */}
+            {isInstalled && (
+              <div style={{ margin: "8px 10px 4px", padding: "8px 12px", background: "#F0FDF4", border: "1px solid #86EFAC", borderRadius: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 14 }}>✅</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#15803D" }}>App Installed</div>
+                  <div style={{ fontSize: 10, color: "#16A34A" }}>Notifications are active</div>
                 </div>
               </div>
             )}

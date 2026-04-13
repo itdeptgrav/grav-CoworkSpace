@@ -48,12 +48,20 @@ messaging.onBackgroundMessage((payload) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     const url = event.notification.data?.url || '/coworking';
+    const fullUrl = self.location.origin + url;
+
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-            for (const client of list) {
-                if ('focus' in client) { client.focus(); return; }
-            }
-            if (clients.openWindow) return clients.openWindow(url);
+            // If a tab with this exact URL already exists, focus it
+            const exactMatch = list.find(c => c.url === fullUrl);
+            if (exactMatch) { exactMatch.focus(); return; }
+
+            // If any tab of our app is open, navigate it to the right page
+            const anyTab = list.find(c => c.url.startsWith(self.location.origin));
+            if (anyTab) { anyTab.navigate(fullUrl); anyTab.focus(); return; }
+
+            // No tab open — open a new one
+            if (clients.openWindow) return clients.openWindow(fullUrl);
         })
     );
 });
