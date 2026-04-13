@@ -1064,14 +1064,34 @@ export default function Dashboard() {
           </div>
 
           {/* Task & Reminders */}
+          {/* Active Tasks */}
           <Card style={{ marginBottom: 10 }}>
-            <CardH title="Task & Reminders" iconName="alert" iconColor="#4F46E5"
-              sub={`${trackerTasks.filter(t => t.dueDate && new Date(t.dueDate) - Date.now() < 604800000).length} deadlines this week`}
-              badge={urgent > 0 ? urgent : null} badgeBg="#FEF2F2" badgeC="#DC2626"
-              action={() => setSideOpen(true)} actionLabel="Tracker" />
+            <CardH title="Active Tasks" iconName="task" iconColor="#4F46E5"
+              sub={`${myTasks.length} tasks`}
+              action={() => router.push("/coworking/tasks")} actionLabel="All" />
             {tLoad ? <div style={{ textAlign: "center", padding: 14 }}><GwSpinner /></div>
-              : myTasks.length === 0 ? <Empty iconName="checkC" title="No tasks" sub="Nothing assigned yet" />
-                : myTasks.slice(0, 4).map(t => <ReminderItem key={t.taskId} task={t} onClick={goTask} isCEO={isCEO} empMap={empMap} employeeId={employeeId} />)}
+              : myTasks.length === 0 ? <Empty iconName="checkC" title="All caught up!" sub="Nothing assigned yet" />
+                : myTasks.slice(0, 5).map(t => {
+                  const info = dlInfo(t.dueDate); const sb = SBADGE[t.status] || SBADGE.open;
+                  const emp = empMap[t.assignedBy]; const d = desg(emp);
+                  return (
+                    <div key={t.taskId} onClick={() => goTask(t)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderRadius: 7, cursor: "pointer", marginBottom: 1, transition: "background 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <div style={{ width: 28, height: 28, borderRadius: 7, background: avC(t.taskId), color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {(t.title || "T").slice(0, 2).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                        {t.assignedByName && <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>{t.assignedByName}{d ? " · " + d : ""}</div>}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+                        {info && <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 6px", borderRadius: 3, color: info.c, background: info.bg }}>{info.text}</span>}
+                        <span style={{ fontSize: 8.5, fontWeight: 600, padding: "2px 6px", borderRadius: 3, color: sb.c, background: sb.bg, textTransform: "uppercase" }}>{sb.l}</span>
+                      </div>
+                    </div>
+                  );
+                })
+            }
           </Card>
 
           {/* Pending Requests */}
@@ -1169,33 +1189,7 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          {/* Active tasks */}
-          <Card style={{ marginBottom: 10 }}>
-            <CardH title="Active Tasks" iconName="task" sub={`${myTasks.length} tasks`} action={() => router.push("/coworking/tasks")} actionLabel="All" />
-            {tLoad ? <div style={{ textAlign: "center", padding: 14 }}><GwSpinner /></div>
-              : myTasks.length === 0 ? <Empty iconName="checkC" title="All caught up!" />
-                : myTasks.slice(0, 5).map(t => {
-                  const info = dlInfo(t.dueDate); const sb = SBADGE[t.status] || SBADGE.open;
-                  const emp = empMap[t.assignedBy]; const d = desg(emp);
-                  return (
-                    <div key={t.taskId} onClick={() => goTask(t)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderRadius: 7, cursor: "pointer", marginBottom: 1, transition: "background 0.1s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <div style={{ width: 28, height: 28, borderRadius: 7, background: avC(t.taskId), color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {(t.title || "T").slice(0, 2).toUpperCase()}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                        {t.assignedByName && <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>{t.assignedByName}{d ? " · " + d : ""}</div>}
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                        {info && <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 6px", borderRadius: 3, color: info.c, background: info.bg }}>{info.text}</span>}
-                        <span style={{ fontSize: 8.5, fontWeight: 600, padding: "2px 6px", borderRadius: 3, color: sb.c, background: sb.bg, textTransform: "uppercase" }}>{sb.l}</span>
-                      </div>
-                    </div>
-                  );
-                })
-            }
-          </Card>
+
 
           {/* Task Overview (at bottom on mobile) */}
           <Card style={{ marginBottom: 10 }}>
@@ -1384,19 +1378,44 @@ export default function Dashboard() {
                 </div>
               </Card>
               <Card style={{ flex: 1 }}>
-                <CardH title="Task & Reminders" iconName="alert" iconColor="#4F46E5"
-                  sub={`${trackerTasks.filter(t => t.dueDate && new Date(t.dueDate) - Date.now() < 604800000).length} deadlines this week`}
-                  badge={urgent > 0 ? urgent : null} badgeBg="#FEF2F2" badgeC="#DC2626"
-                  action={() => setSideOpen(true)} actionLabel="View all" />
+                <CardH title="Active Tasks" iconName="task" iconColor="#4F46E5"
+                  sub={`${myTasks.length} tasks directly assigned`}
+                  action={() => router.push("/coworking/tasks")} actionLabel="View all" />
                 {tLoad ? <div style={{ textAlign: "center", padding: 16 }}><GwSpinner /></div>
-                  : myTasks.length === 0 ? <Empty iconName="checkC" title="No tasks" sub="Nothing assigned to you yet" />
+                  : myTasks.length === 0 ? <Empty iconName="checkC" title="All caught up!" sub="Nothing assigned to you yet" />
                     : <>
-                      {myTasks.slice(0, 5).map(t => <ReminderItem key={t.taskId} task={t} onClick={goTask} isCEO={isCEO} empMap={empMap} employeeId={employeeId} />)}
-                      {myTasks.length > 5 && (
-                        <button onClick={() => setSideOpen(true)} style={{ width: "100%", marginTop: 7, padding: "7px 0", background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 7, fontSize: 10.5, fontWeight: 600, color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontFamily: "inherit" }}
+                      {myTasks.slice(0, 6).map(t => {
+                        const info = dlInfo(t.dueDate); const sb = SBADGE[t.status] || SBADGE.open;
+                        const emp = empMap[t.assignedBy]; const d = desg(emp);
+                        return (
+                          <div key={t.taskId} onClick={() => goTask(t)}
+                            style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px", borderRadius: 7, cursor: "pointer", marginBottom: 1, transition: "background 0.1s" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <div style={{ position: "relative", flexShrink: 0 }}>
+                              <div style={{ width: 30, height: 30, borderRadius: 7, background: avC(t.taskId), color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {(t.title || "T").slice(0, 2).toUpperCase()}
+                              </div>
+                              {info && <div style={{ position: "absolute", bottom: -1, right: -1, width: 7, height: 7, borderRadius: "50%", background: dlDot(info), border: "2px solid #fff" }} />}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                              <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>
+                                {t.assignedByName ? (t.assignedByName + (d ? " · " + d : "")) : `#${t.taskId}`}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+                              {info && <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 6px", borderRadius: 3, color: info.c, background: info.bg, whiteSpace: "nowrap" }}>{info.text}</span>}
+                              <span style={{ fontSize: 8.5, fontWeight: 600, padding: "2px 6px", borderRadius: 3, color: sb.c, background: sb.bg, textTransform: "uppercase", whiteSpace: "nowrap" }}>{sb.l}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {myTasks.length > 6 && (
+                        <button onClick={() => router.push("/coworking/tasks")} style={{ width: "100%", marginTop: 7, padding: "7px 0", background: "#F9FAFB", border: "1px solid #F3F4F6", borderRadius: 7, fontSize: 10.5, fontWeight: 600, color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontFamily: "inherit" }}
                           onMouseEnter={e => { e.currentTarget.style.background = "#EFF6FF"; e.currentTarget.style.color = "#4F46E5"; }}
                           onMouseLeave={e => { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.color = "#6B7280"; }}>
-                          View {myTasks.length - 5} more <Ic n="chevR" s={9} c="currentColor" />
+                          View {myTasks.length - 6} more <Ic n="chevR" s={9} c="currentColor" />
                         </button>
                       )}
                     </>
@@ -1579,80 +1598,6 @@ export default function Dashboard() {
               <BarChart data={barData} />
             </Card>
           </div>
-
-          {/* Active Tasks Table */}
-          <Card style={{ padding: "16px 0 6px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 17px 12px", flexWrap: "wrap", gap: 7 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>Active Tasks</div>
-                <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>{myTasks.length} tasks directly assigned</div>
-              </div>
-              <button onClick={() => router.push("/coworking/tasks")} style={{ fontSize: 10.5, fontWeight: 600, color: "#374151", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 11px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, transition: "all 0.12s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#374151"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#E5E7EB"; }}>
-                View all <Ic n="arrow" s={9} c="currentColor" />
-              </button>
-            </div>
-            {tLoad ? <div style={{ textAlign: "center", padding: "20px 0" }}><GwSpinner /></div>
-              : myTasks.length === 0
-                ? <div style={{ textAlign: "center", padding: "20px 0" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280" }}>All caught up!</div>
-                </div>
-                : <div style={{ overflowX: "auto" }}>
-                  <table className="db-tbl" style={{ minWidth: 600 }}>
-                    <tbody>
-                      {myTasks.slice(0, 10).map((t, ri) => {
-                        const sb = SBADGE[t.status] || SBADGE.open;
-                        const pri = PCOL[t.priority] || PCOL.medium;
-                        const dI = dlInfo(t.dueDate);
-                        const emp = empMap[t.assignedBy]; const d = desg(emp);
-                        const aEmp = (t.assigneeIds || []).slice(0, 1).map(id => {
-                          const e = empMap[id]; return e ? (e.name + (e.department ? " · " + e.department : "")) : id;
-                        }).join(", ");
-                        return (
-                          <tr key={t.taskId} onClick={() => goTask(t)} style={{ animation: `fadeUp 0.13s ease ${ri * 0.02}s both` }}>
-                            <td style={{ paddingLeft: 17, width: 42 }}>
-                              <div style={{ position: "relative" }}>
-                                <div style={{ width: 30, height: 30, borderRadius: 7, background: avC(t.taskId), color: "#fff", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                  {(t.title || "T").slice(0, 2).toUpperCase()}
-                                </div>
-                                {dI && <div style={{ position: "absolute", bottom: -1, right: -1, width: 7, height: 7, borderRadius: "50%", background: dlDot(dI), border: "2px solid #fff" }} />}
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#111827" }}>{t.title}</div>
-                              <div style={{ fontSize: 9.5, color: "#9CA3AF", marginTop: 1 }}>
-                                {t.assignedByName ? (t.assignedByName + (d ? " · " + d : "")) : `#${t.taskId}`}
-                              </div>
-                            </td>
-                            <td><span style={{ fontSize: 9, color: "#9CA3AF", fontFamily: "monospace", background: "#F9FAFB", padding: "1px 5px", borderRadius: 4, border: "1px solid #F3F4F6" }}>{t.taskId}</span></td>
-                            <td style={{ fontSize: 10.5, color: "#6B7280", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{aEmp || "—"}</td>
-                            <td>{t.priority && <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 7px", borderRadius: 4, color: pri.c, background: pri.bg, textTransform: "capitalize" }}>{t.priority}</span>}</td>
-                            <td style={{ fontSize: 10, color: "#6B7280", whiteSpace: "nowrap" }}>{t.dueDate ? new Date(t.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</td>
-                            <td>{dI && <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 6px", borderRadius: 4, color: dI.c, background: dI.bg, whiteSpace: "nowrap" }}>{dI.text}</span>}</td>
-                            <td><span style={{ fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 5, color: sb.c, background: sb.bg, letterSpacing: "0.02em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{sb.l}</span></td>
-                            <td style={{ paddingRight: 17, width: 56 }}>
-                              <div style={{ display: "flex", gap: 5 }}>
-                                <button onClick={e => { e.stopPropagation(); setDeadlineTask(t); }} title="Edit Deadline" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"} onMouseLeave={e => e.currentTarget.style.background = "none"}>
-                                  <Ic n="edit" s={12} c="#6B7280" />
-                                </button>
-                                {isCEO && (
-                                  <button onClick={e => { e.stopPropagation(); setDeleteTarget(t); }} title="Delete Task" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 3, borderRadius: 5, transition: "background 0.1s" }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "#FEF2F2"} onMouseLeave={e => e.currentTarget.style.background = "none"}>
-                                    <Ic n="trash" s={12} c="#DC2626" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-            }
-          </Card>
 
         </div>
       </div>
