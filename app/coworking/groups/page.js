@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
+
 import { listGroups } from "../../../lib/coworkApi";
 import { GwAvatar } from "../../../components/coworking/shared/CoworkShared";
 import { getCoworkSocket } from "../../../lib/coworkSocket";
@@ -51,6 +52,7 @@ export default function GroupsPage() {
 
     return (
         <>
+
             <div className="cw-groups-page">
                 <style>{`
                     .cw-groups-page {

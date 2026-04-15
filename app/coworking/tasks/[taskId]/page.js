@@ -16,6 +16,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useCoworkAuth } from "../../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../../components/coworking/layout/CoworkingShell";
+
 import DeadlineBadge, { getDeadlineInfo } from "../../../../components/coworking/tasks/DeadlineBadge";
 import { GwAvatar, GwStatusBadge } from "../../../../components/coworking/shared/CoworkShared";
 import MediaMessageInput from "../../../../components/coworking/messaging/MediaMessageInput";
@@ -212,6 +213,7 @@ export default function TaskDetailPage() {
     };
 
     return (
+
         <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title="Task Details">
             <div style={s.page}>
 
@@ -495,7 +497,9 @@ export default function TaskDetailPage() {
                                 <div ref={messagesEndRef} />
                             </div>
 
-                            <MediaMessageInput onSend={handleSendChat} placeholder={`Message in ${task.title} (${taskId})...`} />
+                            <div style={{ background: "#202C33", flexShrink: 0 }}>
+                                <MediaMessageInput onSend={handleSendChat} placeholder={`Message in ${task.title} (${taskId})...`} />
+                            </div>
                         </>
                     )}
 

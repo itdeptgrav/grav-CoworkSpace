@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
+
 import CreateTaskModal from "../../../components/coworking/tasks/CreateTaskModal";
 import ForwardTaskModal from "../../../components/coworking/tasks/ForwardTaskModal";
 import DailyReportModal from "../../../components/coworking/tasks/DailyReportModal";
@@ -2471,6 +2472,7 @@ export default function TasksPage() {
 
   return (
     <>
+
       <style>{STYLES}</style>
 
       {/* Lightbox Modal */}

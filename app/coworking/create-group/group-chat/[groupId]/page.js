@@ -28,6 +28,7 @@ import {
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../../../components/coworking/layout/CoworkingShell";
+
 import MediaMessageInput from "../../../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../../../components/coworking/messaging/MessageBubble";
 import { firebaseDb, firebaseAuth } from "../../../../../lib/coworkFirebase";
@@ -362,49 +363,49 @@ export default function GroupChatPage() {
     const resolvedType = resolveType(messageType, attachments);
 
     const optimistic = {
-      messageId: tempId, threadType: "group", threadId: groupId,
-      senderId: employeeId, senderName: employeeName,
-      text: text || "", attachments: attachments || [],
-      messageType: resolvedType, type: resolvedType,
-      readBy: [employeeId], temp: true, sending: true, error: false,
+      messageId: tempId,
+      threadType: "group",
+      threadId: groupId,
+      senderId: employeeId,
+      senderName: employeeName,
+      text: text || "",
+      attachments: attachments || [],
+      messageType: resolvedType,
+      type: resolvedType,
+      readBy: [employeeId],
+      temp: true,
+      sending: true,
+      error: false,
       createdAt: new Date().toISOString(),
     };
 
+    // 1. Show immediately (optimistic)
     setMessages(prev => [...prev, optimistic]);
 
     try {
-      // Write directly to Firestore — zero race condition with onSnapshot
-      const messageId = crypto.randomUUID();
-      pendingMapRef.current.set(tempId, messageId);
-
-      const groupRef = doc(firebaseDb, "cowork_groups", groupId);
-      const msgsRef = collection(firebaseDb, "cowork_groups", groupId, "messages");
-
-      await setDoc(doc(msgsRef, messageId), {
-        messageId, threadType: "group", threadId: groupId,
-        senderId: employeeId, senderName: employeeName,
-        text: text || "", attachments: attachments || [],
-        messageType: resolvedType, type: resolvedType,
-        readBy: [employeeId], createdAt: serverTimestamp(),
-      });
-
-      const preview = resolvedType === "image" ? "📷 Image" : resolvedType === "pdf" ? "📄 Document" : resolvedType === "voice" ? "🎤 Voice note" : (text || "").slice(0, 80);
-      await updateDoc(groupRef, {
-        lastMessage: { text: preview, senderId: employeeId, senderName: employeeName, messageType: resolvedType, sentAt: serverTimestamp() },
-        updatedAt: serverTimestamp(),
-      });
-      // onSnapshot handles removing temp + showing real message
-
-      // Fire backend for FCM push + email only — non-blocking, no Firestore write
-      apiFetch(`/group/${groupId}/notify`, {
+      // 2. Route through backend so FCM push + email fire for all members
+      const result = await apiFetch(`/group/${groupId}/message`, {
         method: "POST",
-        body: JSON.stringify({ text: text || "", messageType: resolvedType }),
-      }).catch(() => { });
+        body: JSON.stringify({
+          text: text || "",
+          attachments: attachments || [],
+          messageType: resolvedType,
+        }),
+      });
+
+      const messageId = result.message?.messageId || result.messageId;
+      if (messageId) pendingMapRef.current.set(tempId, messageId);
+
+      // 3. Remove temp; onSnapshot handles confirmed message
+      setMessages(prev => prev.filter(m => m.messageId !== tempId));
+      pendingMapRef.current.delete(tempId);
 
     } catch (err) {
       console.error("handleSend:", err);
       pendingMapRef.current.delete(tempId);
-      setMessages(prev => prev.map(m => m.messageId === tempId ? { ...m, sending: false, error: true } : m));
+      setMessages(prev => prev.map(m =>
+        m.messageId === tempId ? { ...m, sending: false, error: true } : m
+      ));
     }
   };
 
@@ -633,6 +634,7 @@ export default function GroupChatPage() {
 
   return (
     <>
+
       <style>{GROUP_CHAT_CSS}</style>
       <div style={s.container} className="grav-chat-container">
 
@@ -1282,7 +1284,7 @@ export default function GroupChatPage() {
 }
 
 const s = {
-  container: { display: "flex", flexDirection: "column", height: "calc(100dvh - 56px)", overflow: "hidden", background: "var(--surface)", border: "none", borderRadius: 0 },
+  container: { display: "flex", flexDirection: "column", height: "calc(100dvh - 108px)", borderRadius: "var(--radius-xl)", overflow: "hidden", border: "1px solid var(--gray-200)", boxShadow: "var(--shadow-sm)", background: "var(--surface)" },
   header: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--gray-200)", background: "var(--surface)", flexShrink: 0, minWidth: 0 },
   backBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, border: "1.5px solid var(--gray-200)", borderRadius: "var(--radius-md)", background: "var(--gray-50)", cursor: "pointer", color: "var(--gray-600)", flexShrink: 0 },
   headerInfo: { flex: 1, minWidth: 0 },
@@ -1298,9 +1300,9 @@ const s = {
   memberChip: { display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--surface)", borderRadius: "var(--radius-full)", border: "1px solid var(--gray-200)" },
   memberName: { fontSize: 12, color: "var(--gray-700)", fontWeight: 500 },
   memberDept: { fontSize: 10, color: "var(--gray-400)" },
-  messagesArea: { flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", background: "#F8FAFC", backgroundImage: "radial-gradient(circle at 1px 1px, #E2E8F0 1px, transparent 0)", backgroundSize: "20px 20px" },
+  messagesArea: { flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", background: "var(--gray-50)" },
   center: { flex: 1, display: "flex", justifyContent: "center", alignItems: "center", padding: 40 },
-  inputArea: { flexShrink: 0, background: "#202C33", paddingBottom: "max(0px, env(safe-area-inset-bottom))" },
+  inputArea: { flexShrink: 0, borderTop: "1px solid var(--gray-200)", background: "var(--surface)" },
 };
 
 // Mobile CSS injected once — collapses labeled buttons to icon-only below 480px
@@ -1313,8 +1315,5 @@ const GROUP_CHAT_CSS = `
   @keyframes gc-new-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.75; transform: scale(1.08); }
-  }
-  @media (max-width: 390px) {
-    .grav-chat-container { border-radius: 0 !important; border-left: none !important; border-right: none !important; }
   }
 `;

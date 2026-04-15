@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
+
 import { GwAvatar, GwSpinner, GwEmpty, GwConfirm } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
 
@@ -633,6 +634,7 @@ export default function CreateGroupPage() {
 
   return (
     <>
+
       <div style={{ maxWidth: 860, margin: "0 auto" }}>
 
         {/* ── Page header ── */}
