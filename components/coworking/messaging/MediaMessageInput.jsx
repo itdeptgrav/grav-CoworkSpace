@@ -307,7 +307,7 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
                         placeholder={uploading ? "Uploading…" : placeholder}
                         rows={1}
                         disabled={disabled || uploading}
-                        style={{ flex: 1, background: "#2A3942", border: "none", outline: "none", color: "#E9EDEF", fontSize: 14.5, padding: "10px 14px", borderRadius: 24, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#00A884" }}
+                        style={{ flex: 1, background: "#2A3942", border: "none", outline: "none", color: "#000000", fontSize: 13, padding: "8px 14px", borderRadius: 24, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#00A884" }}
                         onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
                     />
 

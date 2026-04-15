@@ -36,6 +36,7 @@ import MediaMessageInput from "../../../../components/coworking/messaging/MediaM
 import { GwAvatar, GwSpinner, GwEmpty } from "../../../../components/coworking/shared/CoworkShared";
 import { firebaseDb } from "../../../../lib/coworkFirebase";
 import { uploadImage, uploadVoice, uploadPDF } from "../../../../lib/mediaUploadApi";
+import DMCallManager, { triggerCall } from "../../../../components/coworking/messaging/DMCallManager";
 
 // ── helpers ───────────────────────────────────────────────
 function tsToISO(ts) {
@@ -251,6 +252,18 @@ export default function ConversationPage() {
 
   return (
     <>
+      {/* ── Audio Call Manager (handles outgoing calls + LiveKit) ── */}
+      {employeeId && otherEmpId && (
+        <DMCallManager
+          employeeId={employeeId}
+          employeeName={employeeName}
+          otherEmpId={otherEmpId}
+          otherName={otherName}
+          convId={conversationId}
+        />
+      )}
+      {/* GlobalCallReceiver is mounted in layout.js — covers ALL pages including this one */}
+
       <div style={s.container} className="grav-chat-container">
 
         {/* ── Header ── */}
@@ -276,6 +289,17 @@ export default function ConversationPage() {
               <span style={s.convIdTag}>{conversationId}</span>
             </div>
           </div>
+
+          {/* ── Audio Call button ── */}
+          <button
+            onClick={() => triggerCall(conversationId)}
+            style={s.callBtn}
+            title="Audio call"
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8 19.79 19.79 0 01.01 1.18 2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z" />
+            </svg>
+          </button>
         </div>
 
         {/* ── Messages ── */}
@@ -319,6 +343,7 @@ const s = {
   container: { display: "flex", flexDirection: "column", height: "calc(100vh - 108px)", borderRadius: "var(--radius-xl)", overflow: "hidden", border: "1px solid var(--gray-200)", boxShadow: "var(--shadow-sm)", background: "var(--surface)" },
   header: { display: "flex", alignItems: "center", gap: 12, padding: "12px 20px", borderBottom: "1px solid var(--gray-200)", background: "var(--surface)", flexShrink: 0 },
   backBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, border: "1.5px solid var(--gray-200)", borderRadius: "var(--radius-md)", background: "var(--gray-50)", cursor: "pointer", color: "var(--gray-600)", flexShrink: 0 },
+  callBtn: { display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, border: "1.5px solid var(--gray-200)", borderRadius: "var(--radius-md)", background: "var(--gray-50)", cursor: "pointer", color: "var(--gray-600)", flexShrink: 0, marginLeft: "auto" },
   headerInfo: { flex: 1, minWidth: 0 },
   headerName: { fontSize: 14, fontWeight: 700, color: "var(--gray-900)", letterSpacing: "-0.01em" },
   headerSub: { display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" },
