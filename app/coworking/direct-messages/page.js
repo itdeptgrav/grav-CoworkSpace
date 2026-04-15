@@ -1152,7 +1152,8 @@ const CSS = `
 
 .dm-root {
   display: flex;
-  height: calc(100vh - 108px);
+  height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: #F1F5F9;
   border-radius: 16px;
@@ -1225,7 +1226,7 @@ const CSS = `
 .dm-tab-cnt { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; background: #F1F5F9; color: #64748B; }
 
 /* List */
-.dm-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+.dm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0; }
 .dm-list::-webkit-scrollbar { width: 3px; }
 .dm-list::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 2px; }
 
@@ -1296,7 +1297,7 @@ const CSS = `
 
 /* Messages */
 .dm-msgs {
-  flex: 1; overflow-y: auto; padding: 16px 20px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px;
   display: flex; flex-direction: column; gap: 2px;
   background: inherit;
 }

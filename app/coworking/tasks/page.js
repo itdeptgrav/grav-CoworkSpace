@@ -2679,7 +2679,7 @@ export default function TasksPage() {
                       ...(isCEO && t.completionStatus === "submitted" && t.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isTL && t.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(t.reviewFlow) ? [{ l: "Review Submission", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO && t.completionStatus === "tl_approved" && t.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", a: () => { setActiveModal({ type: "ceo_review", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
-                      ...(isCEO ? [{ l: "Delete Task", d: true, a: () => { setSelectedTask(t); setShowDeleteConf(true); setRowMenuOpen(null); } }] : []),
+                      ...((isCEO || isTL) ? [{ l: "Delete Task", d: true, a: () => { setSelectedTask(t); setShowDeleteConf(true); setRowMenuOpen(null); } }] : []),
                     ].map((item, i) => (
                       <button key={i} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 14px", border: "none", background: "none", cursor: "pointer", fontSize: 12, fontWeight: 500, color: item.d ? "var(--danger)" : "var(--text-2)", textAlign: "left", borderRadius: 6, fontFamily: "var(--font)", transition: "background 0.1s" }}
                         onMouseEnter={e => e.currentTarget.style.background = item.d ? "#FEE2E2" : "var(--bg)"}
