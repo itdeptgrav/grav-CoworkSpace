@@ -99,6 +99,11 @@ export default function DMCallManager({ employeeId, employeeName, otherEmpId, ot
         if (!employeeId) return;
         const socket = getCoworkSocket(employeeId);
 
+        // Ensure this socket is in the employee's room (handles server restarts)
+        socket.emit("join_cowork", employeeId);
+        const onReconnect = () => socket.emit("join_cowork", employeeId);
+        socket.on("connect", onReconnect);
+
         // Server generated our token — connect to LiveKit
         const onTokenReady = ({ token, url, convId: cid }) => {
             if (cid !== convId) return;
@@ -136,6 +141,7 @@ export default function DMCallManager({ employeeId, employeeName, otherEmpId, ot
         socket.on("call_error", onError);
 
         return () => {
+            socket.off("connect", onReconnect);
             socket.off("call_token_ready", onTokenReady);
             socket.off("call_answered", onAnswered);
             socket.off("call_rejected", onRejected);

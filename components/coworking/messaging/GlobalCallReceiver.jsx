@@ -110,6 +110,17 @@ export default function GlobalCallReceiver({ employeeId, employeeName }) {
         if (!employeeId) return;
         const socket = getCoworkSocket(employeeId);
 
+        // ── CRITICAL: ensure this socket is in the employee's room ────────────
+        // Re-emit join_cowork every time — handles server restarts where rooms are wiped
+        socket.emit("join_cowork", employeeId);
+
+        // Re-join room on every reconnect (server restart wipes all rooms)
+        const onReconnect = () => {
+            socket.emit("join_cowork", employeeId);
+            console.log(`[GlobalCallReceiver] Rejoined room after reconnect: ${employeeId}`);
+        };
+        socket.on("connect", onReconnect);
+
         // Incoming call from another employee
         const onIncoming = ({ fromEmployeeId, fromName, convId, roomName }) => {
             // Already in a call — reject immediately
@@ -149,6 +160,7 @@ export default function GlobalCallReceiver({ employeeId, employeeName }) {
         socket.on("call_ended", onEnded);
 
         return () => {
+            socket.off("connect", onReconnect);
             socket.off("call_incoming", onIncoming);
             socket.off("call_token_ready", onTokenReady);
             socket.off("call_ended", onEnded);
