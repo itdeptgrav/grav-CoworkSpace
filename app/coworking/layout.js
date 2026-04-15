@@ -1,10 +1,10 @@
 // app/coworking/layout.js
-// REPLACE your existing app/coworking/layout.js with this
 "use client";
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { useCoworkAuth } from "../../hooks/useCoworkAuth";
 import CoworkingShell from "../../components/coworking/layout/CoworkingShell";
+import GlobalCallReceiver from "../../components/coworking/messaging/GlobalCallReceiver";
 import { GwSpinner } from "../../components/coworking/shared/CoworkShared";
 import TopLoadingBar from "../../components/coworking/shared/TopLoadingBar";
 
@@ -19,9 +19,6 @@ function PageLoadingFallback() {
 export default function CoworkingLayout({ children }) {
     const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
     const pathname = usePathname();
-
-    // ── Room phase covers shell with position:fixed z-index:9999
-    // No bypass needed — lobby/prejoin should show the shell normally
 
     if (loading) {
         return (
@@ -47,6 +44,9 @@ export default function CoworkingLayout({ children }) {
     return (
         <>
             <TopLoadingBar />
+            {employeeId && (
+                <GlobalCallReceiver employeeId={employeeId} employeeName={employeeName || ""} />
+            )}
             <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title={getPageTitle()}>
                 <Suspense fallback={<PageLoadingFallback />}>
                     {children}

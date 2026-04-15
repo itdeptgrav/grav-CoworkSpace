@@ -7,6 +7,7 @@ import { useCoworkNotifications } from "../../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../../lib/coworkUtils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import NotesSidebarPanel from "../notes/NotesSidebarPanel";
+import IncomingCallToast from "../messaging/IncomingCallToast";
 import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMeetingStore";
 import dynamic from "next/dynamic";
 import { useFCMToken } from "../../../hooks/useFCMToken";
@@ -1538,6 +1539,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
+      {/* Global incoming call toast — works on every page */}
+      {employeeId && <IncomingCallToast employeeId={employeeId} />}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 

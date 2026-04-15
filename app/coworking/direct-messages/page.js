@@ -20,7 +20,7 @@ import {
   collection as fsCollection, query as fsQuery, where as fsWhere,
   onSnapshot as fsOnSnapshot, doc as fsDoc, updateDoc as fsUpdateDoc,
 } from "firebase/firestore";
-
+import DMCallManager, { triggerCall } from "../../../components/coworking/messaging/DMCallManager";
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 async function apiFetch(path, opts = {}) {
   const token = await firebaseAuth.currentUser?.getIdToken();
@@ -515,11 +515,17 @@ export default function DirectMessagesPage() {
     setConvsLoading(true);
     const q = query(
       collection(firebaseDb, "cowork_direct_messages"),
-      where("participantIds", "array-contains", employeeId),
-      orderBy("updatedAt", "desc")
+      where("participantIds", "array-contains", employeeId)
     );
     const unsub = onSnapshot(q, async snap => {
-      const convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort client-side — handles docs with missing updatedAt field
+      const convs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
+          const tb = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
+          return tb - ta;
+        });
       setConversations(convs);
       setConvsLoading(false);
       const counts = {};
@@ -591,20 +597,41 @@ export default function DirectMessagesPage() {
     const opt = { messageId: tempId, threadType: "direct", threadId: cid, senderId: employeeId, senderName: employeeName, text: text || "", attachments: attachments || [], messageType: rt, type: rt, readBy: [employeeId], status: "sending", temp: true, sending: true, error: false, createdAt: new Date().toISOString() };
     setMessages(prev => [...prev, opt]);
     try {
-      // Route through backend so FCM push + email fire correctly
-      const result = await apiFetch("/direct-message/send", {
-        method: "POST",
-        body: JSON.stringify({
-          toEmployeeId: selectedPerson.employeeId,
-          text: text || "",
-          attachments: attachments || [],
-          messageType: rt,
-        }),
+      // Write DIRECTLY to Firestore — guarantees participantIds is set for both users
+      const messageId = crypto.randomUUID();
+      pendingMapRef.current.set(tempId, messageId);
+      const convRef = doc(firebaseDb, "cowork_direct_messages", cid);
+      const msgsRef = collection(firebaseDb, "cowork_direct_messages", cid, "messages");
+      // Create conv doc with participantIds if it doesn't exist
+      const snap = await getDoc(convRef);
+      if (!snap.exists()) {
+        await setDoc(convRef, {
+          conversationId: cid,
+          participantIds: [employeeId, selectedPerson.employeeId].sort(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      // Write message
+      await setDoc(doc(msgsRef, messageId), {
+        messageId, threadType: "direct", threadId: cid,
+        senderId: employeeId, senderName: employeeName,
+        text: text || "", attachments: attachments || [],
+        messageType: rt, type: rt,
+        readBy: [employeeId], status: "sent",
+        createdAt: serverTimestamp(),
       });
-      const messageId = result.messageData?.messageId || result.messageId;
-      if (messageId) pendingMapRef.current.set(tempId, messageId);
-      setMessages(prev => prev.filter(m => m.messageId !== tempId));
-      pendingMapRef.current.delete(tempId);
+      // Update conversation preview
+      const preview = rt === "image" ? "📷 Photo" : rt === "pdf" ? "📄 Document" : rt === "voice" ? "🎤 Voice" : (text || "").slice(0, 80);
+      await updateDoc(convRef, {
+        lastMessage: { text: preview, senderId: employeeId, senderName: employeeName, messageType: rt, sentAt: serverTimestamp() },
+        updatedAt: serverTimestamp(),
+      });
+      // Fire backend for FCM push + email ONLY (non-blocking)
+      apiFetch("/direct-message/notify", {
+        method: "POST",
+        body: JSON.stringify({ toEmployeeId: selectedPerson.employeeId, text: text || "", messageType: rt }),
+      }).catch(() => { });
     } catch (err) {
       console.error("send:", err);
       pendingMapRef.current.delete(tempId);
@@ -908,6 +935,22 @@ export default function DirectMessagesPage() {
                     <span className="dm-pill mono">{selectedPerson.employeeId}</span>
                   </div>
                 </div>
+
+                {/* Audio Call button */}
+                <button
+                  onClick={() => {
+                    const cid = convId(employeeId, selectedPerson.employeeId);
+                    const socket = (typeof window !== "undefined") ? require("../../../lib/coworkSocket").getCoworkSocket(employeeId) : null;
+                    if (socket) socket.emit("call_invite", { toEmployeeId: selectedPerson.employeeId, fromEmployeeId: employeeId, fromName: employeeName, convId: cid });
+                    router.push(`/coworking/audio-call/${cid}`);
+                  }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, border: "1.5px solid #DCFCE7", background: "#F0FDF4", color: "#16A34A", cursor: "pointer", flexShrink: 0 }}
+                  title="Audio call"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 8.63 19.79 19.79 0 01.1 4.02 2 2 0 012.08 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 9.91a16 16 0 006.18 6.18l1.48-1.48a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
+                  </svg>
+                </button>
 
                 {/* Request button */}
                 <button onClick={() => {

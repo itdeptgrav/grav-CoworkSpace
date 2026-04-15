@@ -174,7 +174,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
         ? msg.error ? "#fee2e2"
             : msg.sending ? "rgba(37,99,235,0.55)"
                 : "#2563eb"
-        : "#F1F3F4";
+        : "#FFFFFF";
 
     const bubbleColor = isMe
         ? msg.error ? "#991b1b"
@@ -182,8 +182,8 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
         : "#202124";
 
     const bubbleRadius = isMe
-        ? "18px 18px 4px 18px"
-        : "18px 18px 18px 4px";
+        ? "18px 4px 18px 18px"
+        : "4px 18px 18px 18px";
 
     const bubbleBorder = msg.error ? "1.5px solid #fca5a5" : "none";
 
@@ -209,7 +209,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
                 display: "flex",
                 flexDirection: "column",
                 gap: 3,
-                maxWidth: "65%",
+                maxWidth: "75%",
                 alignItems: isMe ? "flex-end" : "flex-start",
             }}>
                 {/* Sender name (others only) */}
@@ -221,7 +221,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
 
                 {/* Bubble */}
                 <div style={{
-                    padding: "9px 14px",
+                    padding: "8px 12px 7px",
                     background: bubbleBg,
                     color: bubbleColor,
                     borderRadius: bubbleRadius,
@@ -232,9 +232,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
                     transition: "background 0.25s, opacity 0.25s",
                     opacity: msg.sending ? 0.82 : 1,
                     maxWidth: "100%",
-                    boxShadow: isMe && !msg.error
-                        ? "0 1px 4px rgba(37,99,235,0.18)"
-                        : "0 1px 3px rgba(0,0,0,0.06)",
+                    boxShadow: isMe && !msg.error ? "0 1px 4px rgba(37,99,235,0.18)" : "none",
                 }}>
                     {/* Attachments */}
                     {msg.attachments?.map((att, i) => (

@@ -33,8 +33,11 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
-, "app/dashboard/inventory/products/raw-items/raw-items-view/components/AddStockPopup.js", "app/accountant/sales/customers/components/Customers.js"  ],
+    ".next/dev/types/**/*.ts",
+    "app/dashboard/inventory/products/raw-items/raw-items-view/components/AddStockPopup.js",
+    "app/accountant/sales/customers/components/Customers.js",
+    "app/api/audio-call-token/route.js"
+  ],
   "exclude": [
     "node_modules"
   ]
