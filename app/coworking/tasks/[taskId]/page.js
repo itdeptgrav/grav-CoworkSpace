@@ -28,11 +28,12 @@ import ForwardTaskModal from "../../../../components/coworking/tasks/ForwardTask
 import SubmitCompletionModal from "../../../../components/coworking/tasks/SubmitCompletionModal";
 import ReviewCompletionModal from "../../../../components/coworking/tasks/ReviewCompletionModal";
 import { getFullTask, deleteTask, getDailyReports, getTaskChat } from "../../../../lib/mediaUploadApi";
+import { taskForwardApi } from "../../../../lib/taskForwardApi";
 import { getCoworkSocket } from "../../../../lib/coworkSocket";
 import { firebaseAuth } from "../../../../lib/coworkFirebase";
 
 import { firebaseDb } from "../../../../lib/coworkFirebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, setDoc, addDoc, updateDoc, onSnapshot, query, orderBy, limit, serverTimestamp, increment } from "firebase/firestore";
 
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -49,10 +50,24 @@ async function apiFetch(path, opts = {}) {
 
 const STATUS_COLORS = {
     open: { c: "#80868b", bg: "#f1f3f4", label: "Open" },
+    pending_deadline_approval: { c: "#b06000", bg: "#fef7e0", label: "⏳ Deadline Pending" },
+    deadline_approved: { c: "#059669", bg: "#ECFDF5", label: "✓ Deadline Approved" },
     confirmed: { c: "#1a73e8", bg: "#e8f0fe", label: "Confirmed" },
     in_progress: { c: "#b06000", bg: "#fef7e0", label: "In Progress" },
     done: { c: "#1e8e3e", bg: "#e6f4ea", label: "Done ✓" },
 };
+// Helper for numeric priority display (1–10)
+function getPriChip(priority) {
+    const n = typeof priority === "number" ? priority : Number(priority);
+    if (!isNaN(n) && n > 0) {
+        const c = n >= 8 ? "#d93025" : n >= 5 ? "#b06000" : "#1e8e3e";
+        const bg = n >= 8 ? "#fce8e6" : n >= 5 ? "#fef7e0" : "#e6f4ea";
+        return { c, bg, label: `P${n}` };
+    }
+    // Fallback for legacy string priorities
+    const map = { high: { c: "#d93025", bg: "#fce8e6", label: "High" }, medium: { c: "#b06000", bg: "#fef7e0", label: "Medium" }, low: { c: "#1e8e3e", bg: "#e6f4ea", label: "Low" } };
+    return map[priority] || map.medium;
+}
 const COMPLETION_STATUS = {
     submitted: { label: "⏳ Awaiting TL Review", c: "#b06000", bg: "#fef7e0" },
     tl_approved: { label: "✅ TL Approved · CEO Review", c: "#1a73e8", bg: "#e8f0fe" },
@@ -68,15 +83,30 @@ export default function TaskDetailPage() {
 
     const [task, setTask] = useState(null);
     const [taskLoading, setTaskLoading] = useState(true);
-    const [chatMsgs, setChatMsgs] = useState([]); // THIS task's chat only
+    const [chatMsgs, setChatMsgs] = useState([]);
+    const [draftMsgs, setDraftMsgs] = useState([]);
     const [reports, setReports] = useState([]);
     const [reportsLoading, setReportsLoading] = useState(false);
-    const [tab, setTab] = useState("chat");
+    const [tab, setTab] = useState("chat"); // "chat" | "reports"
+    const [chatTab, setChatTab] = useState("draft"); // "draft" | "normal"
     const [activeModal, setActiveModal] = useState(null);
     const [showDelete, setShowDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [actionBusy, setActionBusy] = useState(false);
+    // Deadline proposal state
+    const [propDate, setPropDate] = useState("");
+    const [propTime, setPropTime] = useState("09:00");
+    const [proposing, setProposing] = useState(false);
+    const [propError, setPropError] = useState("");
+    // Deadline approval state (for creator)
+    const [approving, setApproving] = useState(false);
+    const [rejectReason, setRejectReason] = useState("");
+    const [showRejectInput, setShowRejectInput] = useState(false);
+    // Draft chat send state
+    const [draftText, setDraftText] = useState("");
+    const [sendingDraft, setSendingDraft] = useState(false);
     const messagesEndRef = useRef(null);
+    const draftEndRef = useRef(null);
 
     const isCEO = role === "ceo";
     const isTL = role === "tl";
@@ -86,9 +116,14 @@ export default function TaskDetailPage() {
         if (!taskId) return;
         setTaskLoading(true);
         try {
-            const t = await taskForwardApi.getTaskDetails(taskId); // Changed from getFullTask
+            const data = await taskForwardApi.getTaskDetails(taskId);
+            const t = data.task || data;
             setTask(t);
             setChatMsgs(t.chatMessages || []);
+            setDraftMsgs(t.draftChatMessages || []);
+            // Auto-select chat tab: normal if task is post-confirmation, draft otherwise
+            const isPostConfirm = ["confirmed", "in_progress", "done"].includes(t.status);
+            setChatTab(isPostConfirm ? "normal" : "draft");
         } catch (e) { console.error(e); }
         finally { setTaskLoading(false); }
     }, [taskId]);
@@ -97,7 +132,8 @@ export default function TaskDetailPage() {
         if (!taskId) return;
         setReportsLoading(true);
         try {
-            setReports(await taskForwardApi.getDailyReports(taskId)); // Changed from getDailyReports
+            const data = await taskForwardApi.getDailyReports(taskId);
+            setReports(data.reports || data || []);
         }
         catch { setReports([]); }
         finally { setReportsLoading(false); }
@@ -107,7 +143,7 @@ export default function TaskDetailPage() {
     useEffect(() => { loadTask(); }, [loadTask]);
     useEffect(() => { if (tab === "reports") loadReports(); }, [tab, loadReports]);
 
-    // Socket — join room "task_chat_T001" — ISOLATED from other tasks
+    // Socket — normal task chat
     useEffect(() => {
         if (!taskId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
@@ -122,7 +158,109 @@ export default function TaskDetailPage() {
         return () => socket.off("task_chat_message", handler);
     }, [taskId, employeeId]);
 
+    // Firestore real-time listener for draft_chat — gives both users live updates
+    useEffect(() => {
+        if (!taskId || !employeeId) return;
+        // Firestore onSnapshot is the primary source for draft messages
+        const draftRef = collection(firebaseDb, "cowork_tasks", taskId, "draft_chat");
+        const draftQ = query(draftRef, orderBy("createdAt", "asc"), limit(100));
+        const unsubDraft = onSnapshot(draftQ, snap => {
+            const msgs = snap.docs.map(d => ({
+                ...d.data(), id: d.id,
+                createdAt: d.data().createdAt?.seconds
+                    ? new Date(d.data().createdAt.seconds * 1000).toISOString()
+                    : (d.data().createdAt || new Date().toISOString()),
+                temp: false,
+            }));
+            setDraftMsgs(msgs);
+        }, err => console.error("draft_chat listener:", err));
+
+        // Socket — deadline status changes to reload task
+        const socket = getCoworkSocket(employeeId);
+        const deadlineApprovedHandler = ({ taskId: tid }) => { if (tid === taskId) loadTask(); };
+        const deadlineProposedHandler = ({ taskId: tid }) => { if (tid === taskId) loadTask(); };
+        const deadlineRejectedHandler = ({ taskId: tid }) => { if (tid === taskId) loadTask(); };
+        socket.on("deadline_approved", deadlineApprovedHandler);
+        socket.on("deadline_proposed", deadlineProposedHandler);
+        socket.on("deadline_rejected", deadlineRejectedHandler);
+
+        return () => {
+            unsubDraft();
+            socket.off("deadline_approved", deadlineApprovedHandler);
+            socket.off("deadline_proposed", deadlineProposedHandler);
+            socket.off("deadline_rejected", deadlineRejectedHandler);
+        };
+    }, [taskId, employeeId, loadTask]);
+
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs]);
+    useEffect(() => { draftEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [draftMsgs]);
+
+    // ── Propose deadline (employee sets date+time, submits for approval) ─────
+    const handleProposeDeadline = async () => {
+        if (!propDate) { setPropError("Please select a date."); return; }
+        setPropError("");
+        setProposing(true);
+        try {
+            const proposedDate = `${propDate}T${propTime || "09:00"}`;
+            // Get current worked seconds from timer sessions in Firestore
+            const timerRef = collection(firebaseDb, "cowork_task_timers", employeeId, "sessions");
+            const timerSnap = await import("firebase/firestore").then(fb => fb.getDocs(timerRef));
+            const sess = timerSnap.docs.find(d => d.id === taskId);
+            const workedSecs = sess ? (sess.data().totalSeconds || 0) : 0;
+            await taskForwardApi.proposeDeadline(taskId, proposedDate, workedSecs);
+            await loadTask();
+        } catch (err) { setPropError(err.message); }
+        finally { setProposing(false); }
+    };
+
+    // ── Approve or reject deadline (task creator only) ────────────────────────
+    const handleApproveDeadline = async (approved) => {
+        if (!approved && !rejectReason.trim()) {
+            setShowRejectInput(true);
+            return;
+        }
+        setApproving(true);
+        try {
+            await taskForwardApi.approveDeadline(taskId, approved, rejectReason.trim());
+            setRejectReason("");
+            setShowRejectInput(false);
+            await loadTask();
+        } catch (err) { alert(err.message); }
+        finally { setApproving(false); }
+    };
+
+    // ── Send draft chat message ───────────────────────────────────────────────
+    const handleSendDraftChat = async () => {
+        const text = draftText.trim();
+        if (!text) return;
+        const tempId = "temp_draft_" + Date.now();
+        setDraftMsgs(prev => [...prev, {
+            messageId: tempId, senderId: employeeId, senderName: employeeName,
+            text, messageType: "text", temp: true, createdAt: new Date().toISOString(),
+        }]);
+        setDraftText("");
+        setSendingDraft(true);
+        try {
+            // Write directly to Firestore — onSnapshot gives real-time to both users
+            const messageId = crypto.randomUUID();
+            const draftRef = collection(firebaseDb, "cowork_tasks", taskId, "draft_chat");
+            await setDoc(doc(draftRef, messageId), {
+                messageId, taskId,
+                senderId: employeeId, senderName: employeeName,
+                text, messageType: "text",
+                createdAt: serverTimestamp(),
+            });
+            await updateDoc(doc(firebaseDb, "cowork_tasks", taskId), {
+                draftChatMessageCount: increment(1),
+                updatedAt: serverTimestamp(),
+            });
+            setDraftMsgs(prev => prev.filter(m => m.messageId !== tempId));
+        } catch (err) {
+            console.error("draft send:", err);
+            setDraftMsgs(prev => prev.map(m => m.messageId === tempId ? { ...m, error: true, temp: false } : m));
+        }
+        finally { setSendingDraft(false); }
+    };
 
     const handleAction = async (type, targetId) => {
         if (type === "add_subtask") { setActiveModal({ type: "add_subtask", taskId: targetId || taskId }); return; }
@@ -259,10 +397,11 @@ export default function TaskDetailPage() {
                             {task.depth > 0 && <span style={s.chip("#f1f3f4", "#80868b")}>Level {task.depth}</span>}
                             {task.isRoot && <span style={s.chip("#e8f0fe", "#1a73e8")}>Root Task</span>}
                             <span style={s.chip(statusInfo.bg, statusInfo.c)}>{statusInfo.label}</span>
-                            <span style={s.chip(task.priority === "high" ? "#fce8e6" : task.priority === "medium" ? "#fef7e0" : "#e6f4ea",
-                                task.priority === "high" ? "#d93025" : task.priority === "medium" ? "#b06000" : "#1e8e3e")}>
-                                ⚡ {task.priority || "medium"}
-                            </span>
+                            {(() => {
+                                const pc = getPriChip(task.priority); return (
+                                    <span style={s.chip(pc.bg, pc.c)}>⚡ {pc.label}</span>
+                                );
+                            })()}
                         </div>
 
                         {/* Title */}
@@ -320,13 +459,145 @@ export default function TaskDetailPage() {
                             </div>
                         )}
 
-                        {/* Action buttons */}
+                        {/* ── DEADLINE STEP-FLOW ── */}
                         <div style={s.actionSection}>
-                            {isAssignee && !isConfirmed && task.status === "open" && (
-                                <button disabled={actionBusy} onClick={() => handleAction("confirm")} style={s.actionBtn("confirm")}>✓ Confirm Receipt</button>
+                            {isAssignee && !isConfirmed && (() => {
+                                // PRIORITY: if dueDate set and not pending approval → always show Confirm
+                                const hasDueDate = !!task.dueDate;
+                                const isPending = task.status === "pending_deadline_approval";
+                                const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
+                                const deadlinePassed = deadlineMs && deadlineMs < Date.now();
+                                const passedStr = (() => {
+                                    if (!deadlinePassed || !deadlineMs) return "";
+                                    const diff = Math.abs(Math.floor((Date.now() - deadlineMs) / 60000));
+                                    if (diff < 60) return `${diff}m ago`;
+                                    const h = Math.floor(diff / 60);
+                                    return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+                                })();
+
+                                if (hasDueDate && !isPending) return (
+                                    <div style={{ background: deadlinePassed ? "#FEF2F2" : "#F0FDF4", border: `1.5px solid ${deadlinePassed ? "#FECDD3" : "#BBF7D0"}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                                            <span style={{ width: 20, height: 20, borderRadius: "50%", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", border: `2px solid ${deadlinePassed ? "#EF4444" : "#16A34A"}`, color: deadlinePassed ? "#EF4444" : "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{deadlinePassed ? "!" : "✓"}</span>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: deadlinePassed ? "#991B1B" : "#166534" }}>
+                                                {deadlinePassed ? "⚠️ Deadline Passed" : "✓ Deadline Approved"}
+                                            </span>
+                                        </div>
+                                        {task.dueDate && <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 9px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", color: deadlinePassed ? "#B91C1C" : "#166534" }}>
+                                            📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                            {deadlinePassed && <span style={{ opacity: 0.8, marginLeft: 6 }}>· passed {passedStr}</span>}
+                                        </div>}
+                                        {deadlinePassed && <div style={{ fontSize: 12, color: "#B91C1C", background: "#FEF2F2", borderRadius: 7, padding: "6px 9px", marginBottom: 8, lineHeight: 1.5 }}>
+                                            Deadline has passed. Confirm receipt and start working, or request a new deadline.
+                                        </div>}
+                                        <button disabled={actionBusy} onClick={() => handleAction("confirm")}
+                                            style={{ ...s.actionBtn("confirm"), display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                                            ✓ Confirm &amp; Accept Task
+                                        </button>
+                                    </div>
+                                );
+
+                                // Step 1: no dueDate yet — propose
+                                if (task.status === "open" || task.status === "deadline_rejected") return (
+                                    <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                                            <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>Set Your Deadline</span>
+                                        </div>
+                                        {task.deadlineProposalRejected && <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7, padding: "8px 10px", marginBottom: 10, fontSize: 12, color: "#991B1B" }}>
+                                            ❌ <strong>Rejected:</strong> {task.deadlineRejectionReason || "Please propose a new deadline."}
+                                        </div>}
+                                        {propError && <div style={{ color: "#d93025", fontSize: 12, marginBottom: 8 }}>{propError}</div>}
+                                        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                                            <div style={{ flex: 1 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Date</label>
+                                                <input type="date" value={propDate} min={new Date().toISOString().split("T")[0]} onChange={e => setPropDate(e.target.value)}
+                                                    style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                                            </div>
+                                            <div style={{ width: 100, flexShrink: 0 }}>
+                                                <label style={{ fontSize: 11, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Time</label>
+                                                <input type="time" value={propTime} onChange={e => setPropTime(e.target.value)}
+                                                    style={{ width: "100%", padding: "8px 6px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                                            </div>
+                                        </div>
+                                        <button disabled={!propDate || proposing} onClick={handleProposeDeadline}
+                                            style={{ width: "100%", padding: "9px", borderRadius: 8, border: "1.5px solid #BFDBFE", background: !propDate || proposing ? "#F1F5F9" : "#EFF6FF", color: !propDate || proposing ? "#94A3B8" : "#1D4ED8", fontSize: 13, fontWeight: 700, cursor: !propDate || proposing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                            {proposing ? "Submitting…" : "📅 Submit Deadline for Approval"}
+                                        </button>
+                                        <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>💬 Use Draft Chat to discuss</div>
+                                    </div>
+                                );
+
+                                // Step 2: waiting for approval
+                                if (task.status === "pending_deadline_approval") return (
+                                    <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                            <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#FEF3C7", border: "2px solid #D97706", color: "#D97706", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</span>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
+                                        </div>
+                                        {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", background: "#FEF9C3", padding: "5px 9px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
+                                            📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                        </div>}
+                                        <div style={{ fontSize: 11, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
+                                    </div>
+                                );
+
+                                return null;
+                            })()}
+
+                            {/* Creator: approve/reject panel */}
+                            {task.status === "pending_deadline_approval" && isCreator && (
+                                <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#9A3412", marginBottom: 8 }}>
+                                        {["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") ? "📅 Deadline Extension Request" : "📋 Deadline Proposal — Needs Your Approval"}
+                                    </div>
+                                    {task.proposedDeadline && <div style={{ fontSize: 13, color: "#78350F", marginBottom: 10 }}>
+                                        Proposed by <strong>{task.proposedDeadlineByName}</strong>:<br />
+                                        <span style={{ fontWeight: 700 }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                                        {task.dueDate && ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") && (
+                                            <span style={{ color: "#9CA3AF", fontSize: 11, marginLeft: 6 }}>(was: {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short" })})</span>
+                                        )}
+                                    </div>}
+                                    {!showRejectInput ? (
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                            <button onClick={() => handleApproveDeadline(true)} disabled={approving}
+                                                style={{ flex: 1, padding: "8px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: approving ? 0.5 : 1 }}>
+                                                {approving ? "…" : "✓ Approve"}
+                                            </button>
+                                            <button onClick={() => setShowRejectInput(true)} disabled={approving}
+                                                style={{ flex: 1, padding: "8px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                                ✕ Reject
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                                                placeholder="Give a reason for rejection (required)…"
+                                                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 12, fontFamily: "inherit", resize: "vertical", minHeight: 56, outline: "none", boxSizing: "border-box" }} />
+                                            <div style={{ display: "flex", gap: 8, marginTop: 7 }}>
+                                                <button onClick={() => handleApproveDeadline(false)} disabled={!rejectReason.trim() || approving}
+                                                    style={{ flex: 1, padding: "8px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !rejectReason.trim() || approving ? 0.5 : 1 }}>
+                                                    {approving ? "…" : "Send Rejection"}
+                                                </button>
+                                                <button onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+                                                    style={{ padding: "8px 14px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             )}
-                            {isAssignee && isConfirmed && !isStarted && (
+
+                            {/* Post-confirm actions */}
+                            {isAssignee && isConfirmed && !isStarted && task.status !== "pending_deadline_approval" && (
                                 <button disabled={actionBusy} onClick={() => handleAction("start")} style={s.actionBtn("start")}>▶ Start Working</button>
+                            )}
+                            {task.status === "pending_deadline_approval" && isAssignee && !isStarted && (
+                                <div style={{ padding: "9px 12px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 12, color: "#92400E", display: "flex", alignItems: "center", gap: 6 }}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                                    <strong>Work paused</strong> — waiting for new deadline approval
+                                </div>
                             )}
                             {isAssignee && task.status === "in_progress" && (
                                 <button onClick={() => setActiveModal({ type: "report", taskId })} style={s.actionBtn("report")}>📊 Submit Daily Report</button>
@@ -458,11 +729,10 @@ export default function TaskDetailPage() {
 
                 {/* ══ RIGHT PANEL — isolated chat + reports ══ */}
                 <div style={s.rightPanel}>
-                    {/* Tab bar */}
+                    {/* Outer tab bar: Chat | Reports */}
                     <div style={s.tabBar}>
                         <button onClick={() => setTab("chat")} style={{ ...s.tabBtn2, ...(tab === "chat" ? s.tabActive2 : {}) }}>
                             💬 Chat <span style={s.chatNote}>(This task only)</span>
-                            {chatMsgs.length > 0 && <span style={s.tabCount}>{chatMsgs.length}</span>}
                         </button>
                         <button onClick={() => setTab("reports")} style={{ ...s.tabBtn2, ...(tab === "reports" ? s.tabActive2 : {}) }}>
                             📊 Daily Reports
@@ -470,38 +740,107 @@ export default function TaskDetailPage() {
                         </button>
                     </div>
 
-                    {/* CHAT TAB — completely isolated, no overlap with other tasks */}
-                    {tab === "chat" && (
-                        <>
-                            <div style={s.chatInfo}>
-                                <span style={{ fontSize: 12, color: "#5f6368" }}>
-                                    📍 <strong>{task.title} ({taskId})</strong> — chat is private to this task.
-                                    {task.path?.length > 0 && (
-                                        <span style={{ color: "#9aa0a6" }}> · Part of: {task.path.map(p => p.title).join(" › ")}</span>
-                                    )}
-                                </span>
-                            </div>
+                    {/* CHAT TAB */}
+                    {tab === "chat" && (() => {
+                        const isPreConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(task.status);
+                        const isPostConfirmed = ["confirmed", "in_progress", "done"].includes(task.status);
+                        return (
+                            <>
+                                {/* Draft / Normal sub-tabs */}
+                                <div style={{ display: "flex", borderBottom: "1px solid #e8eaed", background: "#fff", flexShrink: 0 }}>
+                                    <button onClick={() => setChatTab("draft")}
+                                        style={{ flex: 1, padding: "9px 12px", border: "none", background: "none", fontFamily: "inherit", fontSize: 12, fontWeight: chatTab === "draft" ? 700 : 500, color: chatTab === "draft" ? "#D97706" : "#9aa0a6", borderBottom: `2px solid ${chatTab === "draft" ? "#D97706" : "transparent"}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                                        ✏️ Draft Chat
+                                        {isPreConfirmed && <span style={{ fontSize: 9, fontWeight: 700, background: "#FEF3C7", color: "#D97706", padding: "1px 5px", borderRadius: 99, border: "1px solid #FDE68A" }}>ACTIVE</span>}
+                                        {isPostConfirmed && <span style={{ fontSize: 9, color: "#9aa0a6" }}>read-only</span>}
+                                        {draftMsgs.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, background: chatTab === "draft" ? "#FEF3C7" : "#f1f3f4", color: chatTab === "draft" ? "#D97706" : "#80868b", padding: "1px 5px", borderRadius: 99 }}>{draftMsgs.length}</span>}
+                                    </button>
+                                    <button onClick={() => isPostConfirmed && setChatTab("normal")} disabled={isPreConfirmed}
+                                        style={{ flex: 1, padding: "9px 12px", border: "none", background: "none", fontFamily: "inherit", fontSize: 12, fontWeight: chatTab === "normal" ? 700 : 500, color: isPreConfirmed ? "#d3d3d3" : (chatTab === "normal" ? "#1a73e8" : "#9aa0a6"), borderBottom: `2px solid ${chatTab === "normal" ? "#1a73e8" : "transparent"}`, cursor: isPreConfirmed ? "not-allowed" : "pointer", opacity: isPreConfirmed ? 0.45 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                                        💬 Normal Chat
+                                        {isPreConfirmed && <span style={{ fontSize: 9, color: "#d3d3d3" }}>🔒 locked</span>}
+                                        {chatMsgs.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, background: chatTab === "normal" ? "#e8f0fe" : "#f1f3f4", color: chatTab === "normal" ? "#1a73e8" : "#80868b", padding: "1px 5px", borderRadius: 99 }}>{chatMsgs.length}</span>}
+                                    </button>
+                                </div>
 
-                            <div style={s.chatArea}>
-                                {chatMsgs.length === 0 ? (
-                                    <div style={s.chatEmpty}>
-                                        <div style={{ fontSize: 48, marginBottom: 12 }}>💬</div>
-                                        <div style={{ fontWeight: 500, color: "#202124", marginBottom: 6 }}>No messages yet in this task</div>
-                                        <div style={{ fontSize: 13, color: "#80868b" }}>Messages here are isolated to <strong>{task.title} ({taskId})</strong> only.</div>
-                                    </div>
-                                ) : (
-                                    groupedMsgs.map((msg, i) => (
-                                        <MessageBubble key={msg.messageId || i} msg={msg} isMe={msg.senderId === employeeId} showSender={msg.showSender} showAvatar={msg.showAvatar} />
-                                    ))
+                                {/* DRAFT chat view */}
+                                {chatTab === "draft" && (
+                                    <>
+                                        <div style={s.chatInfo}>
+                                            <span style={{ fontSize: 12, color: "#b06000" }}>
+                                                ✏️ <strong>Draft Chat</strong> — {isPreConfirmed ? "Discuss deadline & task details before confirming." : "Read-only. Task has been confirmed."}
+                                            </span>
+                                        </div>
+                                        <div style={s.chatArea}>
+                                            {draftMsgs.length === 0 ? (
+                                                <div style={s.chatEmpty}>
+                                                    <div style={{ fontSize: 40, marginBottom: 10 }}>✏️</div>
+                                                    <div style={{ fontWeight: 500, color: "#202124", marginBottom: 6 }}>No draft messages yet</div>
+                                                    <div style={{ fontSize: 13, color: "#80868b" }}>{isPreConfirmed ? "Discuss the task and deadline here." : "No pre-confirmation discussion."}</div>
+                                                </div>
+                                            ) : (
+                                                draftMsgs.map((msg, i) => {
+                                                    const isMe = msg.senderId === employeeId;
+                                                    const isSystem = msg.messageType === "system";
+                                                    if (isSystem) return <div key={msg.messageId || i} style={{ textAlign: "center", padding: "4px 12px", fontSize: 11, color: "#9aa0a6", fontStyle: "italic" }}>{msg.text}</div>;
+                                                    const prevMsg = i > 0 ? draftMsgs[i - 1] : null;
+                                                    const showSender = !prevMsg || prevMsg.senderId !== msg.senderId;
+                                                    return <MessageBubble key={msg.messageId || i} msg={msg} isMe={isMe} showSender={showSender} showAvatar={showSender} />;
+                                                })
+                                            )}
+                                            <div ref={draftEndRef} />
+                                        </div>
+                                        {isPreConfirmed ? (
+                                            <div style={{ background: "#fff", borderTop: "1px solid #e8eaed", padding: "8px 12px", flexShrink: 0 }}>
+                                                <div style={{ display: "flex", gap: 8 }}>
+                                                    <input value={draftText} onChange={e => setDraftText(e.target.value)}
+                                                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendDraftChat(); } }}
+                                                        placeholder="Draft message…"
+                                                        style={{ flex: 1, padding: "9px 12px", border: "1.5px solid #e8eaed", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", background: "#f8f9fa" }} />
+                                                    <button onClick={handleSendDraftChat} disabled={!draftText.trim() || sendingDraft}
+                                                        style={{ padding: "9px 16px", borderRadius: 8, border: "none", background: !draftText.trim() || sendingDraft ? "#e8eaed" : "#f9ab00", color: !draftText.trim() || sendingDraft ? "#9aa0a6" : "#000", fontWeight: 600, cursor: !draftText.trim() || sendingDraft ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 12 }}>
+                                                        {sendingDraft ? "…" : "Send"}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div style={{ background: "#FFF8E1", borderTop: "1px solid #FDE68A", padding: "8px 14px", fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                                                🔒 Draft chat is read-only after task confirmation
+                                            </div>
+                                        )}
+                                    </>
                                 )}
-                                <div ref={messagesEndRef} />
-                            </div>
 
-                            <div style={{ background: "#202C33", flexShrink: 0 }}>
-                                <MediaMessageInput onSend={handleSendChat} placeholder={`Message in ${task.title} (${taskId})...`} />
-                            </div>
-                        </>
-                    )}
+                                {/* NORMAL chat view */}
+                                {chatTab === "normal" && (
+                                    <>
+                                        <div style={s.chatInfo}>
+                                            <span style={{ fontSize: 12, color: "#5f6368" }}>
+                                                💬 <strong>{task.title} ({taskId})</strong> — active task chat
+                                            </span>
+                                        </div>
+                                        <div style={s.chatArea}>
+                                            {chatMsgs.length === 0 ? (
+                                                <div style={s.chatEmpty}>
+                                                    <div style={{ fontSize: 48, marginBottom: 12 }}>💬</div>
+                                                    <div style={{ fontWeight: 500, color: "#202124", marginBottom: 6 }}>No messages yet</div>
+                                                    <div style={{ fontSize: 13, color: "#80868b" }}>Chat is open after task confirmation.</div>
+                                                </div>
+                                            ) : (
+                                                groupedMsgs.map((msg, i) => (
+                                                    <MessageBubble key={msg.messageId || i} msg={msg} isMe={msg.senderId === employeeId} showSender={msg.showSender} showAvatar={msg.showAvatar} />
+                                                ))
+                                            )}
+                                            <div ref={messagesEndRef} />
+                                        </div>
+                                        <div style={{ background: "#202C33", flexShrink: 0 }}>
+                                            <MediaMessageInput onSend={handleSendChat} placeholder={`Message in ${task.title}...`} />
+                                        </div>
+                                    </>
+                                )}
+                            </>
+                        );
+                    })()}
 
                     {/* REPORTS TAB */}
                     {tab === "reports" && (

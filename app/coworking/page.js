@@ -12,7 +12,7 @@ import { useCoworkNotifications } from "../../hooks/useCoworkNotifications";
 import { timeAgo } from "../../lib/coworkUtils";
 
 import {
-  collection, doc, updateDoc, serverTimestamp,
+  collection, doc, updateDoc, serverTimestamp, getDoc,
   query, where, orderBy, onSnapshot, setDoc, getDocs, limit,
 } from "firebase/firestore";
 
@@ -891,13 +891,64 @@ export default function Dashboard() {
         [...snapBy.docs, ...snapTo.docs].forEach(d => {
           if (!seen.has(d.id)) { seen.add(d.id); all.push({ ...d.data(), taskId: d.id }); }
         });
+
+        // Fetch parent folders up the chain — TL may create subtasks (assignedBy===TL + parentTaskId set)
+        // or be assigned to subtasks; we need root folders for correct total count
+        const existingIds = new Set(all.map(t => t.taskId));
+        let missingParentIds = [
+          ...new Set(all.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId))
+        ];
+        for (let pass = 0; pass < 2 && missingParentIds.length > 0; pass++) {
+          const parentSnaps = await Promise.all(
+            missingParentIds.map(id => getDoc(doc(collection(firebaseDb, "cowork_tasks"), id)))
+          );
+          const fetched = [];
+          parentSnaps.forEach(d => {
+            if (d.exists() && !existingIds.has(d.id)) {
+              existingIds.add(d.id);
+              const t = { ...d.data(), taskId: d.id };
+              fetched.push(t);
+              all.push(t);
+            }
+          });
+          missingParentIds = [
+            ...new Set(fetched.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId))
+          ];
+        }
       } else {
-        // Employee: ONLY tasks directly assigned to them
+        // Employee: tasks directly assigned to them
         const snap = await getDocs(query(
           collection(firebaseDb, "cowork_tasks"),
           where("assigneeIds", "array-contains", employeeId)
         ));
         snap.forEach(d => all.push({ ...d.data(), taskId: d.id }));
+
+        // Also fetch parent folder tasks up the chain (same as tasks page logic)
+        // so that root folders count correctly in total
+        const existingIds = new Set(all.map(t => t.taskId));
+        let missingParentIds = [
+          ...new Set(all.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId))
+        ];
+
+        // Walk up 2 levels (folder → sub-folder → task)
+        for (let pass = 0; pass < 2 && missingParentIds.length > 0; pass++) {
+          const parentSnaps = await Promise.all(
+            missingParentIds.map(id => getDoc(doc(collection(firebaseDb, "cowork_tasks"), id)))
+          );
+          const fetched = [];
+          parentSnaps.forEach(d => {
+            if (d.exists() && !existingIds.has(d.id)) {
+              existingIds.add(d.id);
+              const t = { ...d.data(), taskId: d.id };
+              fetched.push(t);
+              all.push(t);
+            }
+          });
+          // Collect next level of missing parents
+          missingParentIds = [
+            ...new Set(fetched.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId))
+          ];
+        }
       }
       // Sort by createdAt descending in JS — no composite index needed
       all.sort((a, b) => {
@@ -918,16 +969,19 @@ export default function Dashboard() {
   if (loading || !user) return null;
 
   /* ── Computed values ── */
-  const total = tasks.length;
-  const done = tasks.filter(t => t.status === "done").length;
-  const inprog = tasks.filter(t => t.status === "in_progress").length;
-  const openT = tasks.filter(t => t.status === "open").length;
-  const review = tasks.filter(t => ["submitted", "tl_approved"].includes(t.completionStatus)).length;
+  // Root-only: normal tasks + folder tasks, excludes subtasks (anything with a parentTaskId)
+  const nonFolderTasks = tasks.filter(t => !t.parentTaskId);
+  const total = nonFolderTasks.length;
+  const done = nonFolderTasks.filter(t => t.status === "done").length;
+  const inprog = nonFolderTasks.filter(t => t.status === "in_progress").length;
+  const openT = nonFolderTasks.filter(t => t.status === "open").length;
+  const review = nonFolderTasks.filter(t => ["submitted", "tl_approved"].includes(t.completionStatus)).length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  /* ALL tasks directly assigned to or by me — no depth restriction */
+  /* ALL tasks directly assigned to or by me — no depth restriction, no folders */
   const myTasks = tasks.filter(t => {
     if (t.status === "done") return false;
+    if (t.isFolder === true) return false;
     return t.assignedBy === employeeId || (t.assigneeIds || []).includes(employeeId);
   });
 

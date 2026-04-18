@@ -10,165 +10,36 @@
 import React from "react";
 import { useState, useEffect, useRef } from "react";
 import { createTask, listAllEmployees, uploadImage, uploadPDF } from "../../../lib/mediaUploadApi";
-import DeadlineBadge from "./DeadlineBadge";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { collection, doc, setDoc, updateDoc, serverTimestamp, increment } from "firebase/firestore";
 
 // ── Empty subtask row template ────────────────────────────────────────────────
 const emptySubtask = () => ({
-    title: "", description: "", notes: "", dueDate: "", priority: "medium", assigneeIds: [],
+    title: "", description: "", notes: "", priority: 5, assigneeIds: [],
 });
 
 
-// ── DateTimePicker — professional date+time selector ──────────────────────────
-function DateTimePicker({ value, onChange, label = "Deadline", style: extraStyle = {} }) {
-    // value is stored as "YYYY-MM-DDTHH:mm" (datetime-local format)
-    const [showPicker, setShowPicker] = React.useState(false);
-    const [date, setDate] = React.useState("");
-    const [time, setTime] = React.useState("09:00");
-    const pickerRef = React.useRef(null);
-
-    // Parse incoming value
-    React.useEffect(() => {
-        if (value) {
-            const [d, t] = value.includes("T") ? value.split("T") : [value, "09:00"];
-            setDate(d || "");
-            setTime(t?.slice(0, 5) || "09:00");
-        } else {
-            setDate(""); setTime("09:00");
-        }
-    }, [value]);
-
-    // Close on outside click
-    React.useEffect(() => {
-        if (!showPicker) return;
-        const handler = (e) => {
-            if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowPicker(false);
-        };
-        document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
-    }, [showPicker]);
-
-    const commit = (d, t) => {
-        if (d) onChange(t ? `${d}T${t}` : d);
-        else onChange("");
-    };
-
-    const clear = (e) => { e.stopPropagation(); onChange(""); setShowPicker(false); };
-
-    // Format display
-    const displayText = (() => {
-        if (!value) return null;
-        const dt = new Date(value);
-        if (isNaN(dt.getTime())) return value;
-        const dateStr = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-        const timeStr = dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
-        return `${dateStr} · ${timeStr}`;
-    })();
-
-    // Quick time presets
-    const TIME_PRESETS = [
-        { label: "9:00 AM", value: "09:00" }, { label: "10:00 AM", value: "10:00" },
-        { label: "12:00 PM", value: "12:00" }, { label: "2:00 PM", value: "14:00" },
-        { label: "5:00 PM", value: "17:00" }, { label: "6:00 PM", value: "18:00" },
-        { label: "EOD", value: "23:59" },
-    ];
-
-    const FONT = "'Inter','DM Sans',-apple-system,sans-serif";
-
+// ── PrioritySlider — 1–10 number selector ────────────────────────────────────
+function PrioritySlider({ value, onChange }) {
+    const num = Number(value) || 5;
+    const color = num >= 8 ? "#991B1B" : num >= 5 ? "#92400E" : "#166534";
+    const bg = num >= 8 ? "#FFF1F2" : num >= 5 ? "#FFFBEB" : "#F0FDF4";
+    const border = num >= 8 ? "#FECDD3" : num >= 5 ? "#FDE68A" : "#BBF7D0";
+    const label = num >= 8 ? "High" : num >= 5 ? "Medium" : "Low";
     return (
-        <div style={{ position: "relative", ...extraStyle }} ref={pickerRef}>
-            {/* Trigger button */}
-            <button type="button"
-                onClick={() => setShowPicker(p => !p)}
-                style={{
-                    width: "100%", display: "flex", alignItems: "center", gap: 8,
-                    padding: "8px 11px", border: `1.5px solid ${showPicker ? "#3B82F6" : "#E2E8F0"}`,
-                    borderRadius: 8, background: "#fff", cursor: "pointer", fontFamily: FONT,
-                    boxShadow: showPicker ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
-                    transition: "all 0.15s", textAlign: "left",
-                }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={value ? "#3B82F6" : "#94A3B8"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-                <span style={{ flex: 1, fontSize: 13, color: value ? "#0F172A" : "#94A3B8", fontWeight: value ? 500 : 400 }}>
-                    {displayText || "Set date & time"}
-                </span>
-                {value && (
-                    <span onClick={clear} style={{ fontSize: 14, color: "#94A3B8", lineHeight: 1, padding: "0 2px", cursor: "pointer" }}>×</span>
-                )}
-            </button>
-
-            {/* Picker dropdown */}
-            {showPicker && (
-                <div style={{
-                    position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 9999,
-                    background: "#fff", borderRadius: 12, padding: 16,
-                    boxShadow: "0 12px 40px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.06)",
-                    width: 280, fontFamily: FONT,
-                    animation: "dtp-pop 0.12s cubic-bezier(0.4,0,0.2,1)",
-                }}>
-                    <style>{`@keyframes dtp-pop { from { opacity:0; transform:translateY(-4px) scale(0.97); } to { opacity:1; transform:translateY(0) scale(1); } }`}</style>
-
-                    {/* Date section */}
-                    <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Date</div>
-                        <input type="date"
-                            value={date}
-                            min={new Date().toISOString().split("T")[0]}
-                            onChange={e => { setDate(e.target.value); commit(e.target.value, time); }}
-                            style={{
-                                width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0",
-                                borderRadius: 7, fontSize: 13, color: "#0F172A", fontFamily: FONT,
-                                outline: "none", boxSizing: "border-box", cursor: "pointer",
-                            }}
-                        />
-                    </div>
-
-                    {/* Time section */}
-                    <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Time</div>
-                        {/* Preset buttons */}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
-                            {TIME_PRESETS.map(p => (
-                                <button key={p.value} type="button"
-                                    onClick={() => { setTime(p.value); commit(date, p.value); }}
-                                    style={{
-                                        padding: "4px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                                        border: `1.5px solid ${time === p.value ? "#3B82F6" : "#E2E8F0"}`,
-                                        background: time === p.value ? "#EFF6FF" : "#F8FAFC",
-                                        color: time === p.value ? "#1D4ED8" : "#475569",
-                                        cursor: "pointer", fontFamily: FONT, transition: "all 0.1s",
-                                    }}>
-                                    {p.label}
-                                </button>
-                            ))}
-                        </div>
-                        {/* Manual time input */}
-                        <input type="time"
-                            value={time}
-                            onChange={e => { setTime(e.target.value); commit(date, e.target.value); }}
-                            style={{
-                                width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0",
-                                borderRadius: 7, fontSize: 13, color: "#0F172A", fontFamily: FONT,
-                                outline: "none", boxSizing: "border-box",
-                            }}
-                        />
-                    </div>
-
-                    {/* Footer */}
-                    <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                        <button type="button" onClick={clear}
-                            style={{ padding: "6px 12px", border: "1.5px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", color: "#64748B", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: FONT }}>
-                            Clear
-                        </button>
-                        <button type="button" onClick={() => setShowPicker(false)}
-                            style={{ padding: "6px 14px", border: "none", borderRadius: 7, background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
-                            Done
-                        </button>
-                    </div>
-                </div>
-            )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input
+                type="range" min={1} max={10} step={1} value={num}
+                onChange={e => onChange(Number(e.target.value))}
+                style={{ flex: 1, accentColor: color, cursor: "pointer", height: 4 }}
+            />
+            <div style={{
+                minWidth: 64, padding: "5px 12px", borderRadius: 6,
+                border: `1.5px solid ${border}`, background: bg, color,
+                fontSize: 13, fontWeight: 700, textAlign: "center", fontFamily: "inherit",
+            }}>
+                {num} <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.75 }}>({label})</span>
+            </div>
         </div>
     );
 }
@@ -183,7 +54,8 @@ export default function CreateTaskModal({
 }) {
     const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
-    const [form, setForm] = useState({ title: "", description: "", notes: "", dueDate: "", priority: "medium" });
+    const [form, setForm] = useState({ title: "", description: "", notes: "", priority: 5 });
+    const [isFolder, setIsFolder] = useState(false);
     const [subtaskRows, setSubtaskRows] = useState([emptySubtask()]);
     const [employees, setEmployees] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
@@ -350,8 +222,8 @@ export default function CreateTaskModal({
                         description: row.description,
                         notes: row.notes,
                         assigneeIds: row.assigneeIds,
-                        dueDate: row.dueDate || null,
-                        priority: row.priority,
+                        dueDate: null,
+                        priority: row.priority || 5,
                         parentTaskId: parentTask?.taskId || null,
                         createdByRole: currentRole,
                         createdBy: currentEmployeeId,
@@ -365,20 +237,21 @@ export default function CreateTaskModal({
                 onSuccess?.();
             } else {
                 if (!form.title.trim()) { setError("Title is required."); setSubmitting(false); return; }
-                if (!selectedIds.length) { setError("Assign to at least one person."); setSubmitting(false); return; }
+                if (!isFolder && !selectedIds.length) { setError("Assign to at least one person."); setSubmitting(false); return; }
                 const newTask = await createTask({
                     title: form.title.trim(),
                     description: form.description,
-                    notes: form.notes,
-                    assigneeIds: selectedIds,
-                    dueDate: form.dueDate || null,
-                    priority: form.priority,
+                    notes: isFolder ? "" : form.notes,
+                    assigneeIds: isFolder ? [] : selectedIds,
+                    dueDate: null,
+                    priority: isFolder ? 5 : (form.priority || 5),
                     parentTaskId: parentTask?.taskId || null,
                     createdByRole: currentRole,
                     createdBy: currentEmployeeId,
                     createdByCeo: currentRole === "ceo" && !parentTask,
                     createdByTl: currentRole === "tl",
-                    status: needsApproval ? "pending_tl_approval" : "open",
+                    status: "open",
+                    isFolder: isFolder || false,
                 });
                 if (parentTask?.taskId && newTask?.taskId) {
                     await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
@@ -393,11 +266,6 @@ export default function CreateTaskModal({
         finally { setSubmitting(false); }
     };
 
-    const PRIORITIES = [
-        { value: "low", label: "Low", color: "#166534", bg: "#F0FDF4", border: "#BBF7D0" },
-        { value: "medium", label: "Medium", color: "#92400E", bg: "#FFFBEB", border: "#FDE68A" },
-        { value: "high", label: "High", color: "#991B1B", bg: "#FFF1F2", border: "#FECDD3" },
-    ];
 
     return (
         <div style={s.overlay}>
@@ -493,23 +361,8 @@ export default function CreateTaskModal({
                                                     placeholder="Enter subtask title" />
                                             </div>
                                             <div style={s.field}>
-                                                <label style={s.label}>Deadline</label>
-                                                <div style={{ display: "flex", gap: 6 }}>
-                                                    <input type="date" className="ctm-input" style={{ ...s.input, flex: 1 }}
-                                                        value={row.dueDate ? row.dueDate.split("T")[0] : ""}
-                                                        onChange={e => {
-                                                            const d = e.target.value;
-                                                            const t = row.dueDate?.split("T")[1] || "09:00";
-                                                            updateRow(i, "dueDate", d ? `${d}T${t}` : "");
-                                                        }} />
-                                                    <input type="time" className="ctm-input" style={{ ...s.input, width: 90, flexShrink: 0 }}
-                                                        value={row.dueDate ? (row.dueDate.split("T")[1] || "09:00") : "09:00"}
-                                                        disabled={!row.dueDate}
-                                                        onChange={e => {
-                                                            const d = row.dueDate?.split("T")[0];
-                                                            if (d) updateRow(i, "dueDate", `${d}T${e.target.value}`);
-                                                        }} />
-                                                </div>
+                                                <label style={s.label}>Priority <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 10, textTransform: "none" }}>(1 = lowest · 10 = highest)</span></label>
+                                                <PrioritySlider value={row.priority} onChange={v => updateRow(i, "priority", v)} />
                                             </div>
                                         </div>
 
@@ -518,26 +371,6 @@ export default function CreateTaskModal({
                                             <textarea className="ctm-input" style={{ ...s.input, height: 52, resize: "vertical" }}
                                                 value={row.notes} onChange={e => updateRow(i, "notes", e.target.value)}
                                                 placeholder="Specific requirements or deliverables" />
-                                        </div>
-
-                                        <div style={{ ...s.field, marginTop: 10 }}>
-                                            <label style={s.label}>Priority</label>
-                                            <div style={{ display: "flex", gap: 6 }}>
-                                                {PRIORITIES.map(p => (
-                                                    <button key={p.value} type="button" onClick={() => updateRow(i, "priority", p.value)}
-                                                        style={{
-                                                            flex: 1, padding: "7px 6px",
-                                                            border: `1.5px solid ${row.priority === p.value ? p.border : "#E5E7EB"}`,
-                                                            borderRadius: 6,
-                                                            background: row.priority === p.value ? p.bg : "#fff",
-                                                            color: row.priority === p.value ? p.color : "#6B7280",
-                                                            fontSize: 12, fontWeight: row.priority === p.value ? 600 : 400,
-                                                            cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
-                                                        }}>
-                                                        {p.label}
-                                                    </button>
-                                                ))}
-                                            </div>
                                         </div>
 
                                         <div style={{ ...s.field, marginTop: 10 }}>
@@ -652,6 +485,29 @@ export default function CreateTaskModal({
                                     autoFocus />
                             </div>
 
+                            {/* ── Folder Task Toggle — shown right after title, only for root tasks ── */}
+                            {!parentTask && !isMultiMode && (
+                                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isFolder ? "#F5F3FF" : "#F8FAFC", border: `1.5px solid ${isFolder ? "#C4B5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                    <div style={{ position: "relative", marginTop: 2, flexShrink: 0 }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={isFolder}
+                                            onChange={e => setIsFolder(e.target.checked)}
+                                            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#7C3AED", margin: 0 }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: isFolder ? "#7C3AED" : "#374151", display: "flex", alignItems: "center", gap: 5 }}>
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                                            This task is a folder
+                                        </span>
+                                        <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.45 }}>
+                                            A container for subtasks only. No chat, reports, or assignees needed.
+                                        </p>
+                                    </div>
+                                </label>
+                            )}
+
                             {/* Description */}
                             <div style={s.field}>
                                 <label style={s.label}>Description</label>
@@ -660,62 +516,27 @@ export default function CreateTaskModal({
                                     placeholder="Brief description of what needs to be done" />
                             </div>
 
-                            {/* Notes */}
-                            <div style={s.field}>
+                            {/* Notes — hidden for folder tasks (no deliverables needed) */}
+                            {!isFolder && <div style={s.field}>
                                 <label style={s.label}>
                                     Notes / Requirements <span style={s.req}>*</span>
                                 </label>
                                 <textarea className="ctm-input" style={{ ...s.input, height: 72, resize: "vertical" }}
                                     value={form.notes} onChange={e => set("notes", e.target.value)}
-                                    placeholder="Specific requirements, deliverables, acceptance criteria"
-                                    required />
-                            </div>
+                                    placeholder="Specific requirements, deliverables, acceptance criteria" />
+                            </div>}
 
-                            {/* Deadline + Priority */}
-                            <div style={{ display: "flex", gap: 16 }}>
-                                <div style={{ flex: 1, ...s.field }}>
-                                    <label style={s.label}>Deadline</label>
-                                    <div style={{ display: "flex", gap: 6 }}>
-                                        <input type="date" className="ctm-input" style={{ ...s.input, flex: 1 }}
-                                            value={form.dueDate ? form.dueDate.split("T")[0] : ""}
-                                            onChange={e => {
-                                                const d = e.target.value;
-                                                const t = form.dueDate?.split("T")[1] || "09:00";
-                                                set("dueDate", d ? `${d}T${t}` : "");
-                                            }} />
-                                        <input type="time" className="ctm-input" style={{ ...s.input, width: 100, flexShrink: 0 }}
-                                            value={form.dueDate ? (form.dueDate.split("T")[1] || "09:00") : "09:00"}
-                                            disabled={!form.dueDate}
-                                            onChange={e => {
-                                                const d = form.dueDate?.split("T")[0];
-                                                if (d) set("dueDate", `${d}T${e.target.value}`);
-                                            }} />
-                                    </div>
-                                    {form.dueDate && <div style={{ marginTop: 4 }}><DeadlineBadge dueDate={form.dueDate} /></div>}
-                                </div>
-                                <div style={{ flex: 1, ...s.field }}>
-                                    <label style={s.label}>Priority</label>
-                                    <div style={{ display: "flex", gap: 6, height: 38, alignItems: "stretch" }}>
-                                        {PRIORITIES.map(p => (
-                                            <button key={p.value} type="button" onClick={() => set("priority", p.value)}
-                                                style={{
-                                                    flex: 1,
-                                                    border: `1.5px solid ${form.priority === p.value ? p.border : "#E5E7EB"}`,
-                                                    borderRadius: 6,
-                                                    background: form.priority === p.value ? p.bg : "#fff",
-                                                    color: form.priority === p.value ? p.color : "#6B7280",
-                                                    fontSize: 12, fontWeight: form.priority === p.value ? 600 : 400,
-                                                    cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
-                                                }}>
-                                                {p.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
+                            {/* Priority — hidden for folder tasks */}
+                            {!isFolder && <div style={s.field}>
+                                <label style={s.label}>
+                                    Priority
+                                    <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 10, textTransform: "none", marginLeft: 6 }}>1 = lowest priority · 10 = highest</span>
+                                </label>
+                                <PrioritySlider value={form.priority} onChange={v => set("priority", v)} />
+                            </div>}
 
-                            {/* Assignees — Department filter first, then employees */}
-                            <div style={s.field}>
+                            {/* Assignees — hidden for folder tasks, required for normal tasks */}
+                            {!isFolder && <div style={s.field}>
                                 <label style={s.label}>
                                     Assign to
                                     {selectedIds.length > 0 && <span style={s.countBadge}>{selectedIds.length} selected</span>}
@@ -804,10 +625,10 @@ export default function CreateTaskModal({
                                         );
                                     })}
                                 </div>
-                            </div>
+                            </div>}
 
-                            {/* Attachments */}
-                            <div style={s.field}>
+                            {/* Attachments — hidden for folder tasks */}
+                            {!isFolder && <div style={s.field}>
                                 <label style={s.label}>
                                     Attachments
                                     <span style={{ fontWeight: 400, textTransform: "none", fontSize: 11, color: "#9CA3AF", marginLeft: 6 }}>
@@ -865,7 +686,7 @@ export default function CreateTaskModal({
                                         ))}
                                     </div>
                                 )}
-                            </div>
+                            </div>}
                         </div>
                     )}
 

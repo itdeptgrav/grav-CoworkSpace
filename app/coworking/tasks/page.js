@@ -22,7 +22,10 @@ import MediaMessageInput from "../../../components/coworking/messaging/MediaMess
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
 import { listTasks, getFullTask, getDailyReports, deleteTask } from "../../../lib/mediaUploadApi";
+import { taskForwardApi } from "../../../lib/taskForwardApi";
+import { getCoworkSocket } from "../../../lib/coworkSocket";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
+import { useTaskTimer, useWatchEmployeeTimers, formatTimeHMS, formatTime } from "../../../hooks/useTaskTimer";
 import {
   MessageCircle,
   Plus,
@@ -35,7 +38,7 @@ import {
 import {
   collection, doc, setDoc, updateDoc, deleteDoc,
   query, orderBy, limit, onSnapshot, serverTimestamp, getDocs,
-  writeBatch, where, arrayUnion,
+  writeBatch, where, arrayUnion, increment,
 } from "firebase/firestore";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -64,6 +67,8 @@ const STATUS = {
   in_progress: { label: "In Progress", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
   pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
+  pending_deadline_approval: { label: "Deadline Pending", color: "#D97706", bg: "#FFFBEB", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
+  deadline_approved: { label: "Deadline Approved", color: "#059669", bg: "#ECFDF5", dot: "#059669", glow: "rgba(5,150,105,0.3)" },
 };
 
 const COMP = {
@@ -80,6 +85,16 @@ const PRI = {
   medium: { label: "Normal", color: "#92400E", bg: "#FFFBEB", dot: "#D97706" },
   low: { label: "Lowest", color: "#166534", bg: "#F0FDF4", dot: "#16A34A" }
 };
+
+// Helper for numeric priority (1-10)
+function getPriDisplay(priority) {
+  const n = typeof priority === "number" ? priority : (typeof priority === "string" && !isNaN(Number(priority)) ? Number(priority) : null);
+  if (n !== null) {
+    const level = n >= 8 ? "high" : n >= 5 ? "medium" : "low";
+    return { ...PRI[level], label: `P${n}`, dot: PRI[level].dot };
+  }
+  return PRI[priority] || PRI.medium;
+}
 
 // Avatar Color Helper
 const AVATAR_COLORS = [
@@ -614,7 +629,9 @@ function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewR
 
 function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setActiveDetailTab,
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
-  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages }) {
+  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages,
+  timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
+  deadlineFlow }) {
   const st = STATUS[task.status] || STATUS.open;
   // Derive comp label — for "submitted" status, show flow-appropriate label
   const _compBase = task.completionStatus ? COMP[task.completionStatus] : null;
@@ -628,7 +645,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
           ? "Awaiting TL Review"
           : _compBase.label,
   } : null;
-  const pri = task.priority ? (PRI[task.priority] || PRI.medium) : PRI.medium;
+  const pri = getPriDisplay(task.priority);
 
   const createdDate = task.createdAt
     ? new Date(typeof task.createdAt === "object" && task.createdAt.seconds ? task.createdAt.seconds * 1000 : task.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
@@ -688,6 +705,12 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} /> {st.label}
               </span>}
               <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text-4)", padding: "3px 7px", background: "var(--bg)", borderRadius: 5, border: "1px solid var(--border)" }}>{task.taskId}</span>
+              {task.isFolder && (
+                <span style={{ fontSize: 9, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: "#7C3AED", background: "#EDE9FE", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                  Folder
+                </span>
+              )}
             </div>
             {/* Big title */}
             <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", lineHeight: 1.3, margin: 0, letterSpacing: "-0.01em" }}>{task.title}</h2>
@@ -814,39 +837,382 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
           {/* Workflow actions */}
           {(isAssignee || isTL || isCEO) && (
             <div style={{ marginTop: 14, padding: "0 14px" }}>
+
+              {/* ── Time Tracker ── shown to whoever can see this task */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                  Time Tracked
+                </div>
+                {(() => {
+                  const isRunningThis = timerActiveTaskId === task.taskId;
+                  const secs = getDisplaySeconds(task.taskId);
+                  const sess = getTimerSession(task.taskId);
+                  const hasTime = (sess?.totalSeconds || 0) > 0 || isRunningThis || secs > 0;
+                  // Block timer when awaiting deadline approval
+                  const timerBlocked = task.status === "pending_deadline_approval";
+
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+                      {/* Assignee view: Start/Pause + own timer */}
+                      {isAssignee && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {timerBlocked && (
+                            <div style={{ fontSize: 10, fontWeight: 600, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5 }}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                              Timer locked — waiting for deadline approval
+                            </div>
+                          )}
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <button
+                              disabled={timerBlocked && !isRunningThis}
+                              onClick={() => isRunningThis ? handleTimerPause(task.taskId, task.title) : timerStart(task.taskId, task.title)}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "none",
+                                cursor: (timerBlocked && !isRunningThis) ? "not-allowed" : "pointer",
+                                fontFamily: "inherit", fontSize: 11, fontWeight: 600, transition: "all 0.15s",
+                                opacity: (timerBlocked && !isRunningThis) ? 0.4 : 1,
+                                background: isRunningThis ? "#DCFCE7" : "#F1F5F9",
+                                color: isRunningThis ? "#16A34A" : "#475569",
+                              }}
+                              onMouseEnter={e => { if (!timerBlocked || isRunningThis) e.currentTarget.style.background = isRunningThis ? "#BBF7D0" : "#E2E8F0"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = isRunningThis ? "#DCFCE7" : "#F1F5F9"; }}
+                            >
+                              {isRunningThis
+                                ? <><svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg> Pause</>
+                                : <><svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg> {hasTime ? "Resume" : "Start"}</>
+                              }
+                            </button>
+                            <span style={{ fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: isRunningThis ? "#16A34A" : "#64748B", letterSpacing: "0.06em" }}>
+                              {formatTimeHMS(secs)}
+                            </span>
+                            {isRunningThis && (
+                              <span style={{ fontSize: 9, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 7px", borderRadius: 99, display: "flex", alignItems: "center", gap: 3 }}>
+                                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A", display: "inline-block", animation: "timerPulse 1.5s ease-in-out infinite" }} />
+                                Running
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CEO/TL view: show who is working + live time, or grey if paused */}
+                      {(isCEO || isTL) && (() => {
+                        const watchedInfo = watchedTimers?.get(task.taskId);
+                        if (!watchedInfo) return null;
+                        const isWorking = watchedInfo.isActive;
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: isWorking ? "#F0FDF4" : "#F8FAFC", borderRadius: 8, border: `1px solid ${isWorking ? "#BBF7D0" : "#E2E8F0"}` }}>
+                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: isWorking ? "#16A34A" : "#94A3B8", flexShrink: 0, display: "inline-block", ...(isWorking ? { animation: "timerPulse 1.5s ease-in-out infinite" } : {}) }} />
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "#0F172A" }}>{watchedInfo.employeeName}</span>
+                            <span style={{ fontSize: 11, color: isWorking ? "#16A34A" : "#94A3B8" }}>{isWorking ? "working now" : "paused"}</span>
+                            <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: isWorking ? "#16A34A" : "#64748B", marginLeft: "auto" }}>{formatTimeHMS(watchedInfo.displaySeconds)}</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
+              </div>
+
               <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6 }}>Workflow</div>
-              {isAssignee && !isConfirmed && task.status === "open" && (
-                <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  Confirm Task
-                </button>
-              )}
-              {isAssignee && isConfirmed && !isStarted && (
+
+              {/* ── DEADLINE STEP-FLOW (employee) ─────────────────────────────────── */}
+              {isAssignee && !isConfirmed && !task.isFolder && (() => {
+                const df = deadlineFlow || {};
+                const status = task.status;
+
+                // PRIORITY 1: If dueDate is set → always show Confirm (regardless of status)
+                // This handles: deadline_approved, open-with-dueDate, and any edge case
+                // The only exception: if actively pending approval right now
+                const hasDueDate = !!task.dueDate;
+                const isPendingApproval = status === "pending_deadline_approval";
+
+                // Deadline passed warning
+                const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
+                const deadlinePassed = deadlineMs && deadlineMs < Date.now();
+                const deadlinePassedStr = deadlineMs ? (() => {
+                  const diff = Math.abs(Math.floor((Date.now() - deadlineMs) / 60000));
+                  if (diff < 60) return `${diff}m ago`;
+                  const h = Math.floor(diff / 60);
+                  if (h < 24) return `${h}h ago`;
+                  return `${Math.floor(h / 24)}d ago`;
+                })() : null;
+
+                // If dueDate is set and not currently pending → show Step 3 Confirm directly
+                if (hasDueDate && !isPendingApproval) return (
+                  <div style={{ background: deadlinePassed ? "#FEF2F2" : "#F0FDF4", border: `1.5px solid ${deadlinePassed ? "#FECDD3" : "#BBF7D0"}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", border: `2px solid ${deadlinePassed ? "#EF4444" : "#16A34A"}`, color: deadlinePassed ? "#EF4444" : "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {deadlinePassed ? "!" : "✓"}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: deadlinePassed ? "#991B1B" : "#166534" }}>
+                        {deadlinePassed ? "⚠️ Deadline Passed — Confirm Task" : "✓ Deadline Approved"}
+                      </span>
+                    </div>
+                    {task.dueDate && (
+                      <div style={{ fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", color: deadlinePassed ? "#B91C1C" : "#166534" }}>
+                        📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {deadlinePassed && <span style={{ marginLeft: 6, opacity: 0.8 }}>· passed {deadlinePassedStr}</span>}
+                      </div>
+                    )}
+                    {deadlinePassed && (
+                      <div style={{ fontSize: 11, color: "#B91C1C", background: "#FEF2F2", borderRadius: 7, padding: "6px 9px", marginBottom: 8, lineHeight: 1.5 }}>
+                        The deadline has passed. Confirm receipt and start working, or request a new deadline.
+                      </div>
+                    )}
+                    <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      Confirm & Accept Task
+                    </button>
+                  </div>
+                );
+
+                // effectiveStatus for proposal flow (no dueDate yet)
+                const effectiveStatus = status;
+
+                if (effectiveStatus === "open") return (
+                  <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B" }}>Set Your Deadline</span>
+                    </div>
+                    {task.deadlineProposalRejected && (
+                      <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7, padding: "8px 10px", marginBottom: 10, fontSize: 11, color: "#991B1B" }}>
+                        ❌ <strong>Rejected:</strong> {task.deadlineRejectionReason || "Please propose a new deadline."}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8, lineHeight: 1.5 }}>
+                      Propose a deadline. Your {task.assignedByRole === "ceo" ? "CEO" : "Team Lead"} will approve it before you can confirm.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Date</label>
+                        <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
+                          onChange={e => df.setDate?.(e.target.value)}
+                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                      <div style={{ width: 88, flexShrink: 0 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Time</label>
+                        <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
+                          style={{ width: "100%", padding: "7px 6px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                    </div>
+                    <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
+                      className="gv-wf-btn gv-wf-confirm" style={{ opacity: !df.proposedDate || df.proposing ? 0.5 : 1 }}>
+                      {df.proposing ? "Submitting…" : "📅 Submit Deadline for Approval"}
+                    </button>
+                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 5, display: "flex", alignItems: "center", gap: 4 }}>
+                      💬 Use Draft Chat to discuss with your {task.assignedByRole === "ceo" ? "CEO" : "TL"}
+                    </div>
+                  </div>
+                );
+                if (effectiveStatus === "pending_deadline_approval") return (
+                  <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#FEF3C7", border: "2px solid #D97706", color: "#D97706", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
+                    </div>
+                    {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
+                      📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </div>}
+                    <div style={{ fontSize: 10, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
+                  </div>
+                );
+                if (effectiveStatus === "deadline_approved") return (
+                  <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#DCFCE7", border: "2px solid #16A34A", color: "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>3</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ Deadline Approved</span>
+                    </div>
+                    {task.dueDate && <div style={{ fontSize: 11, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>
+                      📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </div>}
+                    <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      Confirm & Accept Task
+                    </button>
+                  </div>
+                );
+                return null;
+              })()}
+
+              {/* ── CREATOR APPROVAL PANEL ─────────────────────────────────────────── */}
+              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder && (() => {
+                const df = deadlineFlow || {};
+                return (
+                  <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 8 }}>📋 Deadline Proposal — Needs Your Approval</div>
+                    {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
+                      <span style={{ fontWeight: 500 }}>Proposed by {task.proposedDeadlineByName}:</span><br />
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>}
+                    {!df.showRejectInput ? (
+                      <div style={{ display: "flex", gap: 7 }}>
+                        <button onClick={() => df.onApprove?.(true)} disabled={df.approving}
+                          style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: df.approving ? 0.5 : 1 }}>
+                          {df.approving ? "…" : "✓ Approve"}
+                        </button>
+                        <button onClick={() => df.setShowRejectInput?.(true)} disabled={df.approving}
+                          style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                          ✕ Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
+                          placeholder="Reason for rejection (required)…"
+                          style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "vertical", minHeight: 56, outline: "none", boxSizing: "border-box" }} />
+                        <div style={{ display: "flex", gap: 7, marginTop: 6 }}>
+                          <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
+                            {df.approving ? "…" : "Send Rejection"}
+                          </button>
+                          <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── POST-CONFIRM ACTIONS ────────────────────────────────────────────── */}
+              {isAssignee && isConfirmed && !isStarted && task.status !== "pending_deadline_approval" && (
                 <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}>
                   <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
                   Start Working
                 </button>
               )}
-              {isAssignee && task.status === "in_progress" && (
+              {isAssignee && task.status === "pending_deadline_approval" && !task.isFolder && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 11, color: "#92400E" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                  <span><strong>Work paused</strong> — waiting for new deadline approval</span>
+                </div>
+              )}
+              {isAssignee && task.status === "in_progress" && !task.isFolder && (
                 <button className="gv-wf-btn gv-wf-report" onClick={() => handleAction("report")}>Daily Report</button>
               )}
-              {isAssignee && task.status === "in_progress" && !["submitted", "tl_approved", "tl_final_approved", "ceo_approved", "ceo_direct_approved"].includes(task.completionStatus) && (
+
+              {/* ── DEADLINE EXTENSION (in_progress — only after deadline passed) ── */}
+              {isAssignee && ["in_progress", "confirmed"].includes(task.status) && !task.isFolder && (() => {
+                const df = deadlineFlow || {};
+                const isOverdue = task.dueDate && new Date(task.dueDate) < new Date();
+                const isNear = task.dueDate && !isOverdue && (new Date(task.dueDate) - new Date()) < 24 * 60 * 60 * 1000;
+                return (
+                  <div style={{ marginBottom: 8 }}>
+                    {/* Near-deadline warning only (no button yet) */}
+                    {isNear && (
+                      <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
+                        ⏰ Deadline in less than 24h
+                        {task.dueDate && <span style={{ fontWeight: 700 }}> · {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                      </div>
+                    )}
+                    {/* Overdue warning + Request Extension button — ONLY after deadline passed */}
+                    {isOverdue && (
+                      <>
+                        <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#991B1B", display: "flex", alignItems: "center", gap: 5 }}>
+                          ⚠️ Deadline passed!
+                          {task.dueDate && <span style={{ fontWeight: 700 }}> · {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                        </div>
+                        <button onClick={() => df.setShowExtend?.(true)}
+                          style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                          Request Deadline Extension
+                        </button>
+                      </>
+                    )}
+
+                    {/* Extension form */}
+                    {df.showExtend && (
+                      <div style={{ marginTop: 8, background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 12px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                          Propose New Deadline
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                          <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
+                            onChange={e => df.setDate?.(e.target.value)}
+                            style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                          <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
+                            style={{ width: 82, padding: "7px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.proposedDate || df.proposing ? "#E5E7EB" : "#4F46E5", color: !df.proposedDate || df.proposing ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.proposedDate || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {df.proposing ? "Submitting…" : "Submit for Approval"}
+                          </button>
+                          <button onClick={() => df.setShowExtend?.(false)}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Creator approval panel for deadline extension requests */}
+              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder &&
+                ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") && (() => {
+                  const df = deadlineFlow || {};
+                  return (
+                    <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>📅 Deadline Extension Request</div>
+                      {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 8 }}>
+                        <strong>{task.proposedDeadlineByName}</strong> needs more time:<br />
+                        <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        {task.dueDate && <span style={{ color: "#9CA3AF", fontSize: 11, marginLeft: 6 }}>(was: {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short" })})</span>}
+                      </div>}
+                      {!df.showRejectInput ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => df.onApprove?.(true)} disabled={df.approving}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: df.approving ? 0.5 : 1 }}>
+                            {df.approving ? "…" : "✓ Approve Extension"}
+                          </button>
+                          <button onClick={() => df.setShowRejectInput?.(true)} disabled={df.approving}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            ✕ Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
+                            placeholder="Reason for rejection…"
+                            style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box" }} />
+                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                            <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
+                              style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
+                              {df.approving ? "…" : "Send Rejection"}
+                            </button>
+                            <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
+                              style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              {isAssignee && task.status === "in_progress" && !task.isFolder && !["submitted", "tl_approved", "tl_final_approved", "ceo_approved", "ceo_direct_approved"].includes(task.completionStatus) && (
                 <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>Submit for Review</button>
               )}
               {isTL && task.status === "pending_tl_approval" && task.assigneeIds?.includes(employeeId) && (
                 <button className="gv-wf-btn" style={{ background: "#EDEDFE", color: "#5B5EF4", borderColor: "rgba(91,94,244,.3)" }} disabled={actionBusy} onClick={() => handleAction("approve_tl")}>⭐ Approve Task</button>
               )}
-              {/* TL Review: show when submitted AND (flow is tl_final or tl_then_ceo) */}
               {isTL && task.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(task.reviewFlow) && (
                 <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>
                   {task.reviewFlow === "tl_final" ? "✅ Final Review" : "Review Submission"}
                 </button>
               )}
-              {/* CEO Review Direct: show when submitted AND flow is ceo_direct */}
               {isCEO && task.completionStatus === "submitted" && task.reviewFlow === "ceo_direct" && (
                 <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("review_completion")}>CEO Final Review</button>
               )}
-              {/* CEO Final Review: show after TL approved in tl_then_ceo flow */}
               {isCEO && task.completionStatus === "tl_approved" && task.reviewFlow === "tl_then_ceo" && (
                 <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("ceo_review")}>CEO Final Approval</button>
               )}
@@ -854,28 +1220,59 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
           )}
 
           {/* Subtasks — Task.Co style */}
-          {task.subtasks?.length > 0 && (
-            <div style={{ marginTop: 14, padding: "0 14px" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="6" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="1" y="6" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
-                Subtasks ({task.subtasks.length})
+          {(() => {
+            // Employee: only show subtasks assigned to or by them
+            const visibleSubtasks = (!isCEO && !isTL)
+              ? (task.subtasks || []).filter(sub =>
+                (sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId
+              )
+              : (task.subtasks || []);
+            return visibleSubtasks.length > 0 ? (
+              <div style={{ marginTop: 14, padding: "0 14px" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="6" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="1" y="6" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
+                  Subtasks ({visibleSubtasks.length})
+                </div>
+                {visibleSubtasks.map(sub => {
+                  const sst = STATUS[sub.status] || STATUS.open;
+                  const subIsRunning = timerActiveTaskId === sub.taskId;
+                  const subSecs = getDisplaySeconds(sub.taskId);
+                  const subSess = getTimerSession(sub.taskId);
+                  const subHasTime = (subSess?.totalSeconds || 0) > 0 || subIsRunning;
+                  const subIsAssignee = (sub.assigneeIds || []).includes(employeeId);
+                  return (
+                    <div key={sub.taskId}
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: subIsRunning ? "#F0FDF4" : "var(--bg)", marginBottom: 3, transition: "all 0.1s", border: `1px solid ${subIsRunning ? "#BBF7D0" : "transparent"}` }}
+                      onMouseEnter={e => { if (!subIsRunning) { e.currentTarget.style.background = "var(--p-lt)"; e.currentTarget.style.borderColor = "var(--p)"; } }}
+                      onMouseLeave={e => { if (!subIsRunning) { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "transparent"; } }}
+                    >
+                      {/* Timer button for subtask */}
+                      {(subIsAssignee || isCEO || isTL) && (
+                        <button
+                          onClick={e => { e.stopPropagation(); subIsRunning ? handleTimerPause(sub.taskId, sub.title) : timerStart(sub.taskId, sub.title); }}
+                          style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: subIsRunning ? "#DCFCE7" : "#F1F5F9", color: subIsRunning ? "#16A34A" : "#94A3B8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                          title={subIsRunning ? "Pause" : subHasTime ? "Resume" : "Start"}
+                        >
+                          {subIsRunning
+                            ? <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg>
+                            : <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
+                          }
+                        </button>
+                      )}
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: sst.dot, flexShrink: 0, display: "inline-block" }} />
+                      <span onClick={() => handleSelectNode(sub)} style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>{sub.title}</span>
+                      {subHasTime && (
+                        <span style={{ fontSize: 10, fontFamily: "monospace", fontWeight: 600, color: subIsRunning ? "#16A34A" : "#94A3B8", letterSpacing: "0.04em", flexShrink: 0 }}>
+                          {formatTimeHMS(subSecs)}
+                        </span>
+                      )}
+                      <svg onClick={() => handleSelectNode(sub)} width="8" height="8" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0, cursor: "pointer" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    </div>
+                  );
+                })}
               </div>
-              {task.subtasks.map(sub => {
-                const sst = STATUS[sub.status] || STATUS.open;
-                return (
-                  <div key={sub.taskId} onClick={() => handleSelectNode(sub)}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg)", cursor: "pointer", marginBottom: 3, transition: "all 0.1s", border: "1px solid transparent" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "var(--p-lt)"; e.currentTarget.style.borderColor = "var(--p)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "transparent"; }}
-                  >
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sst.dot, flexShrink: 0, display: "inline-block" }} />
-                    <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub.title}</span>
-                    <svg width="8" height="8" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0 }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            ) : null;
+          })()}
 
           {/* Deadline history */}
           {isCEO && task.deadlineHistory?.length > 0 && (
@@ -1014,6 +1411,22 @@ export default function TasksPage() {
   const [actionBusy, setActionBusy] = useState(false);
   const [showDeleteConf, setShowDeleteConf] = useState(false);
 
+  // ── Work commit modal (shown when employee pauses timer) ─────────────────────
+  const [commitModal, setCommitModal] = useState(null); // { taskId, taskTitle }
+  const [commitMessage, setCommitMessage] = useState("");
+  const [savingCommit, setSavingCommit] = useState(false);
+
+  // ── Draft chat + deadline flow state ─────────────────────────────────────────
+  const [draftMessages, setDraftMessages] = useState([]);
+  const [chatTabMode, setChatTabMode] = useState("normal"); // "draft" | "normal"
+  const [proposedDeadlineDate, setProposedDeadlineDate] = useState("");
+  const [proposedDeadlineTime, setProposedDeadlineTime] = useState("09:00");
+  const [proposingDeadline, setProposingDeadline] = useState(false);
+  const [approvingDeadline, setApprovingDeadline] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [showExtendForm, setShowExtendForm] = useState(false);
+
   const [requestModal, setRequestModal] = useState(null); // { taskId, taskTitle }
 
   const [detailCollapsed, setDetailCollapsed] = useState(false);
@@ -1139,6 +1552,68 @@ export default function TasksPage() {
   const lastReadAtRef = useRef({});
   const isCEO = role === "ceo";
   const isTL = role === "tl";
+  const isEmployee = role === "employee";
+
+  // ── Task Timer (start/pause per task, one active at a time) ─────────────────
+  const {
+    activeTaskId: timerActiveTaskId,
+    startTask: timerStart,
+    pauseTask: timerPause,
+    getDisplaySeconds,
+    getSession: getTimerSession,
+    toast: timerToast,
+    sessionMap: timerSessionMap,
+  } = useTaskTimer(employeeId);
+
+  // ── Intercept pause: show commit message modal first ─────────────────────────
+  const handleTimerPause = useCallback((taskId, taskTitle) => {
+    setCommitModal({ taskId, taskTitle });
+    setCommitMessage("");
+  }, []);
+
+  const handleCommitSubmit = useCallback(async (skipMessage = false) => {
+    if (!commitModal) return;
+    const { taskId, taskTitle } = commitModal;
+    setSavingCommit(true);
+    try {
+      const sess = timerSessionMap?.get(taskId);
+      const base = sess?.totalSeconds || 0;
+      const start = sess?.lastStartTime || Date.now();
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      const secondsWorked = base + elapsed;
+      const msg = skipMessage ? "" : (commitMessage.trim() || "");
+
+      // Write commit log to Firestore
+      const { addDoc: _addDoc, collection: _col, serverTimestamp: _st } = await import("firebase/firestore");
+      await _addDoc(_col(firebaseDb, "cowork_work_commits", employeeId, "logs"), {
+        taskId, taskTitle: taskTitle || taskId,
+        message: msg,
+        secondsWorked,
+        stoppedAt: _st(),
+        empId: employeeId,
+        empName: employeeName,
+        hasMessage: !!msg,
+      });
+    } catch (e) {
+      console.error("[commit] write error:", e.message);
+    } finally {
+      // Always pause regardless of commit write success
+      timerPause(taskId, taskTitle);
+      setCommitModal(null);
+      setCommitMessage("");
+      setSavingCommit(false);
+    }
+  }, [commitModal, commitMessage, employeeId, employeeName, timerPause, timerSessionMap]);
+
+  const allAssigneeIds = (isCEO || isTL)
+    ? [...new Set(allTasks.flatMap(t => t.assigneeIds || []))]
+    : [];
+
+  const { activeTimers: assigneeActiveTimers, allTimers: assigneeAllTimers } = useWatchEmployeeTimers(
+    allAssigneeIds,
+    employeeMap
+  );
+
 
   // Helper Functions
   const downloadImage = (url) => {
@@ -1354,18 +1829,83 @@ export default function TasksPage() {
           return assignedToMe || createdByMe;
         });
       } else if (role === "employee") {
-        // Employee: ONLY tasks directly assigned to them. No parent tasks they weren't assigned to.
-        tasks = tasks.filter(t =>
-          (t.assigneeIds || []).includes(employeeId)
-        );
+        // Employee sees:
+        // 1. Tasks directly assigned to them
+        // 2. Tasks they created (subtasks they assigned to others)
+        // 3. Folder tasks that contain any of the above
+        const taskMap = new Map(tasks.map(t => [t.taskId, t]));
+        tasks = tasks.filter(t => {
+          // Directly assigned to me
+          if ((t.assigneeIds || []).includes(employeeId)) return true;
+          // Task I created (I'm the assignedBy)
+          if (t.assignedBy === employeeId) return true;
+          // Folder task — show if any subtask involves me (assigned to me OR created by me)
+          if (t.isFolder === true || (t.isFolder === undefined && !t.assigneeIds?.length)) {
+            const subtaskIds = t.subtaskIds || [];
+            return subtaskIds.some(sid => {
+              const sub = taskMap.get(sid);
+              return sub && ((sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId);
+            });
+          }
+          return false;
+        });
       }
       // TL: no extra filter — backend already returns correct set
 
+      // ── For EMPLOYEES: fetch folder parents up the chain ──────────────────────
+      // Backend only returns directly-assigned tasks. Folder tasks (empty assigneeIds)
+      // are never returned. We must fetch them separately using the parent chain.
+      let allFetchedChain = []; // ALL chain items (including intermediate nodes like task1)
+      if (role === "employee" && tasks.length > 0) {
+        const existingIds = new Set(tasks.map(t => t.taskId));
+        const missingParentIds = [...new Set(
+          tasks.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId)
+        )];
+        if (missingParentIds.length) {
+          try {
+            const { getDoc, doc: fd } = await import("firebase/firestore");
+            const alreadyFetched = new Set([...existingIds]);
+            let toFetch = missingParentIds.filter(id => !alreadyFetched.has(id));
+            while (toFetch.length > 0 && allFetchedChain.length < 20) {
+              const docs = await Promise.all(toFetch.map(id => getDoc(fd(firebaseDb, "cowork_tasks", id))));
+              const nextToFetch = [];
+              docs.forEach(doc => {
+                if (!doc.exists()) return;
+                const t = { ...doc.data(), taskId: doc.id };
+                alreadyFetched.add(t.taskId);
+                if (t.isFolder !== true && !t.parentTaskId && !t.assigneeIds?.length) t.isFolder = true;
+                allFetchedChain.push(t);
+                if (t.parentTaskId && !alreadyFetched.has(t.parentTaskId)) {
+                  nextToFetch.push(t.parentTaskId);
+                  alreadyFetched.add(t.parentTaskId);
+                }
+              });
+              toFetch = nextToFetch;
+            }
+            // Only add ROOT folders to allTasks to avoid duplicate standalone rows
+            // Intermediate nodes (e.g. task1 under folder) go into allTaskMap ONLY
+            const rootFolders = allFetchedChain.filter(t => !t.parentTaskId);
+            if (rootFolders.length) tasks = [...tasks, ...rootFolders];
+          } catch (e) {
+            console.warn("[loadAllTasks] folder parent fetch:", e.message);
+          }
+        }
+      }
+
       setAllTasks(tasks);
-      const map = new Map(tasks.map(t => [t.taskId, t]));
-      allTaskMapRef.current = map;
-      setAllTaskMap(map);
-      setExpandedIds(new Set()); // subtasks collapsed by default
+      // fullMap includes allTasks + intermediate chain nodes so TblRow can expand deep trees
+      const fullMap = new Map(tasks.map(t => [t.taskId, t]));
+      allFetchedChain.forEach(t => fullMap.set(t.taskId, t));
+      allTaskMapRef.current = fullMap;
+      setAllTaskMap(fullMap);
+      // Auto-expand folder tasks for employees so their subtasks show immediately
+      const autoExpand = new Set();
+      if (role === "employee") {
+        tasks.forEach(t => {
+          if (t.isFolder && t.subtaskIds?.length) autoExpand.add(t.taskId);
+        });
+      }
+      setExpandedIds(autoExpand);
 
       // Per-task chat count listeners give 100% accurate real-time unread counts
       setupChatCountListeners(tasks);
@@ -1386,6 +1926,9 @@ export default function TasksPage() {
     latestTaskIdRef.current = taskId; // mark this as the latest requested task
     setDetailLoading(true);
     setDailyReports([]);
+    setDraftMessages([]); // reset draft messages
+    setProposedDeadlineDate(""); setProposedDeadlineTime("09:00");
+    setShowRejectInput(false); setRejectReason("");
     // ── Serve cached messages instantly ──
     if (chatCacheRef.current[taskId]?.length) {
       setChatMessages(chatCacheRef.current[taskId]);
@@ -1397,7 +1940,16 @@ export default function TasksPage() {
       const task = await getFullTask(taskId);
       // ── STALE RESPONSE GUARD: discard if user has since clicked a different task ──
       if (latestTaskIdRef.current !== taskId) return;
+      // ── Merge isFolder from allTaskMap so old tasks without the field still work ──
+      // allTaskMap has the live Firestore value; getFullTask may return undefined for isFolder
+      const cached = allTaskMapRef.current?.get(taskId);
+      if (cached?.isFolder && !task.isFolder) task.isFolder = true;
       setSelectedTask(task);
+      // Load draft messages from task details
+      if (task.draftChatMessages?.length) setDraftMessages(task.draftChatMessages);
+      // Set default chat tab: draft if pre-confirmed, normal if post-confirmed
+      const preConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(task.status);
+      setChatTabMode(preConfirmed ? "draft" : "normal");
       // Update messages from REST only if cache was empty
       if (!chatCacheRef.current[taskId]?.length && task.chatMessages?.length) {
         setChatMessages(task.chatMessages);
@@ -1536,14 +2088,13 @@ export default function TasksPage() {
 
   const toggleExpand = (taskId) => {
     setExpandedIds(prev => {
-      // If this task is already expanded → collapse it
-      if (prev.has(taskId)) {
-        const n = new Set(prev);
+      const n = new Set(prev);
+      if (n.has(taskId)) {
         n.delete(taskId);
-        return n;
+      } else {
+        n.add(taskId);
       }
-      // Otherwise expand this task and close all others
-      return new Set([taskId]);
+      return n;
     });
   };
 
@@ -1616,6 +2167,73 @@ export default function TasksPage() {
     if (!isCEO) return;
     if (!selectedTask?.taskId) return;
     setDeleteMsgConf({ message });
+  };
+
+  // ── Deadline proposal handlers ────────────────────────────────────────────
+  const handleProposeDeadline = async () => {
+    if (!selectedTask?.taskId || !proposedDeadlineDate) return;
+    setProposingDeadline(true);
+    try {
+      const proposedDate = `${proposedDeadlineDate}T${proposedDeadlineTime || "09:00"}`;
+      // Pass current worked seconds so backend can correctly accumulate "Asked For"
+      const workedSecs = getDisplaySeconds(selectedTask.taskId) || 0;
+      await taskForwardApi.proposeDeadline(selectedTask.taskId, proposedDate, workedSecs);
+      await loadDetail(selectedTask.taskId);
+      await loadAllTasks();
+    } catch (e) { alert(e.message); }
+    finally { setProposingDeadline(false); }
+  };
+
+  const handleApproveDeadline = async (approved) => {
+    if (!selectedTask?.taskId) return;
+    if (!approved && !rejectReason.trim()) { setShowRejectInput(true); return; }
+    setApprovingDeadline(true);
+    try {
+      await taskForwardApi.approveDeadline(selectedTask.taskId, approved, rejectReason.trim());
+      setShowRejectInput(false); setRejectReason("");
+      await loadDetail(selectedTask.taskId);
+      await loadAllTasks();
+    } catch (e) { alert(e.message); }
+    finally { setApprovingDeadline(false); }
+  };
+
+  // ── Draft chat send handler — writes directly to Firestore ─────────────────
+  const handleSendDraftChat = async (text, attachments, messageType) => {
+    if (!selectedTask?.taskId || !text?.trim()) return;
+    const tid = selectedTask.taskId;
+    const tempId = "draft_temp_" + Date.now();
+    const resolvedType = messageType || "text";
+
+    // Show optimistic temp message immediately
+    setDraftMessages(prev => [...prev, {
+      messageId: tempId, senderId: employeeId, senderName: employeeName,
+      text, attachments: attachments || [], messageType: resolvedType,
+      temp: true, createdAt: new Date().toISOString(),
+    }]);
+
+    try {
+      const messageId = crypto.randomUUID();
+      const draftRef = collection(firebaseDb, "cowork_tasks", tid, "draft_chat");
+      await setDoc(doc(draftRef, messageId), {
+        messageId, taskId: tid,
+        senderId: employeeId, senderName: employeeName,
+        text: text || "", attachments: attachments || [],
+        messageType: resolvedType,
+        createdAt: serverTimestamp(),
+      });
+      // Update task metadata count
+      await updateDoc(doc(firebaseDb, "cowork_tasks", tid), {
+        draftChatMessageCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+      // Remove temp — onSnapshot will add the real message
+      setDraftMessages(prev => prev.filter(m => m.messageId !== tempId));
+    } catch (err) {
+      console.error("draft send error:", err);
+      setDraftMessages(prev => prev.map(m =>
+        m.messageId === tempId ? { ...m, error: true, temp: false } : m
+      ));
+    }
   };
 
   const confirmDeleteMessage = async () => {
@@ -1812,7 +2430,12 @@ export default function TasksPage() {
     }
   }, [user, employeeId, role, loadAllTasks, loadEmployees]);
 
-  // Auto-select task from dashboard
+  // Auto-switch chat tab based on task status
+  useEffect(() => {
+    if (!selectedTask) return;
+    const preConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(selectedTask.status);
+    setChatTabMode(preConfirmed ? "draft" : "normal");
+  }, [selectedTask?.taskId, selectedTask?.status]);
   useEffect(() => {
     const storedTaskId = localStorage.getItem('selectedTaskId');
     if (storedTaskId && allTasks.length > 0 && !selectedTask) {
@@ -1842,7 +2465,7 @@ export default function TasksPage() {
     }
   }, [allTasks, selectedTask, loadDetail, isCEO, isTL, allTaskMap]);
 
-  // Chat listener
+  // Chat listener (normal chat + draft chat — both via Firestore onSnapshot)
   useEffect(() => {
     if (!selectedTask?.taskId) return;
     const taskId = selectedTask.taskId;
@@ -1850,6 +2473,36 @@ export default function TasksPage() {
 
     // Record the time this chat was opened — messages before this are "read"
     lastReadAtRef.current[taskId] = Date.now();
+
+    // ── Draft chat — Firestore real-time listener ───────────────────────────
+    // Writes to draft_chat subcollection; both sender & receiver get live updates
+    const draftRef = collection(firebaseDb, "cowork_tasks", taskId, "draft_chat");
+    const draftQ = query(draftRef, orderBy("createdAt", "asc"), limit(100));
+    const unsubDraft = onSnapshot(draftQ, snap => {
+      const msgs = snap.docs.map(d => ({
+        ...d.data(), id: d.id,
+        createdAt: d.data().createdAt?.seconds
+          ? new Date(d.data().createdAt.seconds * 1000).toISOString()
+          : (d.data().createdAt || new Date().toISOString()),
+        temp: false,
+      }));
+      setDraftMessages(msgs);
+    }, err => console.error("draft_chat listener:", err));
+
+    // ── Socket ──────────────────────────────────────────────────────────────
+    const socket = getCoworkSocket(employeeId);
+
+    // timer_blocked: auto-pause if backend signals timer should stop
+    const timerBlockedHandler = ({ taskId: tid }) => {
+      if (timerActiveTaskId === tid) {
+        handleTimerPause(tid, allTaskMapRef.current?.get(tid)?.title || tid);
+      }
+    };
+    socket.on("timer_blocked", timerBlockedHandler);
+    const draftHandler = ({ taskId: tid, message }) => {
+      // onSnapshot already handles this — no-op to avoid duplicates
+    };
+    socket.on("task_draft_chat_message", draftHandler);
 
     const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
     const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
@@ -1883,7 +2536,7 @@ export default function TasksPage() {
         return [...incoming, ...kept].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       });
     }, err => console.error("chat listener:", err));
-    return () => { unsub(); pendingMapRef.current.clear(); };
+    return () => { unsub(); unsubDraft(); pendingMapRef.current.clear(); socket.off("task_draft_chat_message", draftHandler); socket.off("timer_blocked", timerBlockedHandler); };
   }, [selectedTask?.taskId]);
 
   useEffect(() => {
@@ -1926,6 +2579,47 @@ export default function TasksPage() {
       taskQuery = query(tasksRef, where("assigneeIds", "array-contains", employeeId), orderBy("updatedAt", "desc"), limit(100));
     }
 
+    // For EMPLOYEE: also fetch folder parent tasks so they can see the folder structure
+    let unsubFolderParents = null;
+    if (role === "employee") {
+      // After tasks load, fetch any folder parents for subtasks assigned to this employee
+      const fetchFolderParents = async (assignedTasks) => {
+        const parentIds = [...new Set(
+          assignedTasks
+            .filter(t => t.parentTaskId && !assignedTasks.find(x => x.taskId === t.parentTaskId))
+            .map(t => t.parentTaskId)
+        )];
+        if (!parentIds.length) return;
+        try {
+          const { getDocs: gd, doc: fd } = await import("firebase/firestore");
+          const parentDocs = await Promise.all(
+            parentIds.map(id => import("firebase/firestore").then(({ getDoc, doc: d }) =>
+              getDoc(d(firebaseDb, "cowork_tasks", id))
+            ))
+          );
+          const folders = parentDocs
+            .filter(d => d.exists())
+            .map(d => ({ ...d.data(), taskId: d.id }))
+            // Include if isFolder is true, OR if assigneeIds is empty (folder-like task)
+            .filter(t => t.isFolder === true || t.isFolder === undefined && (!t.assigneeIds?.length));
+          // Force isFolder: true on all matched parents
+          folders.forEach(f => { f.isFolder = true; });
+          if (folders.length) {
+            setAllTasks(prev => {
+              const map = new Map(prev.map(t => [t.taskId, t]));
+              folders.forEach(f => map.set(f.taskId, f));
+              const newList = [...map.values()];
+              allTaskMapRef.current = new Map(newList.map(t => [t.taskId, t]));
+              setAllTaskMap(new Map(newList.map(t => [t.taskId, t])));
+              return newList;
+            });
+          }
+        } catch (e) { console.warn("[FolderParents]", e.message); }
+      };
+      // We'll call fetchFolderParents after the main snapshot fires (below)
+      window.__fetchFolderParents = fetchFolderParents;
+    }
+
     // For CEO: also listen to tasks assigned TO the CEO (by TL etc.)
     let unsubCeoAssigned = null;
     if (role === "ceo") {
@@ -1956,22 +2650,77 @@ export default function TasksPage() {
       taskQuery,
       snap => {
         if (snap.empty) return;
+        const newDocs = snap.docs.map(d => ({ ...d.data(), taskId: d.id })).filter(applyVisibilityFilter);
+
+        // Set tasks immediately so UI renders without waiting
         setAllTasks(prev => {
           const map = new Map(prev.map(t => [t.taskId, t]));
-          snap.docs.forEach(d => {
-            const updated = { ...d.data(), taskId: d.id };
-            // Apply visibility filter before merging — prevents wrong tasks from entering state
-            if (applyVisibilityFilter(updated)) {
-              map.set(d.id, updated);
-            }
-          });
+          // Keep any folder parents already fetched
+          prev.filter(t => t.isFolder).forEach(f => map.set(f.taskId, f));
+          newDocs.forEach(t => map.set(t.taskId, t));
           const newList = [...map.values()];
-          const taskMapLocal = new Map(newList.map(t => [t.taskId, t]));
-          allTaskMapRef.current = taskMapLocal;
-          setAllTaskMap(taskMapLocal);
+          // Build fullMap preserving ALL intermediate nodes from previous ref
+          // (e.g. task1 fetched by loadAllTasks must stay in map so rootTasks filter works)
+          const fullMap = new Map(newList.map(t => [t.taskId, t]));
+          allTaskMapRef.current.forEach((t, id) => { if (!fullMap.has(id)) fullMap.set(id, t); });
+          allTaskMapRef.current = fullMap;
+          setAllTaskMap(fullMap);
           setupChatCountListeners(newList);
           return newList;
         });
+
+        // For employees: fetch full parent chain so folder structure shows correctly
+        // (subtasks may be 2+ levels deep: folder → task1 → subtask1)
+        if (role === "employee") {
+          const existingIds = new Set(newDocs.map(t => t.taskId));
+          const initialParentIds = [...new Set(
+            newDocs.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId)
+          )];
+          if (initialParentIds.length) {
+            const fetchChain = async (startIds) => {
+              const fetched = [];
+              const alreadyFetched = new Set([...existingIds]);
+              let toFetch = startIds.filter(id => !alreadyFetched.has(id));
+              while (toFetch.length > 0 && fetched.length < 20) {
+                const docs = await Promise.all(
+                  toFetch.map(id => import("firebase/firestore").then(({ getDoc, doc: d }) =>
+                    getDoc(d(firebaseDb, "cowork_tasks", id))
+                  ))
+                );
+                const nextToFetch = [];
+                docs.forEach(doc => {
+                  if (!doc.exists()) return;
+                  const t = { ...doc.data(), taskId: doc.id };
+                  alreadyFetched.add(t.taskId);
+                  if (t.isFolder !== true && !t.parentTaskId && !t.assigneeIds?.length) t.isFolder = true;
+                  fetched.push(t);
+                  if (t.parentTaskId && !alreadyFetched.has(t.parentTaskId)) {
+                    nextToFetch.push(t.parentTaskId);
+                    alreadyFetched.add(t.parentTaskId);
+                  }
+                });
+                toFetch = nextToFetch;
+              }
+              return fetched;
+            };
+            fetchChain(initialParentIds).then(fetchedTasks => {
+              if (!fetchedTasks.length) return;
+              // Only root folders go into allTasks — intermediates go to allTaskMap only
+              const rootFolders = fetchedTasks.filter(t => !t.parentTaskId);
+              setAllTasks(prev => {
+                const map = new Map(prev.map(t => [t.taskId, t]));
+                rootFolders.forEach(t => map.set(t.taskId, t));
+                const newList = [...map.values()];
+                // fullMap has everything including intermediate nodes for tree expansion
+                const fullMap = new Map(newList.map(t => [t.taskId, t]));
+                fetchedTasks.forEach(t => fullMap.set(t.taskId, t));
+                allTaskMapRef.current = fullMap;
+                setAllTaskMap(fullMap);
+                return newList;
+              });
+            }).catch(e => console.warn("[FolderParents]", e.message));
+          }
+        }
       },
       err => console.error("realtime tasks listener:", err)
     );
@@ -2032,7 +2781,7 @@ export default function TasksPage() {
   const isConfirmed = task?.confirmedBy?.includes(employeeId);
   const isStarted = task?.status === "in_progress" || task?.status === "done";
   const st = task ? (STATUS[task.status] || STATUS.open) : null;
-  const pri = task?.priority ? (PRI[task.priority] || PRI.medium) : PRI.medium;
+  const pri = getPriDisplay(task?.priority);
   const pct = task?.progressPercent || 0;
   const pctColor = task?.status === "done" ? "#16A34A" : pct >= 70 ? "var(--p,#5B5EF4)" : pct >= 30 ? "#F59E0B" : "#EF4444";
   const pctGradient = task?.status === "done"
@@ -2045,11 +2794,13 @@ export default function TasksPage() {
 
   const grouped = groupByDate(chatMessages);
   const getModalTask = () => activeModal ? (allTaskMap.get(activeModal.taskId) || activeModal.task || task) : task;
-  // For employees: count all their assigned tasks; for CEO/TL: count root tasks only
-  const rootOnlyTasks = role === "employee" ? allTasks : allTasks.filter(t => !t.parentTaskId);
+  // Stats: root = strict !parentTaskId for ALL roles (CEO, TL, employee)
+  // Subtasks always have parentTaskId — never count them in total regardless of role
+  const dedupedForStats = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
+  const rootOnlyTasks = dedupedForStats.filter(t => !t.parentTaskId);
   const stats = {
-    total: rootOnlyTasks.filter(t => t.status !== "done").length,
-    open: rootOnlyTasks.filter(t => t.status === "open").length,
+    total: rootOnlyTasks.length,
+    open: rootOnlyTasks.filter(t => ["open", "pending_deadline_approval", "deadline_approved"].includes(t.status)).length,
     active: rootOnlyTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
     done: rootOnlyTasks.filter(t => t.status === "done").length,
   };
@@ -2060,6 +2811,8 @@ export default function TasksPage() {
   const STYLES = `
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    @keyframes timerPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.75); } }
+    @keyframes timerToastIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
     :root {
       --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       --mono: 'IBM Plex Mono', ui-monospace, monospace;
@@ -2124,6 +2877,8 @@ export default function TasksPage() {
 
     .gv-tbl-head { display:flex; align-items:center; padding:0 6px; height:30px; background:#F7F8FC; border-bottom:1px solid var(--border); font-size:10px; font-weight:700; color:var(--text-4); text-transform:uppercase; letter-spacing:0.05em; position:sticky; top:34px; z-index:4; }
     .gv-tbl-head .col-name    { flex:2; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
+    .gv-tbl-head .col-timer   { width:62px; flex-shrink:0; border-right:1px solid var(--border); padding:0 6px; }
+    .gv-tbl-row .col-timer    { width:62px; flex-shrink:0; border-right:1px solid var(--border); padding:0 6px; display:flex; align-items:center; justify-content:center; }
     .gv-tbl-head .col-desc    { flex:2.5; min-width:0; padding:0 10px; border-right:1px solid var(--border); }
     .gv-tbl-head .col-people  { width:90px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
     .gv-tbl-head .col-pri     { width:88px; padding:0 10px; flex-shrink:0; border-right:1px solid var(--border); }
@@ -2409,6 +3164,8 @@ export default function TasksPage() {
       .gv-tbl-head .col-pri, .gv-tbl-row .col-pri,
       .gv-tbl-head .col-status, .gv-tbl-row .col-status,
       .gv-tbl-check, .gv-tbl-drag { display:none; }
+      .gv-tbl-row .col-timer { width:44px; padding:0 4px; }
+      .gv-tbl-head .col-timer { display:none; }
       .gv-tbl-row { height:54px; }
       .gv-tbl-head .col-people { display:none; }
       .gv-tbl-row .col-people { width:auto; max-width:140px; flex:0 1 auto; padding:0 6px; overflow:hidden; border-right:none; }
@@ -2425,6 +3182,7 @@ export default function TasksPage() {
     .gv-list-panel.is-compact .col-people,
     .gv-list-panel.is-compact .col-pri,
     .gv-list-panel.is-compact .col-date,
+    .gv-list-panel.is-compact .col-timer,
     .gv-list-panel.is-compact .gv-tbl-drag,
     .gv-list-panel.is-compact .gv-tbl-check { display:none; }
     .gv-list-panel.is-compact .gv-tbl-row { height:38px; }
@@ -2475,6 +3233,22 @@ export default function TasksPage() {
 
       <style>{STYLES}</style>
 
+      {/* ── Task Timer Toast notification ── */}
+      {timerToast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          background: timerToast.type === "switch" ? "#1E293B" : timerToast.type === "pause" ? "#334155" : "#166534",
+          color: "#fff", padding: "10px 18px", borderRadius: 12,
+          fontSize: 12, fontWeight: 500, fontFamily: "inherit",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+          display: "flex", alignItems: "center", gap: 8, maxWidth: 360,
+          animation: "timerToastIn 0.25s ease-out",
+        }}>
+          <span style={{ fontSize: 16 }}>{timerToast.type === "switch" ? "⏱" : timerToast.type === "pause" ? "⏸" : "▶"}</span>
+          <span>{timerToast.message}</span>
+        </div>
+      )}
+
       {/* Lightbox Modal */}
       {lightboxImage && (
         <ImageLightbox
@@ -2490,6 +3264,8 @@ export default function TasksPage() {
         {(() => {
           const STATUS_GROUPS_TABLE = [
             { key: "open", label: "Not Started", color: "#EF4444", bg: "#FEF2F2", dot: "#EF4444" },
+            { key: "pending_deadline_approval", label: "Deadline Pending", color: "#D97706", bg: "#FFFBEB", dot: "#D97706" },
+            { key: "deadline_approved", label: "Deadline Approved", color: "#059669", bg: "#ECFDF5", dot: "#059669" },
             { key: "confirmed", label: "Confirmed", color: "#5B5EF4", bg: "#EDEDFE", dot: "#5B5EF4" },
             { key: "in_progress", label: "In Progress", color: "#8B5CF6", bg: "#F3E8FF", dot: "#8B5CF6" },
             { key: "done", label: "Done", color: "#16A34A", bg: "#DCFCE7", dot: "#16A34A" },
@@ -2499,15 +3275,18 @@ export default function TasksPage() {
 
           // For employees: show ALL tasks assigned to them (including forwarded subtasks)
           // For CEO/TL: show only root tasks (they see full hierarchy via subtask expansion)
+          // Deduplicate allTasks first — guards against any race condition duplicates
+          const dedupedTasks = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
           const rootTasks = role === "employee"
-            ? allTasks
-            : allTasks.filter(t => !t.parentTaskId);
+            // Use allTaskMapRef.current (always fresh) to avoid stale-state duplicates
+            ? dedupedTasks.filter(t => !t.parentTaskId || !allTaskMapRef.current.has(t.parentTaskId))
+            : dedupedTasks.filter(t => !t.parentTaskId);
           const filteredRoots = rootTasks.filter(t => {
             const q = listSearch.toLowerCase();
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
             const matchSt = activeStatTab === "all"
               ? t.status !== "done"
-              : (activeStatTab === "open" && t.status === "open")
+              : (activeStatTab === "open" && ["open", "pending_deadline_approval", "deadline_approved"].includes(t.status))
               || (activeStatTab === "in_progress" && (t.status === "in_progress" || t.status === "confirmed"))
               || (activeStatTab === "done" && t.status === "done");
             // Department filter — checks assignee's dept from full employee record
@@ -2588,7 +3367,7 @@ export default function TasksPage() {
           const TblRow = ({ t, depth = 0, isSubtask = false }) => {
             const dl = getDeadlineInfo(t.dueDate);
             const st = STATUS[t.status] || STATUS.open;
-            const p = PRI[t.priority] || PRI.medium;
+            const p = getPriDisplay(t.priority);
             // Only show expand arrow for subtasks visible to current user
             const allSubtaskIds = t.subtaskIds || [];
             const visibleSubtaskIds = isCEO
@@ -2596,22 +3375,67 @@ export default function TasksPage() {
                 const s = allTaskMap.get(sid);
                 return s && (s.createdByCeo === true || (s.assignedBy === employeeId && !s.createdByTl));
               })
-              : allSubtaskIds;
+              : isEmployee
+                // Employee: FLATTEN the subtree — skip intermediate nodes, show only their tasks directly
+                ? (() => {
+                  const getMyTasks = (taskId, seen = new Set()) => {
+                    if (seen.has(taskId)) return [];
+                    seen.add(taskId);
+                    const node = allTaskMapRef.current.get(taskId);
+                    if (!node) return [];
+                    const result = [];
+                    for (const sid of (node.subtaskIds || [])) {
+                      const sub = allTaskMapRef.current.get(sid);
+                      if (!sub) continue;
+                      if ((sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId) {
+                        result.push(sid); // This is my task — show it directly
+                      } else {
+                        // Not my task — go deeper, flatten
+                        result.push(...getMyTasks(sid, seen));
+                      }
+                    }
+                    return result;
+                  };
+                  return getMyTasks(t.taskId);
+                })()
+                : allSubtaskIds;
             const hasChildren = visibleSubtaskIds.length > 0;
             const isExp = expandedIds.has(t.taskId);
             const isSel = task?.taskId === t.taskId;
             const unread = unreadCounts?.[t.taskId] || 0;
             return (
               <>
-                <div className={`gv-tbl-row${isSel ? " selected" : ""}${isSubtask ? " subtask-row" : ""}`} style={{ paddingLeft: 8 + depth * 18 }} onClick={() => handleSelectNode(t)} onMouseEnter={() => handleHoverPrefetch(t.taskId)}>
+                <div className={`gv-tbl-row${isSel ? " selected" : ""}${isSubtask ? " subtask-row" : ""}`}
+                  style={{ paddingLeft: 8 + depth * 18 }}
+                  onClick={e => {
+                    // Don't select task if expand button was clicked
+                    if (e.target.closest(".gv-tbl-expand") || e.target.closest(".gv-tbl-check") || e.target.closest(".gv-tbl-drag") || e.target.closest(".col-act") || e.target.closest(".col-timer")) return;
+                    handleSelectNode(t);
+                  }}
+                  onMouseEnter={() => handleHoverPrefetch(t.taskId)}>
                   <div className="gv-tbl-drag"><svg width="9" height="12" viewBox="0 0 9 12" fill="currentColor"><circle cx="3" cy="2" r="1.1" /><circle cx="6" cy="2" r="1.1" /><circle cx="3" cy="6" r="1.1" /><circle cx="6" cy="6" r="1.1" /><circle cx="3" cy="10" r="1.1" /><circle cx="6" cy="10" r="1.1" /></svg></div>
                   <div className="gv-tbl-check" onClick={e => e.stopPropagation()}>
-                    <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${t.status === "done" ? "#16A34A" : "var(--border2)"}`, background: t.status === "done" ? "#16A34A" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {t.status === "done" && <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2.5 2.5 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                    </div>
+                    {t.isFolder
+                      ? <svg width="16" height="14" viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 4a2 2 0 012-2h4l2.5 3H20a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V4z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
+                      </svg>
+                      : <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${t.status === "done" ? "#16A34A" : "var(--border2)"}`, background: t.status === "done" ? "#16A34A" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {t.status === "done" && <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M1.5 4.5l2.5 2.5 4-4" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                      </div>
+                    }
                   </div>
-                  <div className="gv-tbl-expand" onClick={e => { if (hasChildren) { e.stopPropagation(); e.preventDefault(); toggleExpand(t.taskId); } }}>
-                    {hasChildren && <span style={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)", cursor: "pointer" }}>
+                  <div className="gv-tbl-expand"
+                    onMouseDown={e => {
+                      if (hasChildren) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        toggleExpand(t.taskId);
+                      }
+                    }}
+                    onClick={e => { if (hasChildren) { e.stopPropagation(); e.preventDefault(); } }}
+                    style={{ cursor: hasChildren ? "pointer" : "default" }}
+                  >
+                    {hasChildren && <span style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)" }}>
                       <svg width="9" height="9" viewBox="0 0 9 9" fill="none" style={{ transform: isExp ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     </span>}
                   </div>
@@ -2631,6 +3455,106 @@ export default function TasksPage() {
                         By {t.assignedBy === employeeId ? <span style={{ color: "#5B5EF4", fontWeight: 600 }}>you</span> : <span style={{ color: "var(--text-3)", fontWeight: 600 }}>{employeeMap?.get(t.assignedBy) || t.assignedByName || t.assignedBy}</span>}
                       </span>
                     )}
+                  </div>
+                  <div className="col-timer" onClick={e => e.stopPropagation()}>
+                    {(() => {
+                      const isAssigneeOfThis = (t.assigneeIds || []).includes(employeeId);
+                      const canControl = isAssigneeOfThis;
+                      const canView = isAssigneeOfThis || isCEO || isTL;
+                      if (!canView) return null;
+                      const isRunning = timerActiveTaskId === t.taskId;
+                      const secs = getDisplaySeconds(t.taskId);
+                      const sess = getTimerSession(t.taskId);
+                      const hasTime = (sess?.totalSeconds || 0) > 0 || isRunning;
+                      // Block timer when awaiting deadline approval (can still pause if running)
+                      const timerBlocked = t.status === "pending_deadline_approval" && !isRunning;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                          {/* Button only for assignees */}
+                          {canControl && (
+                            <button
+                              disabled={timerBlocked}
+                              onClick={e => {
+                                e.stopPropagation();
+                                if (timerBlocked) return;
+                                if (isRunning) handleTimerPause(t.taskId, t.title);
+                                else timerStart(t.taskId, t.title);
+                              }}
+                              style={{
+                                width: 28, height: 28, borderRadius: 7, border: "1.5px solid",
+                                borderColor: timerBlocked ? "#FDE68A" : isRunning ? "#BBF7D0" : "#E2E8F0",
+                                background: timerBlocked ? "#FFFBEB" : isRunning ? "#DCFCE7" : "#F8FAFC",
+                                color: timerBlocked ? "#D97706" : isRunning ? "#16A34A" : "#94A3B8",
+                                cursor: timerBlocked ? "not-allowed" : "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0, transition: "all 0.15s",
+                                opacity: timerBlocked ? 0.6 : 1,
+                              }}
+                              onMouseEnter={e => { if (!timerBlocked) { e.currentTarget.style.borderColor = isRunning ? "#86EFAC" : "#6366F1"; e.currentTarget.style.color = isRunning ? "#15803D" : "#4F46E5"; } }}
+                              onMouseLeave={e => { if (!timerBlocked) { e.currentTarget.style.borderColor = isRunning ? "#BBF7D0" : "#E2E8F0"; e.currentTarget.style.color = isRunning ? "#16A34A" : "#94A3B8"; } }}
+                              title={timerBlocked ? "Waiting for deadline approval" : isRunning ? "Pause" : (hasTime ? "Resume" : "Start")}
+                            >
+                              {isRunning
+                                ? <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg>
+                                : <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
+                              }
+                            </button>
+                          )}
+                          {/* CEO/TL: show running indicator if someone is working */}
+                          {!canControl && (() => {
+                            const watchedSession = assigneeAllTimers?.get(t.taskId);
+                            if (!watchedSession) return null;
+                            const isWatching = watchedSession.isActive;
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                                {isWatching && (
+                                  <span style={{
+                                    width: 7, height: 7, borderRadius: "50%",
+                                    background: "#16A34A", display: "inline-block",
+                                    animation: "timerPulse 1.5s ease-in-out infinite",
+                                  }} title={`${watchedSession.employeeName} is working`} />
+                                )}
+                                <span style={{
+                                  fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                                  color: isWatching ? "#16A34A" : "#94A3B8",
+                                  letterSpacing: "0.03em", lineHeight: 1,
+                                }}>
+                                  {formatTimeHMS(watchedSession.displaySeconds)}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {canControl && (
+                            <span style={{
+                              fontSize: 9, fontFamily: "monospace", fontWeight: 700,
+                              color: isRunning ? "#16A34A" : "#94A3B8",
+                              letterSpacing: "0.03em", lineHeight: 1,
+                              opacity: secs === 0 && !isRunning ? 0 : 1,
+                            }}>
+                              {formatTimeHMS(secs)}
+                            </span>
+                          )}
+                          {/* Remaining deadline time */}
+                          {t.dueDate && canControl && (() => {
+                            const msLeft = new Date(t.dueDate).getTime() - Date.now();
+                            const isOver = msLeft < 0;
+                            const absSecs = Math.abs(Math.floor(msLeft / 1000));
+                            const h = Math.floor(absSecs / 3600);
+                            const m = Math.floor((absSecs % 3600) / 60);
+                            const label = isOver
+                              ? (h > 0 ? `-${h}h${m}m` : `-${m}m`)
+                              : (h > 0 ? `${h}h${m}m` : `${m}m`);
+                            const color = isOver ? "#EF4444" : msLeft < 2 * 3600 * 1000 ? "#D97706" : "#94A3B8";
+                            return (
+                              <span style={{ fontSize: 8, fontWeight: 700, color, letterSpacing: "0.02em", lineHeight: 1 }}
+                                title={isOver ? "Deadline passed" : "Time remaining"}>
+                                {isOver ? "⚠️ " : "⏰ "}{label}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="col-desc"><span className="gv-task-desc">{t.description || ""}</span></div>
                   <div className="col-people">
@@ -2673,10 +3597,10 @@ export default function TasksPage() {
                 {rowMenuOpen === t.taskId && (
                   <div className="gv-row-menu" style={{ top: Math.min(rowMenuPos.y + 4, window.innerHeight - 280), left: Math.min(rowMenuPos.x - 160, window.innerWidth - 190) }} onMouseDown={e => e.stopPropagation()}>
                     {[
-                      { l: "Open Chat", a: () => { handleSelectNode(t); setRowMenuOpen(null); } },
+                      ...(!t.isFolder ? [{ l: "Open Chat", a: () => { handleSelectNode(t); setRowMenuOpen(null); } }] : []),
                       ...((isCEO || isTL) ? [{ l: "Add Subtask", a: () => { setActiveModal({ type: "add_subtask", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
-                      ...(!isCEO ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
-                      ...(!isCEO ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(!isCEO && !t.isFolder ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(!isCEO && !t.isFolder ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO ? [{ l: "Edit Deadline", a: () => { setActiveModal({ type: "deadline", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO && t.completionStatus === "submitted" && t.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isTL && t.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(t.reviewFlow) ? [{ l: "Review Submission", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
@@ -3004,14 +3928,37 @@ export default function TasksPage() {
                 ) : (
                   (() => {
                     // ── Split filteredRoots into two sections ──────────────
-                    // Section A: tasks assigned TO me by someone else
-                    const assignedToMe = filteredRoots.filter(t =>
-                      (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId
-                    );
-                    // Section B: tasks I created myself
-                    const createdByMe = filteredRoots.filter(t =>
-                      t.assignedBy === employeeId
-                    );
+                    // Helper: check if ANY descendant of a task involves the employee
+                    const hasDescendantAssignedToMe = (taskId, visited = new Set()) => {
+                      if (visited.has(taskId)) return false;
+                      visited.add(taskId);
+                      const t = allTaskMap.get(taskId);
+                      if (!t) return false;
+                      if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
+                      return (t.subtaskIds || []).some(sid => hasDescendantAssignedToMe(sid, visited));
+                    };
+                    const hasDescendantCreatedByMe = (taskId, visited = new Set()) => {
+                      if (visited.has(taskId)) return false;
+                      visited.add(taskId);
+                      const t = allTaskMap.get(taskId);
+                      if (!t) return false;
+                      if (t.assignedBy === employeeId) return true;
+                      return (t.subtaskIds || []).some(sid => hasDescendantCreatedByMe(sid, visited));
+                    };
+
+                    // Section A: Assigned to me by others (direct OR folder with my subtask deep inside)
+                    const assignedToMe = filteredRoots.filter(t => {
+                      if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
+                      if (t.isFolder) return hasDescendantAssignedToMe(t.taskId);
+                      return false;
+                    });
+                    // Section B: Created by me (direct OR folder with subtask I created)
+                    const createdByMe = filteredRoots.filter(t => {
+                      if (assignedToMe.find(x => x.taskId === t.taskId)) return false;
+                      if (t.assignedBy === employeeId) return true;
+                      if (t.isFolder) return hasDescendantCreatedByMe(t.taskId);
+                      return false;
+                    });
 
                     // Render table rows + column header for a list of tasks inside a section
                     const renderTaskGroup = (tasks, sectionKey) =>
@@ -3031,6 +3978,7 @@ export default function TasksPage() {
                                 <div className="gv-tbl-head">
                                   <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
                                   <div className="col-name">Task Name</div>
+                                  <div className="col-timer">Timer</div>
                                   <div className="col-desc">Description</div>
                                   <div className="col-people">People</div>
                                   <div className="col-pri">Priority</div>
@@ -3148,313 +4096,674 @@ export default function TasksPage() {
         {/* RESIZABLE DIVIDER */}
         {task && <div className="gv-resizer" onMouseDown={handleMouseDown} />}
 
-        {/* COL-2: CHAT */}
-        <div className={`gv-chat ${mobileView === "chat" ? "mob-visible" : "mob-hidden"} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative" }}>
-
-          {/* ── Chat header: WhatsApp-style on mobile, standard on desktop ── */}
-          {task ? (
-            <>
-              {/* MOBILE BACK + GROUP HEADER */}
-              <div className="gv-mob-chat-topbar">
-                <button className="gv-mob-back-btn" onClick={() => { setMobileView("list"); setSelectedTask(null); }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
-                </button>
-                {/* Tappable group info area */}
-                <div className="gv-mob-group-info" onClick={() => setMobDetailPanel("info")}>
-                  <div className="gv-mob-group-avatar">
-                    {(task.title || "T")[0].toUpperCase()}
-                  </div>
-                  <div className="gv-mob-group-text">
-                    <div className="gv-mob-group-name">{task.title}</div>
-                    <div className="gv-mob-group-members">
-                      {(task.assigneeIds || []).slice(0, 4).map((id, i) => {
-                        const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
-                        return <span key={id}>{nm}{i < Math.min((task.assigneeIds || []).length, 4) - 1 ? ", " : ""}</span>;
-                      })}
-                      {(task.assigneeIds || []).length > 4 && <span> +{task.assigneeIds.length - 4} more</span>}
-                      {!(task.assigneeIds?.length) && <span>No members</span>}
-                    </div>
-                  </div>
-                </div>
-                {/* Action icons */}
-                <div className="gv-mob-chat-actions">
-                  <button className="gv-mob-icon-btn" onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", taskId: task.taskId, taskTitle: task.title } }))} title="Request">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                  </button>
-                  {(isCEO || isTL) && <button className="gv-mob-icon-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                  </button>}
-                  <button className="gv-mob-icon-btn" onClick={() => setMobDetailPanel("info")} title="Details">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
-                  </button>
-                </div>
+        {/* COL-2: CHAT for normal tasks / FOLDER CONTENTS for folder tasks */}
+        {task?.isFolder ? (
+          <div className={`gv-chat ${mobileView === "chat" ? "mob-visible" : "mob-hidden"} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative", display: "flex", flexDirection: "column", background: "var(--surface)" }}>
+            {/* Folder header */}
+            <div className="gv-chat-head gv-desk-only" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <span style={{ fontSize: 16 }}>📁</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
+                <div style={{ fontSize: 10, color: "var(--text-4)", marginTop: 1 }}>Folder Task — contains subtasks</div>
               </div>
-
-              {/* DESKTOP: standard header (hidden on mobile) */}
-              <div className="gv-chat-head gv-desk-only">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                  <path d="M14 10a1.33 1.33 0 0 1-1.33 1.33H4L1.33 14.33V3.33A1.33 1.33 0 0 1 2.67 2H12.67A1.33 1.33 0 0 1 14 3.33V10z" fill="var(--p)" opacity=".15" stroke="var(--p)" strokeWidth="1.1" strokeLinejoin="round" />
-                </svg>
-                <div className="gv-chat-task-chip"><span className="gv-chat-tid">{task.taskId}</span></div>
-                <span className="gv-chat-task-name">{task.title}</span>
-                {task.status && <span className="gv-chat-badge" style={{ color: (STATUS[task.status] || STATUS.open).color, background: (STATUS[task.status] || STATUS.open).bg }}>{(STATUS[task.status] || STATUS.open).label}</span>}
-                <div className="gv-chat-actions">
-                  <div className="gv-mob-only-actions">
-                    {(isCEO || isTL) && <button className="gv-chat-act-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg></button>}
-                    {isCEO && <button className="gv-chat-act-btn" onClick={() => handleAction("deadline")} title="Deadline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg></button>}
-                    {isCEO && <button className="gv-chat-act-btn" style={{ color: "var(--danger)" }} onClick={() => handleAction("delete")} title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg></button>}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="gv-chat-head">
-              <span style={{ fontSize: 13, color: "var(--text-4)", fontStyle: "italic" }}>Select a task to start chatting</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#7C3AED", background: "#EDE9FE", padding: "3px 9px", borderRadius: 99 }}>Folder</span>
             </div>
-          )}
+            {/* Folder contents */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+              {/* Subtask count summary */}
+              {(() => {
+                const subtaskIds = task.subtaskIds || task.subtasks?.map(s => s.taskId) || [];
+                const allSubtasks = subtaskIds.map(id => allTaskMap.get(id)).filter(Boolean);
+                // Employee: only show subtasks assigned to or by them — not other people's subtasks
+                const subtasks = role === "employee"
+                  ? allSubtasks.filter(sub =>
+                    (sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId
+                  )
+                  : allSubtasks;
+                const done = subtasks.filter(s => s.status === "done").length;
+                const inProg = subtasks.filter(s => s.status === "in_progress").length;
+                const open = subtasks.filter(s => s.status === "open" || s.status === "not_started").length;
+                return (
+                  <>
+                    {subtasks.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 99, background: "#F0FDF4", color: "#16A34A" }}>✅ {done} Done</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 99, background: "#EFF6FF", color: "#1D4ED8" }}>⏳ {inProg} Active</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 99, background: "#F8FAFC", color: "#64748B" }}>📋 {open} Open</span>
+                      </div>
+                    )}
+                    {subtasks.length === 0 ? (
+                      <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-4)" }}>
+                        <div style={{ fontSize: 32, marginBottom: 10 }}>📂</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-2)", marginBottom: 4 }}>Empty folder</div>
+                        <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 16 }}>Add subtasks to organize work inside this folder</div>
+                        {(isCEO || isTL) && (
+                          <button onClick={() => setActiveModal({ type: "add_subtask", taskId: task.taskId, task })}
+                            style={{ padding: "7px 16px", borderRadius: 8, border: "1.5px solid var(--p)", background: "var(--p-lt)", color: "var(--p)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                            + Add Subtask
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {(isCEO || isTL) && (
+                          <button onClick={() => setActiveModal({ type: "add_subtask", taskId: task.taskId, task })}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "7px", borderRadius: 8, border: "1.5px dashed var(--border2)", background: "transparent", color: "var(--text-4)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 4, transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--p)"; e.currentTarget.style.color = "var(--p)"; e.currentTarget.style.background = "var(--p-lt)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border2)"; e.currentTarget.style.color = "var(--text-4)"; e.currentTarget.style.background = "transparent"; }}>
+                            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                            Add Subtask
+                          </button>
+                        )}
+                        {subtasks.map(sub => {
+                          const sst = STATUS[sub.status] || STATUS.open;
+                          const assigneeName = sub.assigneeIds?.map(id => (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || sub.assigneeNameMap?.[id] || id).join(", ") || "Unassigned";
+                          return (
+                            <div key={sub.taskId} onClick={() => handleSelectNode(sub)}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: "var(--surface)", border: "1px solid var(--border)", cursor: "pointer", transition: "all 0.1s" }}
+                              onMouseEnter={e => { e.currentTarget.style.background = "var(--p-lt)"; e.currentTarget.style.borderColor = "var(--p)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--border)"; }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: sst.dot, flexShrink: 0, display: "inline-block" }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub.title}</div>
+                                <div style={{ fontSize: 10, color: "var(--text-4)", marginTop: 2 }}>{assigneeName}</div>
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, color: sst.color, background: sst.bg, flexShrink: 0 }}>{sst.label}</span>
+                              <svg width="8" height="8" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0 }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        ) : (
+          <div className={`gv-chat ${mobileView === "chat" ? "mob-visible" : "mob-hidden"} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative" }}>
 
-          {/* Mobile tabs now handled by header action buttons above */}
-
-          {/* Messages */}
-          <div className="gv-msgs">
-            {!task ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
-                <div style={{ width: 56, height: 56, borderRadius: 14, background: "var(--p-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--p)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)", marginBottom: 3 }}>No conversation selected</p>
-                  <p style={{ fontSize: 10, color: "var(--text-4)", lineHeight: 1.6 }}>Select a task from the sidebar<br />to view its chat thread</p>
-                </div>
-              </div>
-            ) : detailLoading ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 16, padding: 24 }}>
-                {[1, 2, 3].map(i => (
-                  <div key={i} style={{ display: "flex", gap: 10, alignItems: i % 2 === 0 ? "flex-start" : "flex-end", flexDirection: i % 2 === 0 ? "row" : "row-reverse" }}>
-                    <div className="gv-skeleton gv-skel-circle" style={{ width: 30, height: 30 }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, width: `${40 + i * 10}%` }}>
-                      <div className="gv-skeleton gv-skel-line" style={{ height: 14, width: "60%" }} />
-                      <div className="gv-skeleton" style={{ height: 40 + i * 12, borderRadius: 12, width: "100%" }} />
+            {/* ── Chat header: WhatsApp-style on mobile, standard on desktop ── */}
+            {task ? (
+              <>
+                {/* MOBILE BACK + GROUP HEADER */}
+                <div className="gv-mob-chat-topbar">
+                  <button className="gv-mob-back-btn" onClick={() => { setMobileView("list"); setSelectedTask(null); }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
+                  </button>
+                  {/* Tappable group info area */}
+                  <div className="gv-mob-group-info" onClick={() => setMobDetailPanel("info")}>
+                    <div className="gv-mob-group-avatar">
+                      {(task.title || "T")[0].toUpperCase()}
+                    </div>
+                    <div className="gv-mob-group-text">
+                      <div className="gv-mob-group-name">{task.title}</div>
+                      <div className="gv-mob-group-members">
+                        {(task.assigneeIds || []).slice(0, 4).map((id, i) => {
+                          const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
+                          return <span key={id}>{nm}{i < Math.min((task.assigneeIds || []).length, 4) - 1 ? ", " : ""}</span>;
+                        })}
+                        {(task.assigneeIds || []).length > 4 && <span> +{task.assigneeIds.length - 4} more</span>}
+                        {!(task.assigneeIds?.length) && <span>No members</span>}
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : chatMessages.length === 0 ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 32 }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D0D5DD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                <p style={{ fontSize: 13, color: "var(--text-4)", textAlign: "center" }}>No messages yet. Start the conversation!</p>
-              </div>
+                  {/* Action icons */}
+                  <div className="gv-mob-chat-actions">
+                    <button className="gv-mob-icon-btn" onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", taskId: task.taskId, taskTitle: task.title } }))} title="Request">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                    </button>
+                    {(isCEO || isTL) && <button className="gv-mob-icon-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                    </button>}
+                    <button className="gv-mob-icon-btn" onClick={() => setMobDetailPanel("info")} title="Details">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* DESKTOP: standard header (hidden on mobile) */}
+                <div className="gv-chat-head gv-desk-only">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                    <path d="M14 10a1.33 1.33 0 0 1-1.33 1.33H4L1.33 14.33V3.33A1.33 1.33 0 0 1 2.67 2H12.67A1.33 1.33 0 0 1 14 3.33V10z" fill="var(--p)" opacity=".15" stroke="var(--p)" strokeWidth="1.1" strokeLinejoin="round" />
+                  </svg>
+                  <div className="gv-chat-task-chip"><span className="gv-chat-tid">{task.taskId}</span></div>
+                  <span className="gv-chat-task-name">{task.title}</span>
+                  {task.status && <span className="gv-chat-badge" style={{ color: (STATUS[task.status] || STATUS.open).color, background: (STATUS[task.status] || STATUS.open).bg }}>{(STATUS[task.status] || STATUS.open).label}</span>}
+                  <div className="gv-chat-actions">
+                    <div className="gv-mob-only-actions">
+                      {(isCEO || isTL) && <button className="gv-chat-act-btn" onClick={() => handleAction("add_subtask")} title="Add Subtask"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg></button>}
+                      {isCEO && <button className="gv-chat-act-btn" onClick={() => handleAction("deadline")} title="Deadline"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg></button>}
+                      {isCEO && <button className="gv-chat-act-btn" style={{ color: "var(--danger)" }} onClick={() => handleAction("delete")} title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg></button>}
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : (
-              grouped.map((item, idx) => {
-                if (item.type === "date") {
-                  return (
-                    <div key={`date-${idx}`} className="gv-date-sep">
+              <div className="gv-chat-head">
+                <span style={{ fontSize: 13, color: "var(--text-4)", fontStyle: "italic" }}>Select a task to start chatting</span>
+              </div>
+            )}
+
+            {/* Mobile tabs now handled by header action buttons above */}
+
+            {/* ── QUICK TOUR — shows on new open tasks so employee knows the flow ── */}
+            {task && !task.isFolder && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
+              <div style={{
+                flexShrink: 0, padding: "10px 14px 8px",
+                background: "linear-gradient(135deg,#EEF2FF,#F0FDF4)",
+                borderBottom: "1px solid #E5E7EB",
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                  How this task works
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto" }}>
+                  {[
+                    { emoji: "📅", label: "Set Deadline", active: true },
+                    { emoji: "⏳", label: "TL Approves", active: false },
+                    { emoji: "✅", label: "Confirm Task", active: false },
+                    { emoji: "▶", label: "Start Work", active: false },
+                  ].map((step, i, arr) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                      <div style={{
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                        padding: "4px 8px", borderRadius: 8,
+                        background: step.active ? "#4F46E5" : "transparent",
+                        minWidth: 56,
+                      }}>
+                        <span style={{ fontSize: 16 }}>{step.emoji}</span>
+                        <span style={{ fontSize: 9, fontWeight: step.active ? 700 : 500, color: step.active ? "#fff" : "#9CA3AF", whiteSpace: "nowrap" }}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {i < arr.length - 1 && (
+                        <div style={{ width: 20, height: 1, background: "#D1D5DB", flexShrink: 0 }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── WORKFLOW BANNER (pre-confirmed only) — shown in chat column ── */}
+            {task && !task.isFolder && isAssignee && !isConfirmed && (() => {
+              const df = {
+                proposedDate: proposedDeadlineDate,
+                proposedTime: proposedDeadlineTime,
+                setDate: setProposedDeadlineDate,
+                setTime: setProposedDeadlineTime,
+                proposing: proposingDeadline,
+                approving: approvingDeadline,
+                rejectReason,
+                setRejectReason,
+                showRejectInput,
+                setShowRejectInput,
+                showExtend: showExtendForm,
+                setShowExtend: setShowExtendForm,
+                onPropose: handleProposeDeadline,
+                onApprove: handleApproveDeadline,
+              };
+              const status = task.status;
+              const hasDueDate = !!task.dueDate;
+              const isPendingApproval = status === "pending_deadline_approval";
+              const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
+              const deadlinePassed = deadlineMs && deadlineMs < Date.now();
+              const passedStr = (() => {
+                if (!deadlinePassed || !deadlineMs) return "";
+                const diff = Math.abs(Math.floor((Date.now() - deadlineMs) / 60000));
+                if (diff < 60) return `${diff}m ago`;
+                const h = Math.floor(diff / 60);
+                return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+              })();
+
+              // Don't show if task is in_progress/done (already working)
+              if (["in_progress", "done"].includes(status)) return null;
+
+              return (
+                <div style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", background: "var(--surface)", padding: "10px 14px" }}>
+                  {/* Step: confirmed → Start Working */}
+                  {isConfirmed && !isStarted && status === "confirmed" && (
+                    <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                        <span style={{ fontSize: 14 }}>▶</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Ready to Start</span>
+                      </div>
+                      {task.dueDate && (
+                        <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8 }}>
+                          Deadline: <strong>{new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</strong>
+                        </div>
+                      )}
+                      <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}
+                        style={{ width: "100%", marginBottom: 0 }}>
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
+                        Start Working
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step: dueDate set → Confirm */}
+                  {hasDueDate && !isPendingApproval && (
+                    <div style={{ background: deadlinePassed ? "#FEF2F2" : "#F0FDF4", border: `1.5px solid ${deadlinePassed ? "#FECDD3" : "#BBF7D0"}`, borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 14 }}>{deadlinePassed ? "⚠️" : "✓"}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: deadlinePassed ? "#991B1B" : "#166534" }}>
+                          {deadlinePassed ? "Deadline Passed — Confirm Task" : "Deadline Approved"}
+                        </span>
+                      </div>
+                      {task.dueDate && (
+                        <div style={{ fontSize: 11, fontWeight: 600, color: deadlinePassed ? "#B91C1C" : "#166534", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+                          📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {deadlinePassed && <span style={{ opacity: 0.75 }}>· passed {passedStr}</span>}
+                        </div>
+                      )}
+                      <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
+                        style={{ width: "100%", marginBottom: 0 }}>
+                        <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        Confirm &amp; Accept Task
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step 1: propose deadline */}
+                  {!hasDueDate && status === "open" && (
+                    <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B" }}>Set Your Deadline</span>
+                      </div>
+                      {task.deadlineProposalRejected && (
+                        <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, padding: "6px 8px", marginBottom: 8, fontSize: 11, color: "#991B1B" }}>
+                          ❌ <strong>Rejected:</strong> {task.deadlineRejectionReason || "Please propose a new deadline."}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                        <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
+                          onChange={e => df.setDate?.(e.target.value)}
+                          style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
+                          style={{ width: 80, padding: "6px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                      </div>
+                      <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
+                        className="gv-wf-btn gv-wf-confirm" style={{ width: "100%", marginBottom: 0, opacity: !df.proposedDate || df.proposing ? 0.5 : 1 }}>
+                        {df.proposing ? "Submitting…" : "📅 Submit Deadline for Approval"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Step 2: awaiting */}
+                  {status === "pending_deadline_approval" && (
+                    <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#FEF3C7", border: "2px solid #D97706", color: "#D97706", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
+                      </div>
+                      {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "3px 8px", borderRadius: 6, display: "inline-block" }}>
+                        📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Creator approval panel in chat column */}
+            {task && !task.isFolder && task.status === "pending_deadline_approval" && task.assignedBy === employeeId && (
+              <div style={{ flexShrink: 0, padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "#FFF7ED" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>
+                  {["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") ? "📅 Deadline Extension Request" : "📋 Deadline Proposal"}
+                </div>
+                {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 8 }}>
+                  <strong>{task.proposedDeadlineByName}</strong> →
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>}
+                {!showRejectInput ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => handleApproveDeadline(true)} disabled={approvingDeadline}
+                      style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: approvingDeadline ? 0.5 : 1 }}>
+                      {approvingDeadline ? "…" : "✓ Approve"}
+                    </button>
+                    <button onClick={() => setShowRejectInput(true)} disabled={approvingDeadline}
+                      style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                      ✕ Reject
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                      placeholder="Reason for rejection…"
+                      style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 48, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => handleApproveDeadline(false)} disabled={!rejectReason.trim() || approvingDeadline}
+                        style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !rejectReason.trim() || approvingDeadline ? 0.5 : 1 }}>
+                        Send Rejection
+                      </button>
+                      <button onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
+                        style={{ padding: "6px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── DRAFT / NORMAL CHAT TAB BAR ──────────────────────────────────── */}
+            {task && !task.isFolder && (() => {
+              const isPreConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(task.status);
+              const isPostConfirmed = ["confirmed", "in_progress", "done"].includes(task.status);
+              return (
+                <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
+                  {/* Draft Chat tab — always visible */}
+                  <button
+                    onClick={() => setChatTabMode("draft")}
+                    style={{ flex: 1, padding: "8px 12px", border: "none", background: "none", fontFamily: "var(--font)", fontSize: 11, fontWeight: chatTabMode === "draft" ? 700 : 500, color: chatTabMode === "draft" ? "#D97706" : "var(--text-3)", borderBottom: `2px solid ${chatTabMode === "draft" ? "#D97706" : "transparent"}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, transition: "all 0.12s" }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                    Draft Chat
+                    {isPreConfirmed && <span style={{ fontSize: 8, fontWeight: 700, background: "#FEF3C7", color: "#D97706", padding: "1px 5px", borderRadius: 99, border: "1px solid #FDE68A" }}>ACTIVE</span>}
+                    {isPostConfirmed && <span style={{ fontSize: 8, color: "#94A3B8" }}>read-only</span>}
+                    {draftMessages.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, background: chatTabMode === "draft" ? "#FEF3C7" : "var(--bg)", color: chatTabMode === "draft" ? "#D97706" : "var(--text-4)", padding: "1px 5px", borderRadius: 99 }}>{draftMessages.length}</span>}
+                  </button>
+                  {/* Normal Chat tab — only after confirmation */}
+                  <button
+                    onClick={() => isPostConfirmed && setChatTabMode("normal")}
+                    disabled={isPreConfirmed}
+                    style={{ flex: 1, padding: "8px 12px", border: "none", background: "none", fontFamily: "var(--font)", fontSize: 11, fontWeight: chatTabMode === "normal" ? 700 : 500, color: isPreConfirmed ? "var(--text-4)" : (chatTabMode === "normal" ? "var(--p)" : "var(--text-3)"), borderBottom: `2px solid ${chatTabMode === "normal" ? "var(--p)" : "transparent"}`, cursor: isPreConfirmed ? "not-allowed" : "pointer", opacity: isPreConfirmed ? 0.45 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, transition: "all 0.12s" }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                    Chat
+                    {isPreConfirmed && <span style={{ fontSize: 8, color: "#94A3B8" }}>locked</span>}
+                    {chatMessages.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, background: chatTabMode === "normal" ? "var(--p-lt)" : "var(--bg)", color: chatTabMode === "normal" ? "var(--p)" : "var(--text-4)", padding: "1px 5px", borderRadius: 99 }}>{chatMessages.length}</span>}
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* Messages */}
+            <div className="gv-msgs">
+              {!task ? (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: 14, background: "var(--p-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--p)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)", marginBottom: 3 }}>No conversation selected</p>
+                    <p style={{ fontSize: 10, color: "var(--text-4)", lineHeight: 1.6 }}>Select a task from the sidebar<br />to view its chat thread</p>
+                  </div>
+                </div>
+              ) : detailLoading ? (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 16, padding: 24 }}>
+                  {[1, 2, 3].map(i => (
+                    <div key={i} style={{ display: "flex", gap: 10, alignItems: i % 2 === 0 ? "flex-start" : "flex-end", flexDirection: i % 2 === 0 ? "row" : "row-reverse" }}>
+                      <div className="gv-skeleton gv-skel-circle" style={{ width: 30, height: 30 }} />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, width: `${40 + i * 10}%` }}>
+                        <div className="gv-skeleton gv-skel-line" style={{ height: 14, width: "60%" }} />
+                        <div className="gv-skeleton" style={{ height: 40 + i * 12, borderRadius: 12, width: "100%" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : chatTabMode === "draft" ? (
+                /* ── DRAFT CHAT MESSAGES ── */
+                draftMessages.length === 0 ? (
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 32 }}>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#FDE68A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", textAlign: "center" }}>Draft Chat</p>
+                    <p style={{ fontSize: 11, color: "var(--text-4)", textAlign: "center", lineHeight: 1.5 }}>
+                      {["confirmed", "in_progress", "done"].includes(task?.status) ? "Draft discussion from before confirmation." : "Discuss the task details and deadline here before confirming."}
+                    </p>
+                  </div>
+                ) : groupByDate(draftMessages).map((item, idx) => {
+                  if (item.type === "date") return (
+                    <div key={`ddate-${idx}`} className="gv-date-sep">
                       <div className="gv-date-sep-line" />
                       <span className="gv-date-sep-label">{item.label}</span>
                       <div className="gv-date-sep-line" />
                     </div>
                   );
-                }
-                const msg = item;
-                const isMe = msg.senderId === employeeId;
-                const isSystem = msg.messageType === "system" || msg.senderRole === "system";
-
-                if (isSystem) {
+                  const msg = item;
+                  const isMe = msg.senderId === employeeId;
+                  if (msg.messageType === "system") return <div key={msg.messageId || idx} className="gv-sys-msg">{msg.text}</div>;
+                  const prevMsg = idx > 0 ? groupByDate(draftMessages)[idx - 1] : null;
+                  const showAvatar = !prevMsg || prevMsg.type === "date" || prevMsg.senderId !== msg.senderId;
                   return (
-                    <div key={msg.messageId || idx} className="gv-sys-msg">{msg.text}</div>
-                  );
-                }
-
-                const msgTime = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
-                const openedAt = lastReadAtRef.current[selectedTask?.taskId] || 0;
-                // A message is "new/unread" if it arrived after the chat was opened
-                // AND it was not sent by the current user
-                const isNewMsg = !isMe && !msg.temp && msgTime > openedAt;
-
-                // Group consecutive messages from same sender — hide avatar
-                const prevMsg = idx > 0 ? grouped[idx - 1] : null;
-                const showAvatar = !prevMsg || prevMsg.type === "date" || prevMsg.senderId !== msg.senderId;
-
-                return (
-                  <SwipeableMessage
-                    key={msg.messageId || idx}
-                    isMe={isMe}
-                    onReply={() => setReplyTo({ messageId: msg.messageId, text: msg.text || (msg.attachments?.length ? "📎 Attachment" : ""), senderName: msg.senderName, senderId: msg.senderId })}
-                    onContextMenu={(e) => handleContextMenu(e, msg)}
-                    onLongPressStart={() => handleLongPressStart(msg)}
-                    onLongPressEnd={handleLongPressEnd}
-                    style={{ marginTop: showAvatar ? 8 : 1 }}
-                  >
-                    {!isMe && (
-                      <div className="gv-msg-avatar" style={{ position: "relative", visibility: showAvatar ? "visible" : "hidden" }}>
-                        {(msg.senderName || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                        {/* Green dot on avatar for new messages */}
-                        {isNewMsg && (
-                          <span style={{
-                            position: "absolute", bottom: -1, right: -1,
-                            width: 9, height: 9, borderRadius: "50%",
-                            background: "#16A34A",
-                            border: "2px solid var(--bg, #F4F6FB)",
-                            flexShrink: 0,
-                          }} />
-                        )}
-                      </div>
-                    )}
-                    <div className="gv-msg-col">
-                      <div className="gv-msg-meta" style={{ display: showAvatar ? "flex" : "none" }}>
-                        {!isMe && <span>{msg.senderName}</span>}
-                        {msg.createdAt && (
-                          <span style={{ marginLeft: isMe ? 0 : 6 }}>
-                            {new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        )}
-
-                        {isNewMsg && (
-                          <span style={{
-                            marginLeft: 6,
-                            fontSize: 9,
-                            fontWeight: 700,
-                            color: "#16A34A",
-                            background: "rgba(16,185,129,0.12)",
-                            padding: "1px 6px",
-                            borderRadius: 99,
-                            letterSpacing: "0.04em",
-                          }}>
-                            NEW · {new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        )}
-                      </div>
-                      <div className="gv-bubble-wrapper">
-                        <div className={`gv-bubble${msg.sending ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}${isNewMsg ? " gv-bubble-new" : ""}`}>
-                          {/* Reply quote */}
-                          {msg.replyTo && (() => {
-                            const replyIsMe = msg.replyTo.senderName === employeeName || msg.replyTo.senderId === employeeId;
-                            const replyLabel = replyIsMe ? "You" : msg.replyTo.senderName;
-                            return (
-                              <div style={{
-                                background: isMe ? "rgba(0,0,0,0.15)" : "rgba(79,70,229,0.07)",
-                                borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.5)" : "var(--p)"}`,
-                                borderRadius: "0 6px 6px 0",
-                                padding: "5px 9px",
-                                marginBottom: 6,
-                                cursor: "pointer",
-                              }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.9)" : "var(--p)", marginBottom: 2 }}>{replyLabel}</div>
-                                <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 230 }}>{msg.replyTo.text}</div>
-                              </div>
-                            );
-                          })()}
-                          {msg.text && <div>{msg.text}</div>}
-                          {msg.attachments?.map((att, ai) => {
-                            if (att.type === "image") {
-                              return (
-                                <img
-                                  key={ai}
-                                  src={att.url}
-                                  alt="attachment"
-                                  className="gv-image-preview"
-                                  onClick={() => setLightboxImage(att.url)}
-                                />
-                              );
-                            }
-                            if (att.type === "pdf") {
-                              return (
-                                <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer" className="gv-attachment">
-                                  📄 {att.name || "Document"}
-                                  <span className="gv-attachment-download">
-                                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 1v8M4 6l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" /><path d="M1 11h12" strokeLinecap="round" /></svg>
-                                  </span>
-                                </a>
-                              );
-                            }
-                            if (att.type === "voice") {
-                              return (
-                                <div key={ai} style={{ marginTop: 6 }}>
-                                  <audio controls src={att.url} style={{ maxWidth: "200px", height: "32px" }} />
-                                </div>
-                              );
-                            }
-                            return null;
-                          })}
-                          {msg.mediaUrl && msg.messageType === "image" && (
-                            <img src={msg.mediaUrl} alt="attachment" className="gv-image-preview" onClick={() => setLightboxImage(msg.mediaUrl)} />
-                          )}
-                          {msg.pdfUrl && (
-                            <a href={msg.pdfUrl} target="_blank" rel="noopener noreferrer" className="gv-attachment">
-                              📄 {msg.pdfFileName || "Document"}
-                            </a>
-                          )}
-                          {/* WhatsApp ticks + time */}
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 4 }}>
-                            <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.65)" : "var(--text-4)" }}>
-                              {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
-                            </span>
-                            {isMe && msg.sending && (
-                              <svg width="12" height="9" viewBox="0 0 12 9"><path d="M1 4.5L4 7.5L11 1" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                            )}
-                            {isMe && !msg.temp && !msg.error && !msg.sending && (() => {
-                              const rb = msg.readBy || [];
-                              const otherAssignees = (selectedTask?.assigneeIds || []).filter(id => id !== employeeId);
-                              const seenByOther = otherAssignees.some(id => rb.includes(id));
-                              // Single grey tick = sent, Double grey = delivered, Double blue = read
-                              if (seenByOther) {
-                                // Double BLUE tick — message has been read
-                                return (
-                                  <svg width="16" height="9" viewBox="0 0 16 9" style={{ flexShrink: 0 }}>
-                                    <path d="M1 4.5L4 7.5L11 1" stroke="#53BDEB" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                                    <path d="M5 4.5L8 7.5L15 1" stroke="#53BDEB" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                                  </svg>
-                                );
-                              }
-                              // Double grey tick — delivered but not read
-                              return (
-                                <svg width="16" height="9" viewBox="0 0 16 9" style={{ flexShrink: 0 }}>
-                                  <path d="M1 4.5L4 7.5L11 1" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                                  <path d="M5 4.5L8 7.5L15 1" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              );
-                            })()}
+                    <div key={msg.messageId || idx} className={`gv-msg-group${isMe ? " me" : ""}`} style={{ marginTop: showAvatar ? 8 : 1 }}>
+                      {!isMe && <div className="gv-msg-avatar" style={{ visibility: showAvatar ? "visible" : "hidden" }}>{(msg.senderName || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}</div>}
+                      <div className="gv-msg-col">
+                        {showAvatar && <div className="gv-msg-meta">{!isMe && <span>{msg.senderName}</span>}{msg.createdAt && <span style={{ marginLeft: isMe ? 0 : 6 }}>{new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>}</div>}
+                        <div className="gv-bubble-wrapper">
+                          <div className={`gv-bubble${msg.temp ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}`}>
+                            {msg.text && <div>{msg.text}</div>}
+                            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                              <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.65)" : "var(--text-4)" }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+                            </div>
                           </div>
-                          {msg.error && <div className="gv-bubble-status gv-error">Failed to send</div>}
                         </div>
-                        {/* CEO can delete messages via context menu */}
-                        {isCEO && !msg.temp && (
-                          <button className="gv-delete-msg" onClick={(e) => { e.stopPropagation(); handleContextMenu(e, msg); }} title="More options">⋯</button>
-                        )}
                       </div>
                     </div>
-                  </SwipeableMessage>
-                );
-              })
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input bar with @ mention */}
-          {task && (
-            <div style={{ position: "relative" }}>
-              {/* Reply preview bar */}
-              {replyTo && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 5px", background: "var(--p-lt)", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--p)", marginBottom: 1 }}>Replying to {replyTo.senderName === employeeName ? "yourself" : replyTo.senderName}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text}</div>
-                  </div>
-                  <button onClick={() => setReplyTo(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-4)", padding: 3, flexShrink: 0, display: "flex" }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                  </button>
+                  );
+                })
+              ) : chatMessages.length === 0 ? (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 32 }}>
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D0D5DD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                  <p style={{ fontSize: 13, color: "var(--text-4)", textAlign: "center" }}>No messages yet. Start the conversation!</p>
                 </div>
+              ) : (
+                grouped.map((item, idx) => {
+                  if (item.type === "date") {
+                    return (
+                      <div key={`date-${idx}`} className="gv-date-sep">
+                        <div className="gv-date-sep-line" />
+                        <span className="gv-date-sep-label">{item.label}</span>
+                        <div className="gv-date-sep-line" />
+                      </div>
+                    );
+                  }
+                  const msg = item;
+                  const isMe = msg.senderId === employeeId;
+                  const isSystem = msg.messageType === "system" || msg.senderRole === "system";
+
+                  if (isSystem) {
+                    return (
+                      <div key={msg.messageId || idx} className="gv-sys-msg">{msg.text}</div>
+                    );
+                  }
+
+                  const msgTime = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
+                  const openedAt = lastReadAtRef.current[selectedTask?.taskId] || 0;
+                  // A message is "new/unread" if it arrived after the chat was opened
+                  // AND it was not sent by the current user
+                  const isNewMsg = !isMe && !msg.temp && msgTime > openedAt;
+
+                  // Group consecutive messages from same sender — hide avatar
+                  const prevMsg = idx > 0 ? grouped[idx - 1] : null;
+                  const showAvatar = !prevMsg || prevMsg.type === "date" || prevMsg.senderId !== msg.senderId;
+
+                  return (
+                    <SwipeableMessage
+                      key={msg.messageId || idx}
+                      isMe={isMe}
+                      onReply={() => setReplyTo({ messageId: msg.messageId, text: msg.text || (msg.attachments?.length ? "📎 Attachment" : ""), senderName: msg.senderName, senderId: msg.senderId })}
+                      onContextMenu={(e) => handleContextMenu(e, msg)}
+                      onLongPressStart={() => handleLongPressStart(msg)}
+                      onLongPressEnd={handleLongPressEnd}
+                      style={{ marginTop: showAvatar ? 8 : 1 }}
+                    >
+                      {!isMe && (
+                        <div className="gv-msg-avatar" style={{ position: "relative", visibility: showAvatar ? "visible" : "hidden" }}>
+                          {(msg.senderName || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                          {/* Green dot on avatar for new messages */}
+                          {isNewMsg && (
+                            <span style={{
+                              position: "absolute", bottom: -1, right: -1,
+                              width: 9, height: 9, borderRadius: "50%",
+                              background: "#16A34A",
+                              border: "2px solid var(--bg, #F4F6FB)",
+                              flexShrink: 0,
+                            }} />
+                          )}
+                        </div>
+                      )}
+                      <div className="gv-msg-col">
+                        <div className="gv-msg-meta" style={{ display: showAvatar ? "flex" : "none" }}>
+                          {!isMe && <span>{msg.senderName}</span>}
+                          {msg.createdAt && (
+                            <span style={{ marginLeft: isMe ? 0 : 6 }}>
+                              {new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          )}
+
+                          {isNewMsg && (
+                            <span style={{
+                              marginLeft: 6,
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: "#16A34A",
+                              background: "rgba(16,185,129,0.12)",
+                              padding: "1px 6px",
+                              borderRadius: 99,
+                              letterSpacing: "0.04em",
+                            }}>
+                              NEW · {new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="gv-bubble-wrapper">
+                          <div className={`gv-bubble${msg.sending ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}${isNewMsg ? " gv-bubble-new" : ""}`}>
+                            {/* Reply quote */}
+                            {msg.replyTo && (() => {
+                              const replyIsMe = msg.replyTo.senderName === employeeName || msg.replyTo.senderId === employeeId;
+                              const replyLabel = replyIsMe ? "You" : msg.replyTo.senderName;
+                              return (
+                                <div style={{
+                                  background: isMe ? "rgba(0,0,0,0.15)" : "rgba(79,70,229,0.07)",
+                                  borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.5)" : "var(--p)"}`,
+                                  borderRadius: "0 6px 6px 0",
+                                  padding: "5px 9px",
+                                  marginBottom: 6,
+                                  cursor: "pointer",
+                                }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.9)" : "var(--p)", marginBottom: 2 }}>{replyLabel}</div>
+                                  <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 230 }}>{msg.replyTo.text}</div>
+                                </div>
+                              );
+                            })()}
+                            {msg.text && <div>{msg.text}</div>}
+                            {msg.attachments?.map((att, ai) => {
+                              if (att.type === "image") {
+                                return (
+                                  <img
+                                    key={ai}
+                                    src={att.url}
+                                    alt="attachment"
+                                    className="gv-image-preview"
+                                    onClick={() => setLightboxImage(att.url)}
+                                  />
+                                );
+                              }
+                              if (att.type === "pdf") {
+                                return (
+                                  <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer" className="gv-attachment">
+                                    📄 {att.name || "Document"}
+                                    <span className="gv-attachment-download">
+                                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M7 1v8M4 6l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" /><path d="M1 11h12" strokeLinecap="round" /></svg>
+                                    </span>
+                                  </a>
+                                );
+                              }
+                              if (att.type === "voice") {
+                                return (
+                                  <div key={ai} style={{ marginTop: 6 }}>
+                                    <audio controls src={att.url} style={{ maxWidth: "200px", height: "32px" }} />
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })}
+                            {msg.mediaUrl && msg.messageType === "image" && (
+                              <img src={msg.mediaUrl} alt="attachment" className="gv-image-preview" onClick={() => setLightboxImage(msg.mediaUrl)} />
+                            )}
+                            {msg.pdfUrl && (
+                              <a href={msg.pdfUrl} target="_blank" rel="noopener noreferrer" className="gv-attachment">
+                                📄 {msg.pdfFileName || "Document"}
+                              </a>
+                            )}
+                            {/* WhatsApp ticks + time */}
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 4 }}>
+                              <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.65)" : "var(--text-4)" }}>
+                                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                              </span>
+                              {isMe && msg.sending && (
+                                <svg width="12" height="9" viewBox="0 0 12 9"><path d="M1 4.5L4 7.5L11 1" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                              )}
+                              {isMe && !msg.temp && !msg.error && !msg.sending && (() => {
+                                const rb = msg.readBy || [];
+                                const otherAssignees = (selectedTask?.assigneeIds || []).filter(id => id !== employeeId);
+                                const seenByOther = otherAssignees.some(id => rb.includes(id));
+                                // Single grey tick = sent, Double grey = delivered, Double blue = read
+                                if (seenByOther) {
+                                  // Double BLUE tick — message has been read
+                                  return (
+                                    <svg width="16" height="9" viewBox="0 0 16 9" style={{ flexShrink: 0 }}>
+                                      <path d="M1 4.5L4 7.5L11 1" stroke="#53BDEB" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                                      <path d="M5 4.5L8 7.5L15 1" stroke="#53BDEB" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  );
+                                }
+                                // Double grey tick — delivered but not read
+                                return (
+                                  <svg width="16" height="9" viewBox="0 0 16 9" style={{ flexShrink: 0 }}>
+                                    <path d="M1 4.5L4 7.5L11 1" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d="M5 4.5L8 7.5L15 1" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                );
+                              })()}
+                            </div>
+                            {msg.error && <div className="gv-bubble-status gv-error">Failed to send</div>}
+                          </div>
+                          {/* CEO can delete messages via context menu */}
+                          {isCEO && !msg.temp && (
+                            <button className="gv-delete-msg" onClick={(e) => { e.stopPropagation(); handleContextMenu(e, msg); }} title="More options">⋯</button>
+                          )}
+                        </div>
+                      </div>
+                    </SwipeableMessage>
+                  );
+                })
               )}
-              <div className="gv-input-bar">
-                <MediaMessageInput
-                  onSend={handleSendChat}
-                  placeholder={`Message in ${task.title}…`}
-                  disabled={false}
-                />
-              </div>
+              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
+
+            {/* Input bar with @ mention */}
+            {task && (
+              <div style={{ position: "relative" }}>
+                {/* Reply preview bar */}
+                {replyTo && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px 5px", background: "var(--p-lt)", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--p)", marginBottom: 1 }}>Replying to {replyTo.senderName === employeeName ? "yourself" : replyTo.senderName}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text}</div>
+                    </div>
+                    <button onClick={() => setReplyTo(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-4)", padding: 3, flexShrink: 0, display: "flex" }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                  </div>
+                )}
+                <div className="gv-input-bar">
+                  <MediaMessageInput
+                    onSend={chatTabMode === "draft" ? handleSendDraftChat : handleSendChat}
+                    placeholder={chatTabMode === "draft" ? `Draft: ${task.title}…` : `Chat in ${task.title}…`}
+                    disabled={chatTabMode === "draft" && ["confirmed", "in_progress", "done"].includes(task?.status)}
+                  />
+                  {chatTabMode === "draft" && ["confirmed", "in_progress", "done"].includes(task?.status) && (
+                    <div style={{ padding: "6px 12px", background: "#FFFBEB", borderTop: "1px solid #FDE68A", fontSize: 10, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                      Draft chat is read-only after task confirmation
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* MOBILE DETAIL OVERLAY (Info/Reports) */}
         {task && mobDetailPanel && (
@@ -3515,9 +4824,17 @@ export default function TasksPage() {
                 </div>
                 <div className="gv-detail-tabs">
                   <button className={`gv-dtab ${mobDetailPanel === "info" ? "active" : ""}`} onClick={() => setMobDetailPanel("info")}>ℹ️ Info</button>
-                  <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>
-                    📊 Reports {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
-                  </button>
+                  {!task.isFolder && (
+                    <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>
+                      📊 Reports {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
+                    </button>
+                  )}
+                  {task.isFolder && (
+                    <span style={{ fontSize: 10, fontWeight: 600, color: "#7C3AED", background: "#EDE9FE", padding: "3px 9px", borderRadius: 99, display: "flex", alignItems: "center", gap: 4, marginLeft: 6, alignSelf: "center" }}>
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                      Folder
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -3542,6 +4859,28 @@ export default function TasksPage() {
                 unreadCounts={unreadCounts}
                 employeeMap={employeeMap}
                 chatMessages={chatMessages}
+                timerActiveTaskId={timerActiveTaskId}
+                getDisplaySeconds={getDisplaySeconds}
+                getTimerSession={getTimerSession}
+                timerStart={timerStart}
+                timerPause={handleTimerPause}
+                watchedTimers={assigneeAllTimers}
+                deadlineFlow={{
+                  proposedDate: proposedDeadlineDate,
+                  proposedTime: proposedDeadlineTime,
+                  setDate: setProposedDeadlineDate,
+                  setTime: setProposedDeadlineTime,
+                  proposing: proposingDeadline,
+                  approving: approvingDeadline,
+                  rejectReason,
+                  setRejectReason,
+                  showRejectInput,
+                  setShowRejectInput,
+                  showExtend: showExtendForm,
+                  setShowExtend: setShowExtendForm,
+                  onPropose: handleProposeDeadline,
+                  onApprove: handleApproveDeadline,
+                }}
               />
             </div>
           </div>
@@ -3644,18 +4983,28 @@ export default function TasksPage() {
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" strokeWidth="1" /><path d="M5.5 5v3M5.5 3.5v.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>
                       Info
                     </button>
-                    <button className={`gv-dtab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => { setActiveDetailTab("reports"); setRightPanel("reports"); }}>
-                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="1" y="7" width="2" height="3.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="4.5" y="4" width="2" height="6.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="8" y="1" width="2" height="9.5" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
-                      Reports
-                      {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
-                    </button>
-                    <button className={`gv-dtab ${rightPanel === "requests" ? "active" : ""}`} onClick={() => setRightPanel("requests")}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                      Requests
-                    </button>
+                    {!task.isFolder && (
+                      <button className={`gv-dtab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => { setActiveDetailTab("reports"); setRightPanel("reports"); }}>
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><rect x="1" y="7" width="2" height="3.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="4.5" y="4" width="2" height="6.5" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="8" y="1" width="2" height="9.5" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
+                        Reports
+                        {(task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
+                      </button>
+                    )}
+                    {!task.isFolder && (
+                      <button className={`gv-dtab ${rightPanel === "requests" ? "active" : ""}`} onClick={() => setRightPanel("requests")}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                        Requests
+                      </button>
+                    )}
+                    {task.isFolder && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7C3AED", background: "#EDE9FE", padding: "3px 9px", borderRadius: 99, display: "flex", alignItems: "center", gap: 4, marginLeft: 4, alignSelf: "center" }}>
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                        Folder Task
+                      </span>
+                    )}
                   </div>
 
-                  {rightPanel === "requests" ? (
+                  {rightPanel === "requests" && !task.isFolder ? (
                     <TaskRequestsPanel
                       task={task}
                       employeeId={employeeId}
@@ -3686,6 +5035,28 @@ export default function TasksPage() {
                       unreadCounts={unreadCounts}
                       employeeMap={employeeMap}
                       chatMessages={chatMessages}
+                      timerActiveTaskId={timerActiveTaskId}
+                      getDisplaySeconds={getDisplaySeconds}
+                      getTimerSession={getTimerSession}
+                      timerStart={timerStart}
+                      deadlineFlow={{
+                        proposedDate: proposedDeadlineDate,
+                        proposedTime: proposedDeadlineTime,
+                        setDate: setProposedDeadlineDate,
+                        setTime: setProposedDeadlineTime,
+                        proposing: proposingDeadline,
+                        approving: approvingDeadline,
+                        rejectReason,
+                        setRejectReason,
+                        showRejectInput,
+                        setShowRejectInput,
+                        showExtend: showExtendForm,
+                        setShowExtend: setShowExtendForm,
+                        onPropose: handleProposeDeadline,
+                        onApprove: handleApproveDeadline,
+                      }}
+                      timerPause={handleTimerPause}
+                      watchedTimers={assigneeAllTimers}
                     />
                   )}
                 </>
@@ -3704,10 +5075,10 @@ export default function TasksPage() {
             <div className="gv-row-menu-sheet-handle" />
             <div className="gv-row-menu-sheet-title">{sheetTask.title}</div>
             {[
-              { l: "Open Chat", icon: <MessageCircle />, a: () => { handleSelectNode(sheetTask); setSheetTask(null); } },
+              ...(!sheetTask.isFolder ? [{ l: "Open Chat", icon: <MessageCircle />, a: () => { handleSelectNode(sheetTask); setSheetTask(null); } }] : []),
               ...((isCEO || isTL) ? [{ l: "Add Subtask", icon: <Plus />, a: () => { setActiveModal({ type: "add_subtask", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(!isCEO ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(!isCEO ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(!isCEO && !sheetTask.isFolder ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ...(!isCEO && !sheetTask.isFolder ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
               ...(isCEO ? [{ l: "Edit Deadline", icon: <Calendar />, a: () => { setActiveModal({ type: "deadline", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
               ...(isCEO && sheetTask.completionStatus === "submitted" && sheetTask.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
               ...(isTL && sheetTask.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(sheetTask.reviewFlow) ? [{ l: "Review Submission", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
@@ -3807,6 +5178,102 @@ export default function TasksPage() {
           onConfirm={confirmDeleteMessage}
           onCancel={() => setDeleteMsgConf(null)}
         />
+      )}
+
+      {/* ── Work Commit Modal — shown when employee pauses timer ── */}
+      {commitModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
+          zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(3px)", padding: 16,
+          fontFamily: "var(--font,'DM Sans',-apple-system,sans-serif)",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 16, width: "min(440px,96vw)",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
+            animation: "ctm-in 0.18s cubic-bezier(0.4,0,0.2,1)",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #E5E7EB" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 9, background: "#FFF7ED",
+                  border: "1px solid #FED7AA", display: "flex", alignItems: "center",
+                  justifyContent: "center", flexShrink: 0,
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
+                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                    <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
+                  </svg>
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>Pause Timer</div>
+                  <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>
+                    {commitModal.taskTitle}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "16px 20px" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
+                What did you work on? <span style={{ color: "#94A3B8", fontWeight: 400, textTransform: "none" }}>(optional)</span>
+              </label>
+              <textarea
+                autoFocus
+                value={commitMessage}
+                onChange={e => setCommitMessage(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
+                placeholder="e.g. Fixed the login bug, updated UI layout…"
+                style={{
+                  width: "100%", padding: "10px 12px", border: "1.5px solid #E5E7EB",
+                  borderRadius: 9, fontSize: 13, fontFamily: "inherit",
+                  outline: "none", resize: "vertical", minHeight: 90,
+                  color: "#0F172A", background: "#FAFAFA", boxSizing: "border-box",
+                  transition: "border-color 0.12s",
+                }}
+                onFocus={e => e.target.style.borderColor = "#4F46E5"}
+                onBlur={e => e.target.style.borderColor = "#E5E7EB"}
+              />
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>
+                💡 Ctrl+Enter to save quickly
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end",
+              borderTop: "1px solid #F1F5F9",
+            }}>
+              <button onClick={() => handleCommitSubmit(true)}
+                disabled={savingCommit}
+                style={{
+                  padding: "8px 16px", borderRadius: 8, border: "1.5px solid #E5E7EB",
+                  background: "#F9FAFB", color: "#64748B", fontSize: 13, fontWeight: 500,
+                  cursor: "pointer", fontFamily: "inherit", opacity: savingCommit ? 0.5 : 1,
+                }}>
+                Skip
+              </button>
+              <button onClick={() => handleCommitSubmit(false)}
+                disabled={savingCommit}
+                style={{
+                  padding: "8px 20px", borderRadius: 8, border: "none",
+                  background: savingCommit ? "#E5E7EB" : "#4F46E5",
+                  color: savingCommit ? "#94A3B8" : "#fff",
+                  fontSize: 13, fontWeight: 700, cursor: savingCommit ? "not-allowed" : "pointer",
+                  fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
+                }}>
+                {savingCommit ? (
+                  <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Saving…</>
+                ) : (
+                  <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Pause & Save</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Delete task confirmation modal */}

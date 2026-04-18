@@ -14,7 +14,7 @@
  *  ✅ Bottom toolbar: Share screen | Chat | Leave (Zoom-style)
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { getMeet } from "../../../lib/coworkApi";
@@ -29,7 +29,9 @@ import {
     RoomAudioRenderer,
     useParticipants,
     useLocalParticipant,
+    useTracks,
 } from "@livekit/components-react";
+import { Track } from "livekit-client";
 import "@livekit/components-styles";
 
 const LK_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL;
@@ -49,14 +51,6 @@ export default function CoworkMeetingRoom() {
     const [info, setInfo] = useState(null);
     const [token, setToken] = useState(null);
     const [phase, setPhase] = useState("loading");
-    const [pipMode, setPipMode] = useState(false);       // mini floating box
-    const [pipCollapsed, setPipCollapsed] = useState(false); // collapsed to tiny bar
-    const [pipPos, setPipPos] = useState({ x: null, y: null }); // drag position
-    const [pipControls, setPipControls] = useState({ micOn: true, camOn: true, toggleMic: null, toggleCam: null });
-    const pipDragRef = useRef(null);
-    const pipDragState = useRef(null);
-    const pipControlsCallbackRef = useRef(null);
-    pipControlsCallbackRef.current = setPipControls;
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
     const [joinCode, setJoinCode] = useState("");
@@ -156,64 +150,94 @@ export default function CoworkMeetingRoom() {
         router.push("/coworking/schedule-meet");
     };
 
-    // ── Minimize to PiP — NO navigation, CSS overlay only ──────────────────
-    // Meeting page stays at /coworking/cowork-meeting/[meetId]
-    // LiveKit room stays mounted and connected — no disconnect
+    // Stores the intended destination when user navigates away mid-meeting
+    const navigateAfterLeave = useRef(null);
+
+    // ── Minimize to PiP ───────────────────────────────────────────────────────
+    // Hand off to CoworkingShell: store meeting info in pipMeetingStore, then
+    // navigate to the dashboard. The shell subscribes to the store and renders
+    // a hidden LiveKitRoom + floating PiP widget that persists across pages.
+    // The LiveKit connection briefly drops here (old room unmounts on nav) and
+    // re-establishes in the shell using the same token.
     const handleMinimize = () => {
-        setPipMode(true);
-        setPipCollapsed(false);
-        if (pipPos.x === null) {
-            setPipPos({ x: window.innerWidth - 320, y: window.innerHeight - 220 });
-        }
-    };
-
-    const handleRestorePip = () => {
-        setPipMode(false);
-        setPipCollapsed(false);
-    };
-
-    // ── PiP drag ─────────────────────────────────────────────────────────────
-    const handlePipDragStart = (e) => {
-        const el = pipDragRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        pipDragState.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
-        const onMove = (e2) => {
-            if (!pipDragState.current) return;
-            const dx = e2.clientX - pipDragState.current.startX;
-            const dy = e2.clientY - pipDragState.current.startY;
-            const newX = Math.max(0, Math.min(window.innerWidth - 300, pipDragState.current.origX + dx));
-            const newY = Math.max(0, Math.min(window.innerHeight - 200, pipDragState.current.origY + dy));
-            setPipPos({ x: newX, y: newY });
-        };
-        const onUp = () => {
-            pipDragState.current = null;
-            window.removeEventListener("mousemove", onMove);
-            window.removeEventListener("mouseup", onUp);
-        };
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", onUp);
+        if (!token) return;
+        storePipMeeting({
+            token,
+            meetId,
+            title: meet?.title,
+            serverUrl: LK_URL,
+            userChoices,
+        });
+        // Tell the disconnect handler where to go, so the unmount-triggered
+        // disconnect doesn't race us to /coworking/schedule-meet.
+        navigateAfterLeave.current = "/coworking";
+        intentionalLeave.current = true;
+        router.push("/coworking");
     };
 
     const handleDisconnected = () => {
-        // Always redirect when disconnected — covers both our button + LiveKit built-in leave button
-        router.push("/coworking/schedule-meet");
+        const dest = navigateAfterLeave.current || "/coworking/schedule-meet";
+        navigateAfterLeave.current = null;
+        router.push(dest);
     };
+
+    // ── Auto-leave when navigating to another page ────────────────────────────
+    // Intercepts clicks on sidebar nav links while in-room
+    useEffect(() => {
+        if (phase !== "room") return;
+
+        const handleClick = (e) => {
+            const anchor = e.target.closest("a[href]");
+            if (!anchor) return;
+            const href = anchor.getAttribute("href");
+            if (!href) return;
+            // Ignore same-page or meeting links
+            if (href.includes("cowork-meeting")) return;
+            if (href === window.location.pathname) return;
+            // Navigation away = FULL LEAVE (not PiP)
+            // Store destination so handleDisconnected goes there, not schedule-meet
+            e.preventDefault();
+            e.stopPropagation();
+            navigateAfterLeave.current = href;
+            intentionalLeave.current = true;
+            setToken(null); // triggers LiveKit disconnect → handleDisconnected → router.push(dest)
+        };
+
+        document.addEventListener("click", handleClick, true); // capture phase
+        return () => document.removeEventListener("click", handleClick, true);
+    }, [phase, router]);
+    useEffect(() => {
+        if (phase !== "room") return;
+
+        // 1. Browser back button — popstate fires when history goes back
+        const handlePopState = () => {
+            intentionalLeave.current = true;
+            setToken(null);
+            // Don't push — the back navigation already changed URL
+        };
+        window.addEventListener("popstate", handlePopState);
+
+        // 2. Tab/window close or hard navigation
+        const handleBeforeUnload = (e) => {
+            e.preventDefault();
+            e.returnValue = "You are in a meeting. Are you sure you want to leave?";
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener("popstate", handlePopState);
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, [phase]);
 
     // ── Render ────────────────────────────────────────────────────────────────
     if (loading || phase === "loading") return <FullLoader />;
     if (phase === "ended") return <EndedScreen meet={meet} onBack={() => router.push("/coworking/schedule-meet")} />;
 
     if (phase === "room" && token) {
-        // ONE LiveKitRoom always mounted — never unmounts in pip mode
-        // In pip mode: LiveKit hidden via CSS, pip box + iframe overlay shown
         return (
             <>
-                {/* ── LiveKit room — always mounted, hidden in pip mode ── */}
-                <div style={pipMode
-                    ? { position: "fixed", width: 1, height: 1, top: -9999, left: -9999, overflow: "hidden", opacity: 0, pointerEvents: "none", zIndex: -1 }
-                    : { width: "100%", height: "100%", display: "flex", flexDirection: "column" }
-                }>
+                <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
                     <div style={S.roomRoot}>
                         <GlobalCSS />
                         <LiveKitRoom
@@ -226,7 +250,6 @@ export default function CoworkMeetingRoom() {
                             onDisconnected={handleDisconnected}
                         >
                             <MuteWatcher onMuteChange={recording.setMuted} />
-                            <PipMediaControls onReady={pipControlsCallbackRef} />
                             <AvatarColorInjector />
                             <TopBar
                                 meet={meet}
@@ -240,112 +263,12 @@ export default function CoworkMeetingRoom() {
                                 employeeName={employeeName}
                             />
                             <div style={{ flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                                <VideoConference />
+                                <SmartVideoConference />
                             </div>
                             <RoomAudioRenderer />
                         </LiveKitRoom>
                     </div>
                 </div>
-
-                {/* ── PiP mode: dashboard iframe overlay + floating box ── */}
-                {pipMode && (
-                    <>
-                        {/* Dashboard shown via iframe so user can interact with app */}
-                        <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "#fff" }}>
-                            <iframe
-                                src="/coworking"
-                                style={{ width: "100%", height: "100%", border: "none" }}
-                                title="Dashboard"
-                            />
-                        </div>
-
-                        {/* Floating PiP box — above iframe */}
-                        <div
-                            ref={pipDragRef}
-                            style={{
-                                position: "fixed",
-                                left: pipPos.x !== null ? pipPos.x : "auto",
-                                right: pipPos.x !== null ? "auto" : 24,
-                                top: pipPos.y !== null ? pipPos.y : "auto",
-                                bottom: pipPos.y !== null ? "auto" : 24,
-                                zIndex: 9999,
-                                width: pipCollapsed ? 220 : 300,
-                                borderRadius: 14, overflow: "hidden",
-                                boxShadow: "0 8px 40px rgba(0,0,0,0.45)",
-                                background: "#111827", border: "1px solid rgba(255,255,255,0.15)",
-                                userSelect: "none",
-                            }}
-                        >
-                            {/* Drag handle */}
-                            <div onMouseDown={handlePipDragStart}
-                                style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#0F172A", cursor: "grab", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0, boxShadow: "0 0 6px #EF4444" }} />
-                                <span style={{ fontSize: 12, fontWeight: 700, color: "#F1F5F9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    {meet?.title || "Meeting"}
-                                </span>
-                                {/* Collapse */}
-                                <button onClick={() => setPipCollapsed(p => !p)}
-                                    style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.1)", color: "#CBD5E1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                                        {pipCollapsed ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
-                                    </svg>
-                                </button>
-                                {/* Restore full meeting */}
-                                <button onClick={handleRestorePip} title="Return to full meeting"
-                                    style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(37,99,235,0.4)", color: "#93C5FD", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                                        <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
-                                        <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-                                    </svg>
-                                </button>
-                            </div>
-
-                            {/* Body */}
-                            {!pipCollapsed && (
-                                <div style={{ padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-                                    {/* Status */}
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94A3B8" }}>
-                                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
-                                        Connected · {meet?.title}
-                                    </div>
-
-                                    {/* Mic / Cam — wired to actual LiveKit via pipControls */}
-                                    <div style={{ display: "flex", gap: 6 }}>
-                                        <button onClick={() => pipControls.toggleMic?.()}
-                                            style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipControls.micOn ? "rgba(255,255,255,0.1)" : "#DC2626", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                                            {pipControls.micOn
-                                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
-                                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23" /><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6" /><path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
-                                            }
-                                            {pipControls.micOn ? "Mic On" : "Muted"}
-                                        </button>
-                                        <button onClick={() => pipControls.toggleCam?.()}
-                                            style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipControls.camOn ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.05)", color: pipControls.camOn ? "#fff" : "#64748B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, border: "1px solid rgba(255,255,255,0.1)" }}>
-                                            {pipControls.camOn
-                                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
-                                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 01-2 2H3a2 2 0 01-2-2V7a2 2 0 012-2h2m5.66 0H14a2 2 0 012 2v3.34l1 1L23 7v10" /><line x1="1" y1="1" x2="23" y2="23" /></svg>
-                                            }
-                                            {pipControls.camOn ? "Cam On" : "Cam Off"}
-                                        </button>
-                                    </div>
-
-                                    {/* Open full / Leave */}
-                                    <div style={{ display: "flex", gap: 8 }}>
-                                        <button onClick={handleRestorePip}
-                                            style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
-                                            Open Meeting
-                                        </button>
-                                        <button onClick={() => { if (window.confirm("Leave the meeting?")) handleLeave(); }}
-                                            style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#DC2626", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                                            Leave
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </>
-                )}
             </>
         );
     }
@@ -424,35 +347,34 @@ function MuteWatcher({ onMuteChange }) {
     return null;
 }
 
-// ── PipMediaControls — inside LiveKitRoom, exposes mic/cam state via callback ─
-function PipMediaControls({ onReady }) {
-    // onReady is a ref (pipControlsCallbackRef) — stable, never changes
-    const { localParticipant } = useLocalParticipant();
-    const [micOn, setMicOn] = useState(true);
-    const [camOn, setCamOn] = useState(true);
+// ── SmartVideoConference — fixes presenter layout stuck after screen share ends
+// PROBLEM: When a remote peer stops screen sharing, LiveKit's <VideoConference>
+// sometimes keeps the presenter (focused) layout around — viewers see a blank
+// black tile instead of snapping back to the grid.
+//
+// FIX: Watch screen share tracks via React state (useTracks). When the count
+// transitions from >0 back to 0 (the last share just ended), bump a key on
+// <VideoConference> to force a full remount. Fresh mount = fresh layout pick,
+// which picks grid because there are no screen shares anymore.
+//
+// Purely state-driven — no dependence on LiveKit event timing, no refs to
+// room internals. Works for both remote sharers stopping and local stop.
+function SmartVideoConference() {
+    const [vcKey, setVcKey] = useState(0);
+    const screenTracks = useTracks([Track.Source.ScreenShare]);
+    const prevCountRef = useRef(0);
 
     useEffect(() => {
-        if (!localParticipant) return;
-        const update = () => {
-            setMicOn(!!localParticipant.isMicrophoneEnabled);
-            setCamOn(!!localParticipant.isCameraEnabled);
-        };
-        update();
-        const t = setInterval(update, 500);
-        return () => clearInterval(t);
-    }, [localParticipant]);
+        const prev = prevCountRef.current;
+        const curr = screenTracks.length;
+        // Transition from sharing → not sharing: force remount
+        if (prev > 0 && curr === 0) {
+            setVcKey(k => k + 1);
+        }
+        prevCountRef.current = curr;
+    }, [screenTracks.length]);
 
-    useEffect(() => {
-        if (!onReady?.current || !localParticipant) return;
-        // Call the ref's current value — stable, no infinite loop
-        onReady.current({
-            micOn, camOn,
-            toggleMic: () => localParticipant.setMicrophoneEnabled(!micOn),
-            toggleCam: () => localParticipant.setCameraEnabled(!camOn),
-        });
-    }, [micOn, camOn, localParticipant]); // onReady is a ref, not a dep
-
-    return null;
+    return <VideoConference key={vcKey} />;
 }
 
 // ── Top bar (inside LiveKitRoom) ──────────────────────────────────────────────
@@ -463,6 +385,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
     const [copied, setCopied] = useState(false);
     const [elapsed, setElapsed] = useState(0); // seconds since meeting started
     const participants = useParticipants();
+    const { localParticipant } = useLocalParticipant();
 
     // Tick every second — count from when user actually joined (not scheduled time)
     const joinedAtRef = useRef(Date.now());
@@ -480,6 +403,23 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
         setTimeout(() => setCopied(false), 2000);
     };
 
+    // Back: always stop screen share first, wait for remote layout to reset, then PiP
+    const handleBack = useCallback(async () => {
+        if (localParticipant) {
+            try {
+                // Always call unconditionally — no-op if not sharing,
+                // but properly signals ALL remote clients to drop presenter layout
+                await localParticipant.setScreenShareEnabled(false);
+                // 800ms lets LiveKit propagate track removal AND remote VideoConference
+                // switch from presenter-layout back to grid before we hide our room
+                await new Promise(r => setTimeout(r, 800));
+            } catch (e) {
+                console.warn("[TopBar] screen share stop:", e.message);
+            }
+        }
+        onMinimize?.();
+    }, [localParticipant, onMinimize]);
+
     // Format elapsed time as  0:05  /  1:23  /  1:23:45
     const fmtElapsed = (s) => {
         const h = Math.floor(s / 3600);
@@ -496,7 +436,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
             {/* Left: LIVE + meeting name + elapsed duration */}
             <div className="tb-left">
                 {onMinimize && (
-                    <button onClick={onMinimize} title="Back to dashboard — meeting continues in mini view"
+                    <button onClick={handleBack} title="Back to dashboard — meeting continues in mini view"
                         style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#E8EAED", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: 6, flexShrink: 0 }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
                         Back
