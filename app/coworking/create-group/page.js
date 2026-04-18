@@ -554,9 +554,11 @@ export default function CreateGroupPage() {
     if (!employeeId) return;
     setGroupsLoading(true);
     let q;
-    if (isCeoOrTL) {
+    if (isCEO) {
+      // CEO sees ALL groups (admin view)
       q = query(collection(firebaseDb, "cowork_groups"), where("deleted", "==", false));
     } else {
+      // TL and Employee: only see groups they are a member of
       q = query(
         collection(firebaseDb, "cowork_groups"),
         where("deleted", "==", false),
