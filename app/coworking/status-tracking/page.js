@@ -720,16 +720,26 @@ export default function StatusTrackingPage() {
                     const t = d.data();
                     const tid = d.id;
                     if (tid) {
-                        // deadlineWindowSecs = ONLY from Firestore field stored at proposal time.
-                        // NEVER calculate dynamically — dynamic calculation changes after deadline passes
-                        // (dueDate - approvedAt becomes smaller over time → wrong "Asked for")
-                        const storedWindow = typeof t.deadlineWindowSecs === "number" && t.deadlineWindowSecs > 0
-                            ? t.deadlineWindowSecs
-                            : null;
+                        // deadlineWindowSecs = dueDate - deadlineApprovedAt (approval time)
+                        // This is ALWAYS correct: "Asked For" = time from TL approval to deadline
+                        // e.g. approved 10:44 AM, deadline 11:14 AM → 30 min ✅
+                        // We recalculate from approvedAt instead of trusting stored value
+                        // because old tasks stored it at proposal time (hours earlier = wrong)
+                        let deadlineWindowSecs = null;
+                        if (t.dueDate && t.deadlineApprovedAt) {
+                            const approvedMs = t.deadlineApprovedAt?.seconds
+                                ? t.deadlineApprovedAt.seconds * 1000
+                                : (typeof t.deadlineApprovedAt === "number" ? t.deadlineApprovedAt : null);
+                            if (approvedMs) {
+                                deadlineWindowSecs = Math.max(0, Math.floor(
+                                    (new Date(t.dueDate).getTime() - approvedMs) / 1000
+                                ));
+                            }
+                        }
                         const entry = {
                             title: t.title || tid, dueDate: t.dueDate || null,
                             status: t.status, taskId: tid,
-                            deadlineWindowSecs: storedWindow, // null for old tasks that don't have it yet
+                            deadlineWindowSecs,
                         };
                         tDataMap.set(tid, entry);
                         if (t.title) tDataMap.set(t.title, entry);
