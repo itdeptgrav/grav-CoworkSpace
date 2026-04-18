@@ -15,7 +15,7 @@ import { collection, doc, setDoc, updateDoc, serverTimestamp, increment } from "
 
 // ── Empty subtask row template ────────────────────────────────────────────────
 const emptySubtask = () => ({
-    title: "", description: "", notes: "", priority: 5, assigneeIds: [],
+    title: "", description: "", notes: "", assigneeIds: [],
 });
 
 
@@ -54,7 +54,7 @@ export default function CreateTaskModal({
 }) {
     const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
-    const [form, setForm] = useState({ title: "", description: "", notes: "", priority: 5 });
+    const [form, setForm] = useState({ title: "", description: "", notes: "" });
     const [isFolder, setIsFolder] = useState(false);
     const [subtaskRows, setSubtaskRows] = useState([emptySubtask()]);
     const [employees, setEmployees] = useState([]);
@@ -361,8 +361,7 @@ export default function CreateTaskModal({
                                                     placeholder="Enter subtask title" />
                                             </div>
                                             <div style={s.field}>
-                                                <label style={s.label}>Priority <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 10, textTransform: "none" }}>(1 = lowest · 10 = highest)</span></label>
-                                                <PrioritySlider value={row.priority} onChange={v => updateRow(i, "priority", v)} />
+
                                             </div>
                                         </div>
 
@@ -524,15 +523,6 @@ export default function CreateTaskModal({
                                 <textarea className="ctm-input" style={{ ...s.input, height: 72, resize: "vertical" }}
                                     value={form.notes} onChange={e => set("notes", e.target.value)}
                                     placeholder="Specific requirements, deliverables, acceptance criteria" />
-                            </div>}
-
-                            {/* Priority — hidden for folder tasks */}
-                            {!isFolder && <div style={s.field}>
-                                <label style={s.label}>
-                                    Priority
-                                    <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 10, textTransform: "none", marginLeft: 6 }}>1 = lowest priority · 10 = highest</span>
-                                </label>
-                                <PrioritySlider value={form.priority} onChange={v => set("priority", v)} />
                             </div>}
 
                             {/* Assignees — hidden for folder tasks, required for normal tasks */}

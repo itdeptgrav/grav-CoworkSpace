@@ -1174,12 +1174,16 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       grpSnap => {
         grpSnap.docs.forEach(grpDoc => {
           const gid = grpDoc.id;
-          if (grpCountMap[gid] !== undefined) return;
+          if (grpCountMap[gid] !== undefined) return; // already listening
           grpCountMap[gid] = 0;
           const unsub = onSnapshot(
-            query(collection(firebaseDb, "cowork_groups", gid, "messages"), where("senderId", "!=", employeeId)),
+            query(collection(firebaseDb, "cowork_groups", gid, "messages")),
             msgSnap => {
-              grpCountMap[gid] = msgSnap.docs.filter(d => !(d.data().readBy || []).includes(employeeId)).length;
+              grpCountMap[gid] = msgSnap.docs.filter(d => {
+                const data = d.data();
+                // Only count messages from others that haven't been read by me
+                return data.senderId !== employeeId && !(data.readBy || []).includes(employeeId);
+              }).length;
               recalcGrp();
             },
             () => { grpCountMap[gid] = 0; recalcGrp(); }
@@ -1262,6 +1266,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
+  // ── Auth toasts (login success) ──────────────────────────────────────────
+  const [authToast, setAuthToast] = useState(null); // { type: "login"|"logout", name }
+  useEffect(() => {
+    const name = sessionStorage.getItem("cowork_login_toast");
+    if (name !== null) {
+      sessionStorage.removeItem("cowork_login_toast");
+      setAuthToast({ type: "login", name: name || "Welcome back" });
+      setTimeout(() => setAuthToast(null), 3500);
+    }
+  }, []);
+
   // ── PiP Meeting state — subscribed to module-level store (persists across navigation)
   const [pipMeeting, setPipMeetingState] = useState(() => {
     const s = getPipMeeting();
@@ -1530,6 +1545,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const handleSignOut = async () => {
     try {
       await signOut(firebaseAuth);
+      sessionStorage.setItem("cowork_logout_toast", "1");
       router.push("/");
     } catch (e) {
       console.error("Sign out error:", e);
@@ -1541,6 +1557,43 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
+      {/* ── Login success toast — top right ── */}
+      {authToast && (
+        <div style={{
+          position: "fixed", top: 20, right: 24, zIndex: 99999,
+          background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+          color: "#fff", padding: "14px 20px", borderRadius: 16,
+          fontSize: 13, fontWeight: 600,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.08)",
+          display: "flex", alignItems: "center", gap: 12, maxWidth: 320,
+          animation: "authToastIn 0.35s cubic-bezier(0.2,0,0,1)",
+          fontFamily: "'DM Sans', sans-serif",
+        }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+            background: "linear-gradient(135deg, #22C55E, #16A34A)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 18,
+          }}>✓</div>
+          <div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 2 }}>Logged in successfully</div>
+            <div style={{ fontSize: 14 }}>
+              Welcome back{authToast.name ? `, ${authToast.name.split(" ")[0]}` : ""}! 👋
+            </div>
+          </div>
+          <button onClick={() => setAuthToast(null)}
+            style={{ marginLeft: "auto", background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 2 }}>
+            ✕
+          </button>
+        </div>
+      )}
+      <style>{`
+        @keyframes authToastIn {
+          from { opacity: 0; transform: translateX(60px) scale(0.92); }
+          to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+      `}</style>
+
       {/* Global incoming call toast — works on every page */}
       {employeeId && <IncomingCallToast employeeId={employeeId} />}
       <style>{`

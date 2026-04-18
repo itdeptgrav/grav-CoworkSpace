@@ -678,6 +678,12 @@ export default function StatusTrackingPage() {
     // Tasks with pending deadline approval — shown in right panel
     const [pendingDeadlineTasks, setPendingDeadlineTasks] = useState([]);
     const [approvingId, setApprovingId] = useState(null);
+    const [counterFormTaskId, setCounterFormTaskId] = useState(null); // which task has suggest form open
+    const [counterDate, setCounterDate] = useState("");
+    const [counterTime, setCounterTime] = useState("09:00");
+    const [counterMsg, setCounterMsg] = useState("");
+    const [rejectFormTaskId, setRejectFormTaskId] = useState(null);
+    const [rejectReason, setRejectReason] = useState("");
     const [dataLoading, setDataLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState("all"); // "all" | "working" | "not_working"
@@ -917,10 +923,22 @@ export default function StatusTrackingPage() {
     }
   `;
 
-    const handleApproveDeadline = async (taskId, approved) => {
+    const handleApproveDeadline = async (taskId, approved, reason = "") => {
         setApprovingId(taskId);
         try {
-            await taskForwardApi.approveDeadline(taskId, approved, approved ? "" : "Rejected by TL/CEO");
+            await taskForwardApi.approveDeadline(taskId, approved, approved ? "" : (reason || "Rejected by TL/CEO"));
+            setRejectFormTaskId(null); setRejectReason("");
+        } catch (e) { console.error(e); }
+        finally { setApprovingId(null); }
+    };
+
+    const handleCounterPropose = async (taskId) => {
+        if (!counterDate) return;
+        setApprovingId(taskId);
+        try {
+            const dt = `${counterDate}T${counterTime || "09:00"}:00`;
+            await taskForwardApi.tlCounterDeadline(taskId, dt, counterMsg.trim());
+            setCounterFormTaskId(null); setCounterDate(""); setCounterTime("09:00"); setCounterMsg("");
         } catch (e) { console.error(e); }
         finally { setApprovingId(null); }
     };
@@ -1182,17 +1200,75 @@ export default function StatusTrackingPage() {
                                         {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                                     </div>
                                 )}
-                                {/* Approve / Reject */}
-                                <div style={{ display: "flex", gap: 6 }}>
-                                    <button onClick={() => handleApproveDeadline(task.id, true)} disabled={isBusy}
-                                        style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: isBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: isBusy ? 0.6 : 1 }}>
-                                        {isBusy ? "…" : "✓ Approve"}
-                                    </button>
-                                    <button onClick={() => handleApproveDeadline(task.id, false)} disabled={isBusy}
-                                        style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: isBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: isBusy ? 0.6 : 1 }}>
-                                        {isBusy ? "…" : "✕ Reject"}
-                                    </button>
-                                </div>
+                                {/* 3-tab action panel */}
+                                {(() => {
+                                    const activeTab = counterFormTaskId === task.id ? "suggest" : rejectFormTaskId === task.id ? "reject" : null;
+                                    const setTab = (t) => {
+                                        setCounterFormTaskId(t === "suggest" ? task.id : null);
+                                        setRejectFormTaskId(t === "reject" ? task.id : null);
+                                        if (t !== "suggest") { setCounterDate(""); setCounterTime("09:00"); setCounterMsg(""); }
+                                        if (t !== "reject") setRejectReason("");
+                                    };
+                                    return (
+                                        <div>
+                                            {/* Tab buttons */}
+                                            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB", marginBottom: activeTab ? 8 : 0 }}>
+                                                {[
+                                                    { key: "approve", label: "✓ Approve", color: "#166534", activeBg: "#DCFCE7", border: "#BBF7D0" },
+                                                    { key: "suggest", label: "📅 Suggest Date", color: "#6D28D9", activeBg: "#EDE9FE", border: "#DDD6FE" },
+                                                    { key: "reject", label: "✕ Reject", color: "#991B1B", activeBg: "#FEE2E2", border: "#FECDD3" },
+                                                ].map((tab, i) => (
+                                                    <button key={tab.key}
+                                                        onClick={() => tab.key === "approve" ? handleApproveDeadline(task.id, true) : setTab(activeTab === tab.key ? null : tab.key)}
+                                                        disabled={isBusy}
+                                                        style={{
+                                                            flex: 1, padding: "7px 2px", border: "none",
+                                                            borderLeft: i > 0 ? "1px solid #E5E7EB" : "none",
+                                                            fontFamily: "inherit", fontSize: 10, fontWeight: 700,
+                                                            cursor: isBusy ? "not-allowed" : "pointer",
+                                                            color: activeTab === tab.key ? tab.color : "#6B7280",
+                                                            background: activeTab === tab.key ? tab.activeBg : "#fff",
+                                                            opacity: isBusy ? 0.5 : 1,
+                                                            transition: "all 0.1s",
+                                                        }}>
+                                                        {tab.key === "approve" && isBusy ? "…" : tab.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {/* Suggest Date form */}
+                                            {activeTab === "suggest" && (
+                                                <div>
+                                                    <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>
+                                                        <input type="date" value={counterDate} min={new Date().toISOString().split("T")[0]}
+                                                            onChange={e => setCounterDate(e.target.value)}
+                                                            style={{ flex: 1, padding: "6px 7px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                                                        <input type="time" value={counterTime} onChange={e => setCounterTime(e.target.value)}
+                                                            style={{ width: 74, padding: "6px 3px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                                                    </div>
+                                                    <textarea value={counterMsg} onChange={e => setCounterMsg(e.target.value)}
+                                                        placeholder="Message to employee (optional)..."
+                                                        style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                                                    <button onClick={() => handleCounterPropose(task.id)} disabled={!counterDate || isBusy}
+                                                        style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !counterDate || isBusy ? "#E5E7EB" : "#7C3AED", color: !counterDate || isBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !counterDate || isBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                                        {isBusy ? "Sending..." : "📅 Send Date to Employee"}
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {/* Reject form */}
+                                            {activeTab === "reject" && (
+                                                <div>
+                                                    <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                                                        placeholder="Reason for rejection..."
+                                                        style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                                                    <button onClick={() => handleApproveDeadline(task.id, false, rejectReason)} disabled={!rejectReason.trim() || isBusy}
+                                                        style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !rejectReason.trim() || isBusy ? "#E5E7EB" : "#EF4444", color: !rejectReason.trim() || isBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !rejectReason.trim() || isBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                                        {isBusy ? "Sending..." : "Send Rejection"}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         );
                     })}

@@ -68,6 +68,7 @@ const STATUS = {
   done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
   pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   pending_deadline_approval: { label: "Deadline Pending", color: "#D97706", bg: "#FFFBEB", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
+  pending_employee_deadline_confirmation: { label: "Employee Confirming", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   deadline_approved: { label: "Deadline Approved", color: "#059669", bg: "#ECFDF5", dot: "#059669", glow: "rgba(5,150,105,0.3)" },
 };
 
@@ -232,17 +233,30 @@ function ImageLightbox({ url, onClose, onDownload }) {
 }
 
 /* ─── TreeNode ─── */
-function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleExpand, depth, viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes }) {
+function TreeNode({ node, allTaskMap, allTasks, selectedId, onSelect, expandedIds, toggleExpand, depth, viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes }) {
   const isSelected = selectedId === node.taskId;
   const isExpanded = expandedIds.has(node.taskId);
   const dl = getDeadlineInfo(node.dueDate);
   const isUnread = unreadTaskIds?.has(node.taskId);
 
   // CEO: hide TL-created subtasks in count/expand
-  const allChildren = (node.subtaskIds || []).map(id => allTaskMap.get(id)).filter(Boolean);
-  const visibleChildren = viewerRole === "ceo"
+  // Resolve children from allTasks array (plain React state — triggers re-render on priority change)
+  // allTaskMap is a Map object — React doesn't detect Map mutations as prop changes
+  // By also checking allTasks, we get fresh priority values immediately after handleUpdatePriority
+  const allChildren = (node.subtaskIds || []).map(id => {
+    const fromArr = allTasks?.find(t => t.taskId === id);
+    const fromMap = allTaskMap.get(id);
+    // Prefer allTasks entry (fresh) but fall back to map (covers nodes not in allTasks like intermediate folders)
+    return fromArr || fromMap;
+  }).filter(Boolean);
+  const visibleChildren = (viewerRole === "ceo"
     ? allChildren.filter(c => c.createdByCeo === true || (c.assignedBy === viewerEmployeeId && c.createdByTl !== true))
-    : allChildren;
+    : allChildren
+  ).sort((a, b) => {
+    const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
+    if (pa !== pb) return pa - pb;
+    return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+  });
   const hasChildren = visibleChildren.length > 0;
 
   // Use real timestamp from live chat listener — falls back to task field
@@ -344,7 +358,7 @@ function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleE
 
       {isExpanded && visibleChildren.map(child => (
         <TreeNode
-          key={child.taskId} node={child} allTaskMap={allTaskMap}
+          key={child.taskId} node={child} allTaskMap={allTaskMap} allTasks={allTasks}
           selectedId={selectedId} onSelect={onSelect}
           expandedIds={expandedIds} toggleExpand={toggleExpand}
           depth={depth + 1}
@@ -362,7 +376,7 @@ function TreeNode({ node, allTaskMap, selectedId, onSelect, expandedIds, toggleE
 /* ─── EmployeeGroup — Groups tasks under employee name ─── */
 /* ─── EmployeeGroup — Groups tasks under employee name with complete features ─── */
 function EmployeeGroup({
-  empId, empName, tasks, allTaskMap, selectedId, onSelect,
+  empId, empName, tasks, allTaskMap, allTasks, selectedId, onSelect,
   expandedIds, toggleExpand, expandedEmps, toggleEmp,
   viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes
 }) {
@@ -469,7 +483,7 @@ function EmployeeGroup({
         <div className="gv-emp-tasks">
           {sortedTasks.map(t => (
             <TreeNode
-              key={t.taskId} node={t} allTaskMap={allTaskMap}
+              key={t.taskId} node={t} allTaskMap={allTaskMap} allTasks={allTasks}
               selectedId={selectedId} onSelect={onSelect}
               expandedIds={expandedIds} toggleExpand={toggleExpand}
               depth={0} viewerRole={viewerRole} viewerEmployeeId={viewerEmployeeId}
@@ -631,7 +645,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow }) {
+  deadlineFlow, onUpdatePriority }) {
   const st = STATUS[task.status] || STATUS.open;
   // Derive comp label — for "submitted" status, show flow-appropriate label
   const _compBase = task.completionStatus ? COMP[task.completionStatus] : null;
@@ -697,9 +711,22 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" /><path d="M3 5h4" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" /></svg>
                 Task Name
               </span>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: pri.color, background: pri.bg, display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: pri.color, background: pri.bg, display: "inline-flex", alignItems: "center", gap: 3, position: "relative" }}>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>
                 {pri.label}
+                {/* Only task creator (assignedBy) or CEO/TL can change priority */}
+                {(task.assignedBy === employeeId || isCEO || isTL) && (
+                  <select
+                    value={task.priority ?? 5}
+                    onChange={e => onUpdatePriority?.(task.taskId, e.target.value)}
+                    title="Click to change priority"
+                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                      <option key={n} value={n}>P{n} — {n === 1 ? "Highest" : n === 2 ? "High" : n <= 9 ? "Medium" : "Lowest"}</option>
+                    ))}
+                  </select>
+                )}
               </span>
               {st && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: st.color, background: st.bg, display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} /> {st.label}
@@ -1156,49 +1183,134 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 );
               })()}
 
-              {/* Creator approval panel for deadline extension requests */}
-              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder &&
-                ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") && (() => {
-                  const df = deadlineFlow || {};
-                  return (
-                    <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>📅 Deadline Extension Request</div>
-                      {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 8 }}>
-                        <strong>{task.proposedDeadlineByName}</strong> needs more time:<br />
-                        <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        {task.dueDate && <span style={{ color: "#9CA3AF", fontSize: 11, marginLeft: 6 }}>(was: {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short" })})</span>}
-                      </div>}
-                      {!df.showRejectInput ? (
+              {/* ── CREATOR: Approve / Reject / Counter-propose ── */}
+              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder && (() => {
+                const df = deadlineFlow || {};
+                const isExt = ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "");
+                return (
+                  <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>
+                      {isExt ? "📅 Deadline Extension Request" : "📋 Deadline Proposal"}
+                    </div>
+                    {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
+                      <strong>{task.proposedDeadlineByName}</strong> proposed:<br />
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>}
+
+                    {!df.showRejectInput && !df.showCounterForm ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => df.onApprove?.(true)} disabled={df.approving}
                             style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: df.approving ? 0.5 : 1 }}>
-                            {df.approving ? "…" : "✓ Approve Extension"}
+                            ✓ Approve
                           </button>
                           <button onClick={() => df.setShowRejectInput?.(true)} disabled={df.approving}
                             style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                             ✕ Reject
                           </button>
                         </div>
-                      ) : (
-                        <div>
-                          <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
-                            placeholder="Reason for rejection…"
-                            style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box" }} />
-                          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                            <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
-                              style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
-                              {df.approving ? "…" : "Send Rejection"}
-                            </button>
-                            <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
-                              style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
-                              Cancel
-                            </button>
-                          </div>
+                        <button onClick={() => df.setShowCounterForm?.(true)}
+                          style={{ width: "100%", padding: "7px", borderRadius: 7, border: "1.5px solid #DDD6FE", background: "#F5F3FF", color: "#7C3AED", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                          📅 Suggest Different Date
+                        </button>
+                      </div>
+                    ) : df.showCounterForm ? (
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Suggest a deadline:</div>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                          <input type="date" value={df.counterDate || ""} min={new Date().toISOString().split("T")[0]}
+                            onChange={e => df.setCounterDate?.(e.target.value)}
+                            style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                          <input type="time" value={df.counterTime || "09:00"} onChange={e => df.setCounterTime?.(e.target.value)}
+                            style={{ width: 78, padding: "6px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
                         </div>
-                      )}
+                        <textarea value={df.counterMessage || ""} onChange={e => df.setCounterMessage?.(e.target.value)}
+                          placeholder="Message to employee (optional)…"
+                          style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={df.handleTlCounterPropose} disabled={!df.counterDate || df.counterBusy}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.counterDate || df.counterBusy ? "#E5E7EB" : "#7C3AED", color: !df.counterDate || df.counterBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.counterDate || df.counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {df.counterBusy ? "…" : "Send Suggestion"}
+                          </button>
+                          <button onClick={() => { df.setShowCounterForm?.(false); df.setCounterDate?.(""); df.setCounterMessage?.(""); }}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
+                          placeholder="Reason for rejection…"
+                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box" }} />
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
+                            {df.approving ? "…" : "Send Rejection"}
+                          </button>
+                          <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── EMPLOYEE: Respond to TL's counter-proposed deadline ── */}
+              {task.status === "pending_employee_deadline_confirmation" && isAssignee && !task.isFolder && (() => {
+                const df = deadlineFlow || {};
+                return (
+                  <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                      📅 {task.tlCounterDeadlineByName || "TL"} Suggested a Date
                     </div>
-                  );
-                })()}
+                    {task.tlCounterDeadline && (
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#4C1D95", marginBottom: 4 }}>
+                        📅 {new Date(task.tlCounterDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    )}
+                    {task.tlCounterDeadlineMessage && (
+                      <div style={{ fontSize: 11, color: "#6D28D9", background: "#EDE9FE", borderRadius: 6, padding: "5px 8px", marginBottom: 8, fontStyle: "italic" }}>
+                        "{task.tlCounterDeadlineMessage}"
+                      </div>
+                    )}
+                    {/* Agree | Not Agree buttons */}
+                    <div style={{ display: "flex", background: "#fff", borderRadius: 8, border: "1px solid #DDD6FE", overflow: "hidden", marginBottom: df.showEmpCounterForm ? 8 : 0 }}>
+                      <button onClick={() => { df.setShowEmpCounterForm?.(false); df.handleRespondToCounter?.(true); }} disabled={df.respondBusy}
+                        style={{ flex: 1, padding: "9px 4px", border: "none", borderRight: "1px solid #DDD6FE", fontFamily: "inherit", fontSize: 11, fontWeight: 700, color: "#166534", background: "#fff", cursor: df.respondBusy ? "not-allowed" : "pointer", opacity: df.respondBusy ? 0.5 : 1 }}>
+                        {df.respondBusy && !df.showEmpCounterForm ? "..." : "✓ Agree"}
+                      </button>
+                      <button onClick={() => df.setShowEmpCounterForm?.(!df.showEmpCounterForm)}
+                        style={{ flex: 1, padding: "9px 4px", border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: 700, color: df.showEmpCounterForm ? "#6D28D9" : "#6B7280", background: df.showEmpCounterForm ? "#EDE9FE" : "#fff", cursor: "pointer", transition: "all 0.1s" }}>
+                        📅 Not Agree
+                      </button>
+                    </div>
+                    {/* Employee new date form */}
+                    {df.showEmpCounterForm && (
+                      <div style={{ paddingTop: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Your preferred deadline:</div>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                          <input type="date" value={df.empCounterDate || ""} min={new Date().toISOString().split("T")[0]}
+                            onChange={e => df.setEmpCounterDate?.(e.target.value)}
+                            style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                          <input type="time" value={df.empCounterTime || "09:00"} onChange={e => df.setEmpCounterTime?.(e.target.value)}
+                            style={{ width: 82, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        </div>
+                        <textarea value={df.empCounterMsg || ""} onChange={e => df.setEmpCounterMsg?.(e.target.value)}
+                          placeholder="Message to TL/CEO (optional)..."
+                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                        <button onClick={() => df.handleRespondToCounter?.(false)} disabled={!df.empCounterDate || df.respondBusy}
+                          style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !df.empCounterDate || df.respondBusy ? "#E5E7EB" : "#7C3AED", color: !df.empCounterDate || df.respondBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !df.empCounterDate || df.respondBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                          {df.respondBusy ? "Sending..." : "📅 Send My Date to TL for Approval"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {isAssignee && task.status === "in_progress" && !task.isFolder && !["submitted", "tl_approved", "tl_final_approved", "ceo_approved", "ceo_direct_approved"].includes(task.completionStatus) && (
                 <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>Submit for Review</button>
               )}
@@ -1222,11 +1334,16 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
           {/* Subtasks — Task.Co style */}
           {(() => {
             // Employee: only show subtasks assigned to or by them
-            const visibleSubtasks = (!isCEO && !isTL)
+            const visibleSubtasks = ((!isCEO && !isTL)
               ? (task.subtasks || []).filter(sub =>
                 (sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId
               )
-              : (task.subtasks || []);
+              : (task.subtasks || [])
+            ).sort((a, b) => {
+              const pa = a.priority ?? 5, pb = b.priority ?? 5;
+              if (pa !== pb) return pa - pb;
+              return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+            });
             return visibleSubtasks.length > 0 ? (
               <div style={{ marginTop: 14, padding: "0 14px" }}>
                 <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
@@ -1410,6 +1527,7 @@ export default function TasksPage() {
   const [activeModal, setActiveModal] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [showDeleteConf, setShowDeleteConf] = useState(false);
+  const [priorityToast, setPriorityToast] = useState(null); // { label, taskTitle }
 
   // ── Work commit modal (shown when employee pauses timer) ─────────────────────
   const [commitModal, setCommitModal] = useState(null); // { taskId, taskTitle }
@@ -1426,6 +1544,22 @@ export default function TasksPage() {
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [showExtendForm, setShowExtendForm] = useState(false);
+  // TL counter-propose states
+  const [counterDate, setCounterDate] = useState("");
+  const [counterTime, setCounterTime] = useState("09:00");
+  const [counterMessage, setCounterMessage] = useState("");
+  const [showCounterForm, setShowCounterForm] = useState(false);
+  const [counterBusy, setCounterBusy] = useState(false);
+  // Employee respond to TL counter states
+  const [respondBusy, setRespondBusy] = useState(false);
+  // Employee's counter-proposal state (when disagreeing with TL's suggested date)
+  const [empCounterDate, setEmpCounterDate] = useState("");
+  const [empCounterTime, setEmpCounterTime] = useState("09:00");
+  const [empCounterMsg, setEmpCounterMsg] = useState("");
+  const [showEmpCounterForm, setShowEmpCounterForm] = useState(false);
+  // Keep legacy for backward compat
+  const [rejectCounterReason, setRejectCounterReason] = useState("");
+  const [showRejectCounterInput, setShowRejectCounterInput] = useState(false);
 
   const [requestModal, setRequestModal] = useState(null); // { taskId, taskTitle }
 
@@ -1548,6 +1682,9 @@ export default function TasksPage() {
 
   const messagesEndRef = useRef(null);
   const pendingMapRef = useRef(new Map());
+  // Tracks when we last did a local optimistic update per taskId
+  // Listener ignores Firestore updates for 4s after a local action to avoid flickering
+  const ignoreLiveUntilRef = useRef({});
   // Stores { taskId -> timestamp(ms) } of when user last opened each task chat
   const lastReadAtRef = useRef({});
   const isCEO = role === "ceo";
@@ -1569,6 +1706,44 @@ export default function TasksPage() {
   const handleTimerPause = useCallback((taskId, taskTitle) => {
     setCommitModal({ taskId, taskTitle });
     setCommitMessage("");
+  }, []);
+
+  // ── Update priority inline from detail panel ──────────────────────────────
+  const handleUpdatePriority = useCallback(async (taskId, newPriority) => {
+    const p = Math.max(1, Math.min(10, Number(newPriority)));
+    if (!taskId || isNaN(p)) return;
+
+    const taskTitle = allTaskMapRef.current?.get(taskId)?.title || "";
+    const label = p === 1 ? "P1 — Highest" : p === 2 ? "P2 — High" : p === 10 ? "P10 — Lowest" : `P${p} — Medium`;
+
+    // Optimistic update — change local state immediately, no reload needed
+    setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: p } : t));
+    setSelectedTask(prev => prev?.taskId === taskId ? { ...prev, priority: p } : prev);
+    // Also update allTaskMap so TblRow subtask sort sees the new priority instantly
+    setAllTaskMap(prev => {
+      const next = new Map(prev);
+      const existing = next.get(taskId);
+      if (existing) next.set(taskId, { ...existing, priority: p });
+      return next;
+    });
+    if (allTaskMapRef.current?.has(taskId)) {
+      allTaskMapRef.current.set(taskId, { ...allTaskMapRef.current.get(taskId), priority: p });
+    }
+
+    // Show top-right toast
+    setPriorityToast({ label, taskTitle });
+    setTimeout(() => setPriorityToast(null), 2500);
+
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_tasks", taskId), {
+        priority: p,
+        updatedAt: new Date(),
+      });
+    } catch (e) {
+      console.error("[priority] update error:", e.message);
+      // Revert on failure
+      setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: t.priority } : t));
+    }
   }, []);
 
   const handleCommitSubmit = useCallback(async (skipMessage = false) => {
@@ -1604,6 +1779,66 @@ export default function TasksPage() {
       setSavingCommit(false);
     }
   }, [commitModal, commitMessage, employeeId, employeeName, timerPause, timerSessionMap]);
+
+  // ── TL counter-propose deadline ──────────────────────────────────────────────
+  const handleTlCounterPropose = useCallback(async () => {
+    if (!counterDate || !selectedTask) return;
+    setCounterBusy(true);
+    const dt = `${counterDate}T${counterTime || "09:00"}:00`;
+    // Optimistic: immediately show pending_employee_deadline_confirmation
+    const optimistic = { status: "pending_employee_deadline_confirmation", tlCounterDeadline: dt, tlCounterDeadlineMessage: counterMessage.trim(), tlCounterDeadlineByName: employeeName };
+    setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+    setShowCounterForm(false); setCounterDate(""); setCounterTime("09:00"); setCounterMessage("");
+    try {
+      await taskForwardApi.tlCounterDeadline(selectedTask.taskId, dt, counterMessage.trim());
+    } catch (e) {
+      console.error(e);
+      // Revert on failure
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: "pending_deadline_approval", tlCounterDeadline: null } : t));
+      setSelectedTask(prev => prev ? { ...prev, status: "pending_deadline_approval", tlCounterDeadline: null } : prev);
+    }
+    finally { setCounterBusy(false); }
+  }, [counterDate, counterTime, counterMessage, selectedTask, employeeName]);
+
+  // ── Employee respond to TL counter-proposal ───────────────────────────────
+  const handleRespondToCounter = useCallback(async (accepted) => {
+    if (!selectedTask) return;
+    setRespondBusy(true);
+
+    if (accepted) {
+      // Optimistic: immediately show deadline_approved with TL's date
+      const newDue = selectedTask.tlCounterDeadline;
+      const optimistic = { status: "deadline_approved", dueDate: newDue, tlCounterDeadline: null, tlCounterDeadlineMessage: null };
+      ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+      setShowEmpCounterForm(false);
+      try {
+        await taskForwardApi.respondToTlCounter(selectedTask.taskId, true, "");
+      } catch (e) {
+        console.error("[respond-counter]", e.message);
+        // Revert
+        setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: "pending_employee_deadline_confirmation", dueDate: selectedTask.dueDate, tlCounterDeadline: selectedTask.tlCounterDeadline } : t));
+        setSelectedTask(prev => prev ? { ...prev, status: "pending_employee_deadline_confirmation" } : prev);
+      }
+    } else {
+      // Optimistic: show pending_deadline_approval with employee's new date
+      const dt = `${empCounterDate}T${empCounterTime || "09:00"}:00`;
+      const optimistic = { status: "pending_deadline_approval", proposedDeadline: dt, proposedDeadlineByName: employeeName, tlCounterDeadline: null };
+      ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+      setShowEmpCounterForm(false);
+      setEmpCounterDate(""); setEmpCounterTime("09:00"); setEmpCounterMsg("");
+      try {
+        await taskForwardApi.respondToTlCounter(selectedTask.taskId, false, "Employee wants a different date");
+        await taskForwardApi.proposeDeadline(selectedTask.taskId, dt, 0);
+      } catch (e) { console.error("[respond-counter]", e.message); }
+    }
+    setRespondBusy(false);
+  }, [selectedTask, empCounterDate, empCounterTime, employeeName]);
 
   const allAssigneeIds = (isCEO || isTL)
     ? [...new Set(allTasks.flatMap(t => t.assigneeIds || []))]
@@ -1929,6 +2164,7 @@ export default function TasksPage() {
     setDraftMessages([]); // reset draft messages
     setProposedDeadlineDate(""); setProposedDeadlineTime("09:00");
     setShowRejectInput(false); setRejectReason("");
+    setShowCounterForm(false); setCounterDate(""); setCounterTime("09:00"); setCounterMessage("");
     // ── Serve cached messages instantly ──
     if (chatCacheRef.current[taskId]?.length) {
       setChatMessages(chatCacheRef.current[taskId]);
@@ -2173,14 +2409,21 @@ export default function TasksPage() {
   const handleProposeDeadline = async () => {
     if (!selectedTask?.taskId || !proposedDeadlineDate) return;
     setProposingDeadline(true);
+    const proposedDate = `${proposedDeadlineDate}T${proposedDeadlineTime || "09:00"}`;
+    // Optimistic: show pending_deadline_approval immediately
+    const optimistic = { status: "pending_deadline_approval", proposedDeadline: proposedDate, proposedDeadlineByName: employeeName };
+    ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+    setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
     try {
-      const proposedDate = `${proposedDeadlineDate}T${proposedDeadlineTime || "09:00"}`;
-      // Pass current worked seconds so backend can correctly accumulate "Asked For"
       const workedSecs = getDisplaySeconds(selectedTask.taskId) || 0;
       await taskForwardApi.proposeDeadline(selectedTask.taskId, proposedDate, workedSecs);
-      await loadDetail(selectedTask.taskId);
-      await loadAllTasks();
-    } catch (e) { alert(e.message); }
+    } catch (e) {
+      alert(e.message);
+      // Revert on failure
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: selectedTask.status } : t));
+      setSelectedTask(prev => prev ? { ...prev, status: selectedTask.status } : prev);
+    }
     finally { setProposingDeadline(false); }
   };
 
@@ -2188,11 +2431,24 @@ export default function TasksPage() {
     if (!selectedTask?.taskId) return;
     if (!approved && !rejectReason.trim()) { setShowRejectInput(true); return; }
     setApprovingDeadline(true);
+
+    if (approved) {
+      // Optimistic: immediately show deadline_approved with the proposed date
+      const newDue = selectedTask.proposedDeadline;
+      const optimistic = { status: "deadline_approved", dueDate: newDue, proposedDeadline: null, deadlineProposalRejected: false };
+      ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    } else {
+      // Optimistic: back to open with rejection reason
+      const optimistic = { status: "open", deadlineProposalRejected: true, deadlineRejectionReason: rejectReason.trim(), proposedDeadline: null };
+      ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    }
+    setShowRejectInput(false); setRejectReason("");
     try {
       await taskForwardApi.approveDeadline(selectedTask.taskId, approved, rejectReason.trim());
-      setShowRejectInput(false); setRejectReason("");
-      await loadDetail(selectedTask.taskId);
-      await loadAllTasks();
     } catch (e) { alert(e.message); }
     finally { setApprovingDeadline(false); }
   };
@@ -2504,6 +2760,28 @@ export default function TasksPage() {
     };
     socket.on("task_draft_chat_message", draftHandler);
 
+    // ── LIVE task document listener — real-time cross-user sync ─────────────
+    // When TL suggests a date → employee sees it instantly (no reload)
+    // When employee proposes → TL sees it instantly (no reload)
+    const taskDocRef = doc(firebaseDb, "cowork_tasks", taskId);
+    const unsubTask = onSnapshot(taskDocRef, (snap) => {
+      if (!snap.exists()) return;
+      // Skip if we just did an optimistic update — prevents 2-3 second flicker
+      // where listener overwrites optimistic state with stale Firestore data
+      if ((ignoreLiveUntilRef.current[taskId] || 0) > Date.now()) return;
+      const updated = {
+        ...snap.data(),
+        taskId: snap.id,
+        createdAt: snap.data().createdAt?.toDate?.()?.toISOString() || snap.data().createdAt,
+        updatedAt: snap.data().updatedAt?.toDate?.()?.toISOString() || snap.data().updatedAt,
+        deadlineApprovedAt: snap.data().deadlineApprovedAt || null,
+      };
+      setSelectedTask(prev => prev?.taskId === taskId ? { ...prev, ...updated } : prev);
+      setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, ...updated } : t));
+      setAllTaskMap(prev => { const next = new Map(prev); next.set(taskId, updated); return next; });
+      allTaskMapRef.current?.set(taskId, updated);
+    }, err => console.error("task doc listener:", err));
+
     const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
     const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
     const unsub = onSnapshot(q, snap => {
@@ -2536,7 +2814,7 @@ export default function TasksPage() {
         return [...incoming, ...kept].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       });
     }, err => console.error("chat listener:", err));
-    return () => { unsub(); unsubDraft(); pendingMapRef.current.clear(); socket.off("task_draft_chat_message", draftHandler); socket.off("timer_blocked", timerBlockedHandler); };
+    return () => { unsub(); unsubDraft(); unsubTask(); pendingMapRef.current.clear(); socket.off("task_draft_chat_message", draftHandler); socket.off("timer_blocked", timerBlockedHandler); };
   }, [selectedTask?.taskId]);
 
   useEffect(() => {
@@ -2800,7 +3078,7 @@ export default function TasksPage() {
   const rootOnlyTasks = dedupedForStats.filter(t => !t.parentTaskId);
   const stats = {
     total: rootOnlyTasks.length,
-    open: rootOnlyTasks.filter(t => ["open", "pending_deadline_approval", "deadline_approved"].includes(t.status)).length,
+    open: rootOnlyTasks.filter(t => ["open", "pending_deadline_approval", "pending_employee_deadline_confirmation", "deadline_approved"].includes(t.status)).length,
     active: rootOnlyTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
     done: rootOnlyTasks.filter(t => t.status === "done").length,
   };
@@ -3233,6 +3511,29 @@ export default function TasksPage() {
 
       <style>{STYLES}</style>
 
+      {/* ── Priority changed toast — top-right ── */}
+      {priorityToast && (
+        <div style={{
+          position: "fixed", top: 20, right: 24, zIndex: 9999,
+          background: "#1E293B", color: "#fff",
+          padding: "10px 16px", borderRadius: 12,
+          fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+          display: "flex", alignItems: "center", gap: 8, maxWidth: 320,
+          animation: "timerToastIn 0.2s ease-out",
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FACC15" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" />
+          </svg>
+          <div>
+            <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 400, marginBottom: 1 }}>
+              Priority updated{priorityToast.taskTitle ? ` · ${priorityToast.taskTitle.slice(0, 22)}${priorityToast.taskTitle.length > 22 ? "…" : ""}` : ""}
+            </div>
+            <div>{priorityToast.label}</div>
+          </div>
+        </div>
+      )}
+
       {/* ── Task Timer Toast notification ── */}
       {timerToast && (
         <div style={{
@@ -3265,6 +3566,7 @@ export default function TasksPage() {
           const STATUS_GROUPS_TABLE = [
             { key: "open", label: "Not Started", color: "#EF4444", bg: "#FEF2F2", dot: "#EF4444" },
             { key: "pending_deadline_approval", label: "Deadline Pending", color: "#D97706", bg: "#FFFBEB", dot: "#D97706" },
+            { key: "pending_employee_deadline_confirmation", label: "Employee Confirming", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED" },
             { key: "deadline_approved", label: "Deadline Approved", color: "#059669", bg: "#ECFDF5", dot: "#059669" },
             { key: "confirmed", label: "Confirmed", color: "#5B5EF4", bg: "#EDEDFE", dot: "#5B5EF4" },
             { key: "in_progress", label: "In Progress", color: "#8B5CF6", bg: "#F3E8FF", dot: "#8B5CF6" },
@@ -3334,6 +3636,13 @@ export default function TasksPage() {
               return true;
             })();
             return matchQ && matchSt && matchDept && matchEmp && matchDate;
+          });
+
+          // Sort by priority (1=highest first, 10=lowest last), then newer first
+          filteredRoots.sort((a, b) => {
+            const pa = a.priority ?? 5, pb = b.priority ?? 5;
+            if (pa !== pb) return pa - pb;
+            return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
           });
 
           const AvatarStack = ({ t }) => {
@@ -3616,10 +3925,15 @@ export default function TasksPage() {
                     ))}
                   </div>
                 )}
-                {isExp && visibleSubtaskIds.map(sid => {
-                  const sub = allTaskMap.get(sid); if (!sub) return null;
-                  return <TblRow key={sid} t={sub} depth={depth + 1} isSubtask />;
-                })}
+                {isExp && [...visibleSubtaskIds]
+                  .map(sid => allTasks.find(t => t.taskId === sid) || allTaskMap.get(sid))
+                  .filter(Boolean)
+                  .sort((a, b) => {
+                    const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
+                    if (pa !== pb) return pa - pb;
+                    return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+                  })
+                  .map(sub => <TblRow key={sub.taskId} t={sub} depth={depth + 1} isSubtask />)}
               </>
             );
           };
@@ -3647,10 +3961,11 @@ export default function TasksPage() {
                     </button>
                   )}
                 </div>
-                {!isSubEl && isExp && (t.subtaskIds || []).map(sid => {
-                  const sub = allTaskMap.get(sid); if (!sub) return null;
-                  return <CompactItem key={sid} t={sub} isSubEl />;
-                })}
+                {!isSubEl && isExp && [...(t.subtaskIds || [])]
+                  .map(sid => allTasks.find(t => t.taskId === sid) || allTaskMap.get(sid))
+                  .filter(Boolean)
+                  .sort((a, b) => Number(a.priority ?? 5) - Number(b.priority ?? 5))
+                  .map(sub => <CompactItem key={sub.taskId} t={sub} isSubEl />)}
               </>
             );
           };
@@ -4390,7 +4705,7 @@ export default function TasksPage() {
                     </div>
                   )}
 
-                  {/* Step 2: awaiting */}
+                  {/* Step 2a: awaiting TL approval */}
                   {status === "pending_deadline_approval" && (
                     <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "10px 12px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -4402,50 +4717,139 @@ export default function TasksPage() {
                       </div>}
                     </div>
                   )}
+
+                  {/* Step 2b: TL counter-proposed — employee must respond */}
+                  {status === "pending_employee_deadline_confirmation" && (
+                    <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EDE9FE", border: "2px solid #7C3AED", color: "#7C3AED", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📅</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>TL Suggested a Date</span>
+                      </div>
+                      {task.tlCounterDeadline && (
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#4C1D95", marginBottom: 4 }}>
+                          📅 {new Date(task.tlCounterDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      )}
+                      {task.tlCounterDeadlineMessage && (
+                        <div style={{ fontSize: 11, color: "#6D28D9", background: "#EDE9FE", borderRadius: 6, padding: "4px 7px", marginBottom: 8, fontStyle: "italic" }}>
+                          "{task.tlCounterDeadlineMessage}"
+                        </div>
+                      )}
+                      {!showRejectCounterInput ? (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => handleRespondToCounter(true)} disabled={respondBusy}
+                            style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: respondBusy ? 0.5 : 1 }}>
+                            ✓ Accept
+                          </button>
+                          <button onClick={() => setShowRejectCounterInput(true)} disabled={respondBusy}
+                            style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            ✕ Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <textarea value={rejectCounterReason} onChange={e => setRejectCounterReason(e.target.value)}
+                            placeholder="Why are you rejecting this date?…"
+                            style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => handleRespondToCounter(false)} disabled={!rejectCounterReason.trim() || respondBusy}
+                              style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !rejectCounterReason.trim() || respondBusy ? 0.5 : 1 }}>
+                              {respondBusy ? "…" : "Send"}
+                            </button>
+                            <button onClick={() => { setShowRejectCounterInput(false); setRejectCounterReason(""); }}
+                              style={{ padding: "6px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })()}
 
-            {/* Creator approval panel in chat column */}
-            {task && !task.isFolder && task.status === "pending_deadline_approval" && task.assignedBy === employeeId && (
-              <div style={{ flexShrink: 0, padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "#FFF7ED" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>
-                  {["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "") ? "📅 Deadline Extension Request" : "📋 Deadline Proposal"}
-                </div>
-                {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 8 }}>
-                  <strong>{task.proposedDeadlineByName}</strong> →
-                  <span style={{ fontWeight: 700, marginLeft: 4 }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                </div>}
-                {!showRejectInput ? (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => handleApproveDeadline(true)} disabled={approvingDeadline}
-                      style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: approvingDeadline ? 0.5 : 1 }}>
-                      {approvingDeadline ? "…" : "✓ Approve"}
-                    </button>
-                    <button onClick={() => setShowRejectInput(true)} disabled={approvingDeadline}
-                      style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                      ✕ Reject
-                    </button>
+            {/* Creator approval panel in chat column — 3 tabs always visible */}
+            {task && !task.isFolder && task.status === "pending_deadline_approval" && task.assignedBy === employeeId && (() => {
+              const isExt = ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "");
+              const activeTab = showCounterForm ? "suggest" : showRejectInput ? "reject" : null;
+              const setTab = (t) => {
+                setShowCounterForm(t === "suggest");
+                setShowRejectInput(t === "reject");
+                if (t !== "suggest") { setCounterDate(""); setCounterTime("09:00"); setCounterMessage(""); }
+                if (t !== "reject") { setRejectReason(""); }
+              };
+              return (
+                <div style={{ flexShrink: 0, borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ padding: "10px 14px 8px", background: "#FFF7ED", borderBottom: "1px solid #FED7AA" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#9A3412", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                      {isExt ? "📅 Extension Request" : "📋 Deadline Proposal"}
+                    </div>
+                    {task.proposedDeadline && (
+                      <div style={{ fontSize: 12, color: "#78350F" }}>
+                        <strong>{task.proposedDeadlineByName}</strong> proposes:{" "}
+                        <span style={{ fontWeight: 700 }}>
+                          📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div>
-                    <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-                      placeholder="Reason for rejection…"
-                      style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 48, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => handleApproveDeadline(false)} disabled={!rejectReason.trim() || approvingDeadline}
-                        style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !rejectReason.trim() || approvingDeadline ? 0.5 : 1 }}>
-                        Send Rejection
+                  {/* 3 action tabs ALWAYS visible */}
+                  <div style={{ display: "flex", background: "#fff", borderBottom: "1px solid #E5E7EB" }}>
+                    {[
+                      { key: "approve", label: "✓ Approve", color: "#166534", activeBg: "#DCFCE7", activeBorder: "#16A34A" },
+                      { key: "suggest", label: "📅 Suggest Date", color: "#6D28D9", activeBg: "#EDE9FE", activeBorder: "#7C3AED" },
+                      { key: "reject", label: "✕ Reject", color: "#991B1B", activeBg: "#FEE2E2", activeBorder: "#EF4444" },
+                    ].map(tab => (
+                      <button key={tab.key}
+                        onClick={() => tab.key === "approve" ? handleApproveDeadline(true) : setTab(activeTab === tab.key ? null : tab.key)}
+                        disabled={tab.key === "approve" && approvingDeadline}
+                        style={{
+                          flex: 1, padding: "9px 4px", border: "none", fontFamily: "inherit",
+                          fontSize: 10, fontWeight: 700, cursor: "pointer",
+                          color: activeTab === tab.key ? tab.color : "#6B7280",
+                          background: activeTab === tab.key ? tab.activeBg : "#fff",
+                          borderBottom: activeTab === tab.key ? `2.5px solid ${tab.activeBorder}` : "2.5px solid transparent",
+                          transition: "all 0.1s",
+                        }}>
+                        {tab.key === "approve" && approvingDeadline ? "…" : tab.label}
                       </button>
-                      <button onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
-                        style={{ padding: "6px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
-                        Cancel
+                    ))}
+                  </div>
+                  {activeTab === "suggest" && (
+                    <div style={{ padding: "10px 14px" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Propose a new deadline to employee:</div>
+                      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                        <input type="date" value={counterDate} min={new Date().toISOString().split("T")[0]}
+                          onChange={e => setCounterDate(e.target.value)}
+                          style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        <input type="time" value={counterTime || "09:00"} onChange={e => setCounterTime(e.target.value)}
+                          style={{ width: 82, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                      </div>
+                      <textarea value={counterMessage} onChange={e => setCounterMessage(e.target.value)}
+                        placeholder="Message to employee (optional)..."
+                        style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 52, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                      <button onClick={handleTlCounterPropose} disabled={!counterDate || counterBusy}
+                        style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !counterDate || counterBusy ? "#E5E7EB" : "#7C3AED", color: !counterDate || counterBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !counterDate || counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                        {counterBusy ? "Sending..." : "📅 Send Date to Employee"}
                       </button>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                  {activeTab === "reject" && (
+                    <div style={{ padding: "10px 14px" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Reason for rejection (required):</div>
+                      <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Tell the employee why..."
+                        style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 52, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                      <button onClick={() => handleApproveDeadline(false)} disabled={!rejectReason.trim() || approvingDeadline}
+                        style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !rejectReason.trim() || approvingDeadline ? "#E5E7EB" : "#EF4444", color: !rejectReason.trim() || approvingDeadline ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !rejectReason.trim() || approvingDeadline ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                        {approvingDeadline ? "Sending..." : "Send Rejection"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── DRAFT / NORMAL CHAT TAB BAR ──────────────────────────────────── */}
             {task && !task.isFolder && (() => {
@@ -4864,6 +5268,7 @@ export default function TasksPage() {
                 getTimerSession={getTimerSession}
                 timerStart={timerStart}
                 timerPause={handleTimerPause}
+                onUpdatePriority={handleUpdatePriority}
                 watchedTimers={assigneeAllTimers}
                 deadlineFlow={{
                   proposedDate: proposedDeadlineDate,
@@ -4878,6 +5283,26 @@ export default function TasksPage() {
                   setShowRejectInput,
                   showExtend: showExtendForm,
                   setShowExtend: setShowExtendForm,
+                  showCounterForm,
+                  setShowCounterForm,
+                  counterDate,
+                  setCounterDate,
+                  counterTime,
+                  setCounterTime,
+                  counterMessage,
+                  setCounterMessage,
+                  counterBusy,
+                  handleTlCounterPropose,
+                  showRejectCounterInput,
+                  setShowRejectCounterInput,
+                  rejectCounterReason,
+                  setRejectCounterReason,
+                  respondBusy,
+                  handleRespondToCounter,
+                  empCounterDate, setEmpCounterDate,
+                  empCounterTime, setEmpCounterTime,
+                  empCounterMsg, setEmpCounterMsg,
+                  showEmpCounterForm, setShowEmpCounterForm,
                   onPropose: handleProposeDeadline,
                   onApprove: handleApproveDeadline,
                 }}
@@ -5052,10 +5477,31 @@ export default function TasksPage() {
                         setShowRejectInput,
                         showExtend: showExtendForm,
                         setShowExtend: setShowExtendForm,
+                        showCounterForm,
+                        setShowCounterForm,
+                        counterDate,
+                        setCounterDate,
+                        counterTime,
+                        setCounterTime,
+                        counterMessage,
+                        setCounterMessage,
+                        counterBusy,
+                        handleTlCounterPropose,
+                        showRejectCounterInput,
+                        setShowRejectCounterInput,
+                        rejectCounterReason,
+                        setRejectCounterReason,
+                        respondBusy,
+                        handleRespondToCounter,
+                        empCounterDate, setEmpCounterDate,
+                        empCounterTime, setEmpCounterTime,
+                        empCounterMsg, setEmpCounterMsg,
+                        showEmpCounterForm, setShowEmpCounterForm,
                         onPropose: handleProposeDeadline,
                         onApprove: handleApproveDeadline,
                       }}
                       timerPause={handleTimerPause}
+                      onUpdatePriority={handleUpdatePriority}
                       watchedTimers={assigneeAllTimers}
                     />
                   )}

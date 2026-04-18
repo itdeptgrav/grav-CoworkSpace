@@ -20,8 +20,11 @@ export default function GroupsPage() {
         try {
             setLoadingGroups(true);
             const data = await listGroups();
-            console.log("Fetched groups:", data.groups);
-            setGroups(data.groups || []);
+            // Only show groups where the current user is a member
+            const myGroups = (data.groups || []).filter(g =>
+                (g.memberIds || []).includes(employeeId)
+            );
+            setGroups(myGroups);
         } catch (err) {
             console.error("Error fetching groups:", err);
         } finally {

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { coworkSignIn } from "../lib/coworkAuth";
+import { coworkSignIn, onCoworkAuthChange } from "../lib/coworkAuth";
 
 export default function CoworkingLoginPage() {
   const router = useRouter();
@@ -14,6 +14,29 @@ export default function CoworkingLoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [emailFilled, setEmailFilled] = useState(false);
   const [passwordFilled, setPasswordFilled] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [logoutToast, setLogoutToast] = useState(false);
+
+  // ── Auto-redirect if already logged in ──────────────────────────────────
+  useEffect(() => {
+    const unsub = onCoworkAuthChange((u) => {
+      if (u) {
+        router.replace("/coworking");
+      } else {
+        setAuthChecking(false);
+      }
+    });
+    return () => unsub();
+  }, [router]);
+
+  // ── Show logout success toast if came from logout ──────────────────────
+  useEffect(() => {
+    if (sessionStorage.getItem("cowork_logout_toast")) {
+      sessionStorage.removeItem("cowork_logout_toast");
+      setLogoutToast(true);
+      setTimeout(() => setLogoutToast(false), 3500);
+    }
+  }, []);
 
   // Permanent fix for autofill overlap
   useEffect(() => {
@@ -35,13 +58,15 @@ export default function CoworkingLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const { role } = await coworkSignIn(email, password);
+      const { role, employee } = await coworkSignIn(email, password);
 
       if (!role || role === "none") {
         setError("No workspace access assigned. Contact your administrator.");
         return;
       }
 
+      // Store flag so CoworkingShell shows login success toast
+      sessionStorage.setItem("cowork_login_toast", employee?.name || "");
       router.push("/coworking");
 
     } catch (err) {
@@ -72,8 +97,42 @@ export default function CoworkingLoginPage() {
     }
   };
 
+  // Show blank while checking auth (prevents flash of login form)
+  if (authChecking) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#fff" }}>
+      <div style={{ width: 36, height: 36, border: "3px solid #E5E7EB", borderTop: "3px solid #2563EB", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+
   return (
     <div className="flex min-h-screen bg-white">
+
+      {/* ── Logout success toast ── */}
+      {logoutToast && (
+        <div style={{
+          position: "fixed", top: 20, right: 24, zIndex: 9999,
+          background: "#1E293B", color: "#fff",
+          padding: "12px 18px", borderRadius: 14,
+          fontSize: 13, fontWeight: 600,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          display: "flex", alignItems: "center", gap: 10,
+          animation: "slideInRight 0.3s ease-out",
+          fontFamily: "'DM Sans', sans-serif",
+        }}>
+          <span style={{ fontSize: 18 }}>👋</span>
+          <div>
+            <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 1 }}>See you soon!</div>
+            <div>Logged out successfully</div>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(40px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
       {/* Left Panel - Hidden on mobile */}
       <div className="hidden lg:flex lg:w-1/2 bg-gray-50 items-center justify-center p-12">
         <div className="max-w-md">
