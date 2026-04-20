@@ -236,7 +236,7 @@ function ImageLightbox({ url, onClose, onDownload }) {
 function TreeNode({ node, allTaskMap, allTasks, selectedId, onSelect, expandedIds, toggleExpand, depth, viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes }) {
   const isSelected = selectedId === node.taskId;
   const isExpanded = expandedIds.has(node.taskId);
-  const dl = getDeadlineInfo(node.dueDate);
+  const dl = getDeadlineInfo(node.dueDate, node.deadlineWindowSecs || 0, 0);
   const isUnread = unreadTaskIds?.has(node.taskId);
 
   // CEO: hide TL-created subtasks in count/expand
@@ -789,10 +789,55 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null
                     ].filter(Boolean).join(" – ")}
                   </span>
-                  {task.dueDate && <DeadlineBadge dueDate={task.dueDate} />}
+                  {(task.dueDate || task.deadlineWindowSecs) && <DeadlineBadge dueDate={task.dueDate} deadlineWindowSecs={task.deadlineWindowSecs || 0} workedSecs={getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0} />}
                 </div>
               </Field>
             )}
+
+            {/* ── Time Requested — visible to all roles ── */}
+            {task.deadlineWindowSecs > 0 && (() => {
+              const w = task.deadlineWindowSecs;
+              const workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+              const fmtSecs = (s) => {
+                const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+                if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+                if (h > 0) return `${h}h ${m}m`;
+                return `${m}m`;
+              };
+              const remaining = Math.max(0, w - workedSecs);
+              const timerStarted = workedSecs > 0;
+              return (
+                <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>} label="Time Requested">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", padding: "2px 8px", borderRadius: 6 }}>
+                        ⏱ {fmtSecs(w)} asked
+                      </span>
+                      {timerStarted && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: workedSecs >= w ? "#B91C1C" : "#16A34A", background: workedSecs >= w ? "#FEF2F2" : "#F0FDF4", padding: "2px 8px", borderRadius: 6 }}>
+                          {workedSecs >= w ? `⚠ ${fmtSecs(workedSecs - w)} over` : `${fmtSecs(remaining)} left`}
+                        </span>
+                      )}
+                      {timerStarted && (
+                        <span style={{ fontSize: 11, color: "#64748B" }}>
+                          {fmtSecs(workedSecs)} worked
+                        </span>
+                      )}
+                      {!timerStarted && (
+                        <span style={{ fontSize: 11, color: "#94A3B8" }}></span>
+                      )}
+                    </div>
+                    {timerStarted && w > 0 && (
+                      <div style={{ height: 4, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${Math.min(100, (workedSecs / w) * 100)}%`, background: workedSecs >= w ? "#EF4444" : "#22C55E", borderRadius: 99, transition: "width 1s linear" }} />
+                      </div>
+                    )}
+                  </div>
+                </Field>
+              );
+            })()}
+
+
 
             {/* Type / category if exists */}
             {task.type && (
@@ -900,7 +945,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <button
                               disabled={timerBlocked && !isRunningThis}
-                              onClick={() => isRunningThis ? handleTimerPause(task.taskId, task.title) : timerStart(task.taskId, task.title)}
+                              onClick={() => isRunningThis ? timerPause(task.taskId, task.title) : timerStart(task.taskId, task.title)}
                               style={{
                                 display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "none",
                                 cursor: (timerBlocked && !isRunningThis) ? "not-allowed" : "pointer",
@@ -956,21 +1001,25 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 const df = deadlineFlow || {};
                 const status = task.status;
 
-                // PRIORITY 1: If dueDate is set → always show Confirm (regardless of status)
-                // This handles: deadline_approved, open-with-dueDate, and any edge case
-                // The only exception: if actively pending approval right now
-                const hasDueDate = !!task.dueDate;
+                // PRIORITY 1: If dueDate/deadline is set → show Confirm (unless pending approval)
+                const hasDueDate = !!(task.dueDate || task.deadlineWindowSecs);
                 const isPendingApproval = status === "pending_deadline_approval";
 
-                // Deadline passed warning
-                const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
-                const deadlinePassed = deadlineMs && deadlineMs < Date.now();
-                const deadlinePassedStr = deadlineMs ? (() => {
-                  const diff = Math.abs(Math.floor((Date.now() - deadlineMs) / 60000));
-                  if (diff < 60) return `${diff}m ago`;
-                  const h = Math.floor(diff / 60);
-                  if (h < 24) return `${h}h ago`;
-                  return `${Math.floor(h / 24)}d ago`;
+                // ── Deadline passed = ONLY when timer has run AND worked >= window ──
+                // If timer never started (workedSecs === 0), deadline NEVER triggers
+                const _workedNow = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                const _window = task.deadlineWindowSecs || 0;
+                const _timerEverStarted = _workedNow > 0;
+
+                // "Deadline passed" is purely worked-time based — wall clock irrelevant
+                const deadlinePassed = _timerEverStarted && _window > 0 && _workedNow >= _window;
+
+                // How long over (in worked seconds)
+                const deadlinePassedStr = deadlinePassed ? (() => {
+                  const over = _workedNow - _window;
+                  if (over < 3600) return `${Math.round(over / 60)}m over`;
+                  if (over < 86400) return `${Math.round(over / 3600)}h over`;
+                  return `${Math.round(over / 86400)}d over`;
                 })() : null;
 
                 // If dueDate is set and not currently pending → show Step 3 Confirm directly
@@ -984,10 +1033,18 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                         {deadlinePassed ? "⚠️ Deadline Passed — Confirm Task" : "✓ Deadline Approved"}
                       </span>
                     </div>
-                    {task.dueDate && (
-                      <div style={{ fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", color: deadlinePassed ? "#B91C1C" : "#166534" }}>
-                        📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                        {deadlinePassed && <span style={{ marginLeft: 6, opacity: 0.8 }}>· passed {deadlinePassedStr}</span>}
+                    {(task.deadlineWindowSecs > 0) && (
+                      <div style={{ fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : _timerEverStarted ? "#DCFCE7" : "#F1F5F9", color: deadlinePassed ? "#B91C1C" : _timerEverStarted ? "#166534" : "#64748B" }}>
+                        {!_timerEverStarted
+                          ? `⏱ ${_window < 3600 ? `${Math.round(_window / 60)}m` : _window < 86400 ? `${Math.round(_window / 3600)}h` : `${Math.round(_window / 86400)}d`} — starts when you start timer`
+                          : deadlinePassed
+                            ? `⚠ ${deadlinePassedStr}`
+                            : (() => {
+                              const _rem = _window - _workedNow;
+                              const _fmt = _rem < 3600 ? `${Math.round(_rem / 60)}m` : _rem < 86400 ? `${Math.round(_rem / 3600)}h` : `${Math.round(_rem / 86400)}d`;
+                              return `⏱ ${_fmt} left`;
+                            })()
+                        }
                       </div>
                     )}
                     {deadlinePassed && (
@@ -1019,22 +1076,27 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8, lineHeight: 1.5 }}>
                       Propose a deadline. Your {task.assignedByRole === "ceo" ? "CEO" : "Team Lead"} will approve it before you can confirm.
                     </div>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-end" }}>
                       <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Date</label>
-                        <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
-                          onChange={e => df.setDate?.(e.target.value)}
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>How long will it take?</label>
+                        <input type="number" min="1" max="999" placeholder="e.g. 4"
+                          value={df.proposedDurationVal || ""}
+                          onChange={e => df.setDurationVal?.(e.target.value)}
                           style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                       </div>
-                      <div style={{ width: 88, flexShrink: 0 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Time</label>
-                        <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
-                          style={{ width: "100%", padding: "7px 6px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                      <div style={{ width: 80, flexShrink: 0 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Unit</label>
+                        <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
+                          style={{ width: "100%", padding: "7px 6px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", background: "#F9FAFB", cursor: "pointer" }}>
+                          <option value="minutes">min</option>
+                          <option value="hours">hrs</option>
+                          <option value="days">days</option>
+                        </select>
                       </div>
                     </div>
-                    <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
-                      className="gv-wf-btn gv-wf-confirm" style={{ opacity: !df.proposedDate || df.proposing ? 0.5 : 1 }}>
-                      {df.proposing ? "Submitting…" : "📅 Submit Deadline for Approval"}
+                    <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                      className="gv-wf-btn gv-wf-confirm" style={{ opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
+                      {df.proposing ? "Submitting…" : "⏱ Submit Deadline for Approval"}
                     </button>
                     <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 5, display: "flex", alignItems: "center", gap: 4 }}>
                       💬 Use Draft Chat to discuss with your {task.assignedByRole === "ceo" ? "CEO" : "TL"}
@@ -1048,7 +1110,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
-                      📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
                     </div>}
                     <div style={{ fontSize: 10, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
                   </div>
@@ -1060,7 +1122,14 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ Deadline Approved</span>
                     </div>
                     {task.dueDate && <div style={{ fontSize: 11, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>
-                      📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {(() => {
+                        const _wk = task.deadlineWindowSecs || 0;
+                        const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                        const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
+                        const _abs = Math.round(Math.abs(_rem));
+                        const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
+                        return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                      })()}
                     </div>}
                     <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
                       <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -1079,7 +1148,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 8 }}>📋 Deadline Proposal — Needs Your Approval</div>
                     {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
                       <span style={{ fontWeight: 500 }}>Proposed by {task.proposedDeadlineByName}:</span><br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now</span>
                     </div>}
                     {!df.showRejectInput ? (
                       <div style={{ display: "flex", gap: 7 }}>
@@ -1133,15 +1202,27 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
               {/* ── DEADLINE EXTENSION (in_progress — only after deadline passed) ── */}
               {isAssignee && ["in_progress", "confirmed"].includes(task.status) && !task.isFolder && (() => {
                 const df = deadlineFlow || {};
-                const isOverdue = task.dueDate && new Date(task.dueDate) < new Date();
-                const isNear = task.dueDate && !isOverdue && (new Date(task.dueDate) - new Date()) < 24 * 60 * 60 * 1000;
+                const _workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                const _window = task.deadlineWindowSecs || 0;
+                const _remaining = _window > 0 ? _window - _workedSecs : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : null);
+                // Only show overdue/near AFTER timer has been started at least once
+                const _timerStarted = _workedSecs > 0;
+                const isOverdue = _timerStarted && _remaining !== null && _remaining < 0;
+                const isNear = _timerStarted && _remaining !== null && !isOverdue && _remaining < 7200; // within 2h
                 return (
                   <div style={{ marginBottom: 8 }}>
                     {/* Near-deadline warning only (no button yet) */}
                     {isNear && (
                       <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
                         ⏰ Deadline in less than 24h
-                        {task.dueDate && <span style={{ fontWeight: 700 }}> · {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                        {task.dueDate && <span style={{ fontWeight: 700 }}> · {(() => {
+                          const _wk = task.deadlineWindowSecs || 0;
+                          const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                          const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
+                          const _abs = Math.round(Math.abs(_rem));
+                          const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
+                          return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                        })()}</span>}
                       </div>
                     )}
                     {/* Overdue warning + Request Extension button — ONLY after deadline passed */}
@@ -1149,7 +1230,14 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <>
                         <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#991B1B", display: "flex", alignItems: "center", gap: 5 }}>
                           ⚠️ Deadline passed!
-                          {task.dueDate && <span style={{ fontWeight: 700 }}> · {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                          {task.dueDate && <span style={{ fontWeight: 700 }}> · {(() => {
+                            const _wk = task.deadlineWindowSecs || 0;
+                            const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                            const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
+                            const _abs = Math.round(Math.abs(_rem));
+                            const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
+                            return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                          })()}</span>}
                         </div>
                         <button onClick={() => df.setShowExtend?.(true)}
                           style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
@@ -1167,16 +1255,21 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                           Propose New Deadline
                         </div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                          <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
-                            onChange={e => df.setDate?.(e.target.value)}
+                          <input type="number" min="1" max="999" placeholder="e.g. 4"
+                            value={df.proposedDurationVal || ""}
+                            onChange={e => df.setDurationVal?.(e.target.value)}
                             style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                          <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
-                            style={{ width: 82, padding: "7px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                          <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
+                            style={{ width: 72, padding: "7px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                            <option value="minutes">min</option>
+                            <option value="hours">hrs</option>
+                            <option value="days">days</option>
+                          </select>
                         </div>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.proposedDate || df.proposing ? "#E5E7EB" : "#4F46E5", color: !df.proposedDate || df.proposing ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.proposedDate || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                            {df.proposing ? "Submitting…" : "Submit for Approval"}
+                          <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.proposedDurationVal || df.proposing ? "#E5E7EB" : "#4F46E5", color: !df.proposedDurationVal || df.proposing ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {df.proposing ? "Submitting…" : "⏱ Submit for Approval"}
                           </button>
                           <button onClick={() => df.setShowExtend?.(false)}
                             style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
@@ -1200,7 +1293,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
                       <strong>{task.proposedDeadlineByName}</strong> proposed:<br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now</span>
                     </div>}
 
                     {!df.showRejectInput && !df.showCounterForm ? (
@@ -1224,21 +1317,26 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Suggest a deadline:</div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="date" value={df.counterDate || ""} min={new Date().toISOString().split("T")[0]}
-                            onChange={e => df.setCounterDate?.(e.target.value)}
+                          <input type="number" min="1" max="999" placeholder="e.g. 4"
+                            value={df.counterDurationVal || ""}
+                            onChange={e => df.setCounterDurationVal?.(e.target.value)}
                             style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
-                          <input type="time" value={df.counterTime || "09:00"} onChange={e => df.setCounterTime?.(e.target.value)}
-                            style={{ width: 78, padding: "6px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                          <select value={df.counterDurationUnit || "hours"} onChange={e => df.setCounterDurationUnit?.(e.target.value)}
+                            style={{ padding: "6px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer" }}>
+                            <option value="minutes">min</option>
+                            <option value="hours">hrs</option>
+                            <option value="days">days</option>
+                          </select>
                         </div>
                         <textarea value={df.counterMessage || ""} onChange={e => df.setCounterMessage?.(e.target.value)}
                           placeholder="Message to employee (optional)…"
                           style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
                         <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={df.handleTlCounterPropose} disabled={!df.counterDate || df.counterBusy}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.counterDate || df.counterBusy ? "#E5E7EB" : "#7C3AED", color: !df.counterDate || df.counterBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.counterDate || df.counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                          <button onClick={df.handleTlCounterPropose} disabled={!df.counterDurationVal || df.counterBusy}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.counterDurationVal || df.counterBusy ? "#E5E7EB" : "#7C3AED", color: !df.counterDurationVal || df.counterBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.counterDurationVal || df.counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                             {df.counterBusy ? "…" : "Send Suggestion"}
                           </button>
-                          <button onClick={() => { df.setShowCounterForm?.(false); df.setCounterDate?.(""); df.setCounterMessage?.(""); }}
+                          <button onClick={() => { df.setShowCounterForm?.(false); df.setCounterDurationVal?.(""); df.setCounterMessage?.(""); }}
                             style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
                             Cancel
                           </button>
@@ -1275,7 +1373,12 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     </div>
                     {task.tlCounterDeadline && (
                       <div style={{ fontWeight: 700, fontSize: 13, color: "#4C1D95", marginBottom: 4 }}>
-                        📅 {new Date(task.tlCounterDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {(() => {
+                          const _ms = new Date(task.tlCounterDeadline).getTime() - Date.now();
+                          const _s = Math.round(Math.abs(_ms) / 1000);
+                          const _fmt = _s < 3600 ? `${Math.round(_s / 60)}m` : _s < 86400 ? `${Math.round(_s / 3600)}h` : `${Math.round(_s / 86400)}d`;
+                          return _ms < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                        })()}
                       </div>
                     )}
                     {task.tlCounterDeadlineMessage && (
@@ -1298,19 +1401,25 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     {df.showEmpCounterForm && (
                       <div style={{ paddingTop: 10 }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Your preferred deadline:</div>
+                        <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 6 }}>How much time do you need?</div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="date" value={df.empCounterDate || ""} min={new Date().toISOString().split("T")[0]}
-                            onChange={e => df.setEmpCounterDate?.(e.target.value)}
+                          <input type="number" min="1" max="999" placeholder="e.g. 6"
+                            value={df.empCounterDurationVal || ""}
+                            onChange={e => df.setEmpCounterDurationVal?.(e.target.value)}
                             style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                          <input type="time" value={df.empCounterTime || "09:00"} onChange={e => df.setEmpCounterTime?.(e.target.value)}
-                            style={{ width: 82, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                          <select value={df.empCounterDurationUnit || "hours"} onChange={e => df.setEmpCounterDurationUnit?.(e.target.value)}
+                            style={{ width: 72, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                            <option value="minutes">min</option>
+                            <option value="hours">hrs</option>
+                            <option value="days">days</option>
+                          </select>
                         </div>
                         <textarea value={df.empCounterMsg || ""} onChange={e => df.setEmpCounterMsg?.(e.target.value)}
                           placeholder="Message to TL/CEO (optional)..."
                           style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-                        <button onClick={() => df.handleRespondToCounter?.(false)} disabled={!df.empCounterDate || df.respondBusy}
-                          style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !df.empCounterDate || df.respondBusy ? "#E5E7EB" : "#7C3AED", color: !df.empCounterDate || df.respondBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !df.empCounterDate || df.respondBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                          {df.respondBusy ? "Sending..." : "📅 Send My Date to TL for Approval"}
+                        <button onClick={() => df.handleRespondToCounter?.(false)} disabled={!df.empCounterDurationVal || df.respondBusy}
+                          style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !df.empCounterDurationVal || df.respondBusy ? "#E5E7EB" : "#7C3AED", color: !df.empCounterDurationVal || df.respondBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !df.empCounterDurationVal || df.respondBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                          {df.respondBusy ? "Sending..." : "⏱ Send My Request to TL for Approval"}
                         </button>
                       </div>
                     )}
@@ -1372,7 +1481,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       {/* Timer button for subtask */}
                       {(subIsAssignee || isCEO || isTL) && (
                         <button
-                          onClick={e => { e.stopPropagation(); subIsRunning ? handleTimerPause(sub.taskId, sub.title) : timerStart(sub.taskId, sub.title); }}
+                          onClick={e => { e.stopPropagation(); subIsRunning ? timerPause(sub.taskId, sub.title) : timerStart(sub.taskId, sub.title); }}
                           style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: subIsRunning ? "#DCFCE7" : "#F1F5F9", color: subIsRunning ? "#16A34A" : "#94A3B8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
                           title={subIsRunning ? "Pause" : subHasTime ? "Resume" : "Start"}
                         >
@@ -1543,24 +1652,24 @@ export default function TasksPage() {
   // ── Draft chat + deadline flow state ─────────────────────────────────────────
   const [draftMessages, setDraftMessages] = useState([]);
   const [chatTabMode, setChatTabMode] = useState("normal"); // "draft" | "normal"
-  const [proposedDeadlineDate, setProposedDeadlineDate] = useState("");
-  const [proposedDeadlineTime, setProposedDeadlineTime] = useState("09:00");
+  const [proposedDurationVal, setProposedDurationVal] = useState(""); // e.g. "4"
+  const [proposedDurationUnit, setProposedDurationUnit] = useState("hours"); // hours | days | minutes
   const [proposingDeadline, setProposingDeadline] = useState(false);
   const [approvingDeadline, setApprovingDeadline] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [showExtendForm, setShowExtendForm] = useState(false);
   // TL counter-propose states
-  const [counterDate, setCounterDate] = useState("");
-  const [counterTime, setCounterTime] = useState("09:00");
+  const [counterDurationVal, setCounterDurationVal] = useState("");
+  const [counterDurationUnit, setCounterDurationUnit] = useState("hours");
   const [counterMessage, setCounterMessage] = useState("");
   const [showCounterForm, setShowCounterForm] = useState(false);
   const [counterBusy, setCounterBusy] = useState(false);
   // Employee respond to TL counter states
   const [respondBusy, setRespondBusy] = useState(false);
   // Employee's counter-proposal state (when disagreeing with TL's suggested date)
-  const [empCounterDate, setEmpCounterDate] = useState("");
-  const [empCounterTime, setEmpCounterTime] = useState("09:00");
+  const [empCounterDurationVal, setEmpCounterDurationVal] = useState("");
+  const [empCounterDurationUnit, setEmpCounterDurationUnit] = useState("hours");
   const [empCounterMsg, setEmpCounterMsg] = useState("");
   const [showEmpCounterForm, setShowEmpCounterForm] = useState(false);
   // Keep legacy for backward compat
@@ -1709,6 +1818,17 @@ export default function TasksPage() {
   } = useTaskTimer(employeeId);
 
   // ── Intercept pause: show commit message modal first ─────────────────────────
+  // Intercept timerStart — if another task is running, show commit modal first
+  const handleTimerStart = useCallback((newTaskId, newTaskTitle) => {
+    if (timerActiveTaskId && timerActiveTaskId !== newTaskId) {
+      // Another task is running — show commit modal, then start new task after
+      setCommitModal({ taskId: timerActiveTaskId, taskTitle: allTaskMapRef.current?.get(timerActiveTaskId)?.title || timerActiveTaskId, nextTaskId: newTaskId, nextTaskTitle: newTaskTitle });
+      setCommitMessage("");
+    } else {
+      timerStart(newTaskId, newTaskTitle);
+    }
+  }, [timerActiveTaskId, timerStart]);
+
   const handleTimerPause = useCallback((taskId, taskTitle) => {
     setCommitModal({ taskId, taskTitle });
     setCommitMessage("");
@@ -1762,7 +1882,7 @@ export default function TasksPage() {
       const start = sess?.lastStartTime || Date.now();
       const elapsed = Math.floor((Date.now() - start) / 1000);
       const secondsWorked = base + elapsed;
-      const msg = skipMessage ? "" : (commitMessage.trim() || "");
+      const msg = commitMessage.trim();
 
       // Write commit log to Firestore
       const { addDoc: _addDoc, collection: _col, serverTimestamp: _st } = await import("firebase/firestore");
@@ -1780,23 +1900,31 @@ export default function TasksPage() {
     } finally {
       // Always pause regardless of commit write success
       timerPause(taskId, taskTitle);
+      // If switching to another task, start it now
+      const next = commitModal?.nextTaskId;
+      const nextTitle = commitModal?.nextTaskTitle;
       setCommitModal(null);
       setCommitMessage("");
       setSavingCommit(false);
+      if (next) {
+        setTimeout(() => timerStart(next, nextTitle), 200);
+      }
     }
   }, [commitModal, commitMessage, employeeId, employeeName, timerPause, timerSessionMap]);
 
   // ── TL counter-propose deadline ──────────────────────────────────────────────
   const handleTlCounterPropose = useCallback(async () => {
-    if (!counterDate || !selectedTask) return;
+    if (!counterDurationVal || !selectedTask) return;
     setCounterBusy(true);
-    const dt = `${counterDate}T${counterTime || "09:00"}:00`;
+    const n = parseFloat(counterDurationVal);
+    const ms = counterDurationUnit === "minutes" ? n * 60000 : counterDurationUnit === "days" ? n * 86400000 : n * 3600000;
+    const dt = new Date(Date.now() + ms).toISOString();
     // Optimistic: immediately show pending_employee_deadline_confirmation
     const optimistic = { status: "pending_employee_deadline_confirmation", tlCounterDeadline: dt, tlCounterDeadlineMessage: counterMessage.trim(), tlCounterDeadlineByName: employeeName };
     setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
     setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
     ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
-    setShowCounterForm(false); setCounterDate(""); setCounterTime("09:00"); setCounterMessage("");
+    setShowCounterForm(false); setCounterDurationVal(""); setCounterDurationUnit("hours"); setCounterMessage("");
     try {
       await taskForwardApi.tlCounterDeadline(selectedTask.taskId, dt, counterMessage.trim());
     } catch (e) {
@@ -1806,7 +1934,7 @@ export default function TasksPage() {
       setSelectedTask(prev => prev ? { ...prev, status: "pending_deadline_approval", tlCounterDeadline: null } : prev);
     }
     finally { setCounterBusy(false); }
-  }, [counterDate, counterTime, counterMessage, selectedTask, employeeName]);
+  }, [counterDurationVal, counterDurationUnit, counterMessage, selectedTask, employeeName]);
 
   // ── Employee respond to TL counter-proposal ───────────────────────────────
   const handleRespondToCounter = useCallback(async (accepted) => {
@@ -1830,21 +1958,23 @@ export default function TasksPage() {
         setSelectedTask(prev => prev ? { ...prev, status: "pending_employee_deadline_confirmation" } : prev);
       }
     } else {
-      // Optimistic: show pending_deadline_approval with employee's new date
-      const dt = `${empCounterDate}T${empCounterTime || "09:00"}:00`;
+      // Optimistic: show pending_deadline_approval with employee's new duration
+      const n = parseFloat(empCounterDurationVal) || 1;
+      const ms = empCounterDurationUnit === "minutes" ? n * 60000 : empCounterDurationUnit === "days" ? n * 86400000 : n * 3600000;
+      const dt = new Date(Date.now() + ms).toISOString();
       const optimistic = { status: "pending_deadline_approval", proposedDeadline: dt, proposedDeadlineByName: employeeName, tlCounterDeadline: null };
       ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
       setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
       setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
       setShowEmpCounterForm(false);
-      setEmpCounterDate(""); setEmpCounterTime("09:00"); setEmpCounterMsg("");
+      setEmpCounterDurationVal(""); setEmpCounterDurationUnit("hours"); setEmpCounterMsg("");
       try {
-        await taskForwardApi.respondToTlCounter(selectedTask.taskId, false, "Employee wants a different date");
+        await taskForwardApi.respondToTlCounter(selectedTask.taskId, false, "Employee wants a different duration");
         await taskForwardApi.proposeDeadline(selectedTask.taskId, dt, 0);
       } catch (e) { console.error("[respond-counter]", e.message); }
     }
     setRespondBusy(false);
-  }, [selectedTask, empCounterDate, empCounterTime, employeeName]);
+  }, [selectedTask, empCounterDurationVal, empCounterDurationUnit, employeeName]);
 
   const allAssigneeIds = (isCEO || isTL)
     ? [...new Set(allTasks.flatMap(t => t.assigneeIds || []))]
@@ -2168,9 +2298,9 @@ export default function TasksPage() {
     setDetailLoading(true);
     setDailyReports([]);
     setDraftMessages([]); // reset draft messages
-    setProposedDeadlineDate(""); setProposedDeadlineTime("09:00");
+    setProposedDurationVal(""); setProposedDurationUnit("hours");
     setShowRejectInput(false); setRejectReason("");
-    setShowCounterForm(false); setCounterDate(""); setCounterTime("09:00"); setCounterMessage("");
+    setShowCounterForm(false); setCounterDurationVal(""); setCounterDurationUnit("hours"); setCounterMessage("");
     // ── Serve cached messages instantly ──
     if (chatCacheRef.current[taskId]?.length) {
       setChatMessages(chatCacheRef.current[taskId]);
@@ -2411,11 +2541,29 @@ export default function TasksPage() {
     setDeleteMsgConf({ message });
   };
 
+  // ── Duration → ISO date string helper ────────────────────────────────────
+  const durationToDate = (val, unit) => {
+    const n = parseFloat(val);
+    if (!n || n <= 0) return null;
+    const ms = unit === "minutes" ? n * 60 * 1000
+      : unit === "hours" ? n * 3600 * 1000
+        : unit === "days" ? n * 86400 * 1000
+          : n * 3600 * 1000;
+    return new Date(Date.now() + ms).toISOString();
+  };
+
+  const durationLabel = (val, unit) => {
+    const n = parseFloat(val);
+    if (!n) return "";
+    return `${n} ${unit}`;
+  };
+
   // ── Deadline proposal handlers ────────────────────────────────────────────
   const handleProposeDeadline = async () => {
-    if (!selectedTask?.taskId || !proposedDeadlineDate) return;
+    if (!selectedTask?.taskId || !proposedDurationVal) return;
+    const proposedDate = durationToDate(proposedDurationVal, proposedDurationUnit);
+    if (!proposedDate) return;
     setProposingDeadline(true);
-    const proposedDate = `${proposedDeadlineDate}T${proposedDeadlineTime || "09:00"}`;
     // Optimistic: show pending_deadline_approval immediately
     const optimistic = { status: "pending_deadline_approval", proposedDeadline: proposedDate, proposedDeadlineByName: employeeName };
     ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
@@ -3685,7 +3833,7 @@ export default function TasksPage() {
           };
 
           const TblRow = ({ t, depth = 0, isSubtask = false }) => {
-            const dl = getDeadlineInfo(t.dueDate);
+            const dl = getDeadlineInfo(t.dueDate, t.deadlineWindowSecs || 0, 0);
             const st = STATUS[t.status] || STATUS.open;
             const p = getPriDisplay(t.priority);
             // Only show expand arrow for subtasks visible to current user
@@ -3797,7 +3945,7 @@ export default function TasksPage() {
                               onClick={e => {
                                 e.stopPropagation();
                                 if (timerBlocked) return;
-                                if (isRunning) handleTimerPause(t.taskId, t.title);
+                                if (isRunning) timerPause(t.taskId, t.title);
                                 else timerStart(t.taskId, t.title);
                               }}
                               style={{
@@ -3856,7 +4004,8 @@ export default function TasksPage() {
                           )}
                           {/* Remaining deadline time */}
                           {t.dueDate && canControl && (() => {
-                            const msLeft = new Date(t.dueDate).getTime() - Date.now();
+                            const _tw = t.deadlineWindowSecs || 0;
+                            const msLeft = _tw > 0 ? (_tw - 0) * 1000 : (t.dueDate ? new Date(t.dueDate).getTime() - Date.now() : 0);
                             const isOver = msLeft < 0;
                             const absSecs = Math.abs(Math.floor(msLeft / 1000));
                             const h = Math.floor(absSecs / 3600);
@@ -3950,7 +4099,7 @@ export default function TasksPage() {
           };
 
           const CompactItem = ({ t, isSubEl = false }) => {
-            const dl = getDeadlineInfo(t.dueDate);
+            const dl = getDeadlineInfo(t.dueDate, t.deadlineWindowSecs || 0, 0);
             const st = STATUS[t.status] || STATUS.open;
             const isSel = task?.taskId === t.taskId;
             const unread = unreadCounts?.[t.taskId] || 0;
@@ -4614,10 +4763,10 @@ export default function TasksPage() {
             {/* ── WORKFLOW BANNER (pre-confirmed only) — shown in chat column ── */}
             {task && !task.isFolder && isAssignee && !isConfirmed && (() => {
               const df = {
-                proposedDate: proposedDeadlineDate,
-                proposedTime: proposedDeadlineTime,
-                setDate: setProposedDeadlineDate,
-                setTime: setProposedDeadlineTime,
+                proposedDurationVal: proposedDurationVal,
+                proposedDurationUnit: proposedDurationUnit,
+                setDurationVal: setProposedDurationVal,
+                setDurationUnit: setProposedDurationUnit,
                 proposing: proposingDeadline,
                 approving: approvingDeadline,
                 rejectReason,
@@ -4678,7 +4827,14 @@ export default function TasksPage() {
                       </div>
                       {task.dueDate && (
                         <div style={{ fontSize: 11, fontWeight: 600, color: deadlinePassed ? "#B91C1C" : "#166534", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-                          📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {(() => {
+                            const _wk = task.deadlineWindowSecs || 0;
+                            const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                            const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
+                            const _abs = Math.round(Math.abs(_rem));
+                            const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
+                            return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                          })()}
                           {deadlinePassed && <span style={{ opacity: 0.75 }}>· passed {passedStr}</span>}
                         </div>
                       )}
@@ -4703,15 +4859,20 @@ export default function TasksPage() {
                         </div>
                       )}
                       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                        <input type="date" value={df.proposedDate || ""} min={new Date().toISOString().split("T")[0]}
-                          onChange={e => df.setDate?.(e.target.value)}
+                        <input type="number" min="1" max="999" placeholder="e.g. 4"
+                          value={df.proposedDurationVal || ""}
+                          onChange={e => df.setDurationVal?.(e.target.value)}
                           style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                        <input type="time" value={df.proposedTime || "09:00"} onChange={e => df.setTime?.(e.target.value)}
-                          style={{ width: 80, padding: "6px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
+                          style={{ width: 72, padding: "6px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                          <option value="minutes">min</option>
+                          <option value="hours">hrs</option>
+                          <option value="days">days</option>
+                        </select>
                       </div>
-                      <button disabled={!df.proposedDate || df.proposing} onClick={df.onPropose}
-                        className="gv-wf-btn gv-wf-confirm" style={{ width: "100%", marginBottom: 0, opacity: !df.proposedDate || df.proposing ? 0.5 : 1 }}>
-                        {df.proposing ? "Submitting…" : "📅 Submit Deadline for Approval"}
+                      <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                        className="gv-wf-btn gv-wf-confirm" style={{ width: "100%", marginBottom: 0, opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
+                        {df.proposing ? "Submitting…" : "⏱ Submit Deadline for Approval"}
                       </button>
                     </div>
                   )}
@@ -4724,7 +4885,7 @@ export default function TasksPage() {
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                       </div>
                       {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "3px 8px", borderRadius: 6, display: "inline-block" }}>
-                        📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
                       </div>}
                     </div>
                   )}
@@ -4738,7 +4899,12 @@ export default function TasksPage() {
                       </div>
                       {task.tlCounterDeadline && (
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#4C1D95", marginBottom: 4 }}>
-                          📅 {new Date(task.tlCounterDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {(() => {
+                            const _ms = new Date(task.tlCounterDeadline).getTime() - Date.now();
+                            const _s = Math.round(Math.abs(_ms) / 1000);
+                            const _fmt = _s < 3600 ? `${Math.round(_s / 60)}m` : _s < 86400 ? `${Math.round(_s / 3600)}h` : `${Math.round(_s / 86400)}d`;
+                            return _ms < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                          })()}
                         </div>
                       )}
                       {task.tlCounterDeadlineMessage && (
@@ -4787,7 +4953,7 @@ export default function TasksPage() {
               const setTab = (t) => {
                 setShowCounterForm(t === "suggest");
                 setShowRejectInput(t === "reject");
-                if (t !== "suggest") { setCounterDate(""); setCounterTime("09:00"); setCounterMessage(""); }
+                if (t !== "suggest") { setCounterDurationVal(""); setCounterDurationUnit("hours"); setCounterMessage(""); }
                 if (t !== "reject") { setRejectReason(""); }
               };
               return (
@@ -4800,7 +4966,7 @@ export default function TasksPage() {
                       <div style={{ fontSize: 12, color: "#78350F" }}>
                         <strong>{task.proposedDeadlineByName}</strong> proposes:{" "}
                         <span style={{ fontWeight: 700 }}>
-                          📅 {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
                         </span>
                       </div>
                     )}
@@ -4831,18 +4997,23 @@ export default function TasksPage() {
                     <div style={{ padding: "10px 14px" }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Propose a new deadline to employee:</div>
                       <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input type="date" value={counterDate} min={new Date().toISOString().split("T")[0]}
-                          onChange={e => setCounterDate(e.target.value)}
+                        <input type="number" min="1" max="999" placeholder="e.g. 4"
+                          value={counterDurationVal || ""}
+                          onChange={e => setCounterDurationVal(e.target.value)}
                           style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                        <input type="time" value={counterTime || "09:00"} onChange={e => setCounterTime(e.target.value)}
-                          style={{ width: 82, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                        <select value={counterDurationUnit || "hours"} onChange={e => setCounterDurationUnit(e.target.value)}
+                          style={{ width: 72, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                          <option value="minutes">min</option>
+                          <option value="hours">hrs</option>
+                          <option value="days">days</option>
+                        </select>
                       </div>
                       <textarea value={counterMessage} onChange={e => setCounterMessage(e.target.value)}
                         placeholder="Message to employee (optional)..."
                         style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 52, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-                      <button onClick={handleTlCounterPropose} disabled={!counterDate || counterBusy}
-                        style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !counterDate || counterBusy ? "#E5E7EB" : "#7C3AED", color: !counterDate || counterBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !counterDate || counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                        {counterBusy ? "Sending..." : "📅 Send Date to Employee"}
+                      <button onClick={handleTlCounterPropose} disabled={!counterDurationVal || counterBusy}
+                        style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !counterDurationVal || counterBusy ? "#E5E7EB" : "#7C3AED", color: !counterDurationVal || counterBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !counterDurationVal || counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                        {counterBusy ? "Sending..." : "⏱ Send Duration to Employee"}
                       </button>
                     </div>
                   )}
@@ -5277,16 +5448,16 @@ export default function TasksPage() {
                 timerActiveTaskId={timerActiveTaskId}
                 getDisplaySeconds={getDisplaySeconds}
                 getTimerSession={getTimerSession}
-                timerStart={timerStart}
+                timerStart={handleTimerStart}
                 timerPause={handleTimerPause}
                 onUpdatePriority={handleUpdatePriority}
                 employeeMapFull={employeeMapFull}
                 watchedTimers={assigneeAllTimers}
                 deadlineFlow={{
-                  proposedDate: proposedDeadlineDate,
-                  proposedTime: proposedDeadlineTime,
-                  setDate: setProposedDeadlineDate,
-                  setTime: setProposedDeadlineTime,
+                  proposedDurationVal: proposedDurationVal,
+                  proposedDurationUnit: proposedDurationUnit,
+                  setDurationVal: setProposedDurationVal,
+                  setDurationUnit: setProposedDurationUnit,
                   proposing: proposingDeadline,
                   approving: approvingDeadline,
                   rejectReason,
@@ -5297,10 +5468,10 @@ export default function TasksPage() {
                   setShowExtend: setShowExtendForm,
                   showCounterForm,
                   setShowCounterForm,
-                  counterDate,
-                  setCounterDate,
-                  counterTime,
-                  setCounterTime,
+                  counterDurationVal,
+                  setCounterDurationVal,
+                  counterDurationUnit,
+                  setCounterDurationUnit,
                   counterMessage,
                   setCounterMessage,
                   counterBusy,
@@ -5311,8 +5482,8 @@ export default function TasksPage() {
                   setRejectCounterReason,
                   respondBusy,
                   handleRespondToCounter,
-                  empCounterDate, setEmpCounterDate,
-                  empCounterTime, setEmpCounterTime,
+                  empCounterDurationVal: empCounterDurationVal, setEmpCounterDurationVal,
+                  empCounterDurationUnit: empCounterDurationUnit, setEmpCounterDurationUnit,
                   empCounterMsg, setEmpCounterMsg,
                   showEmpCounterForm, setShowEmpCounterForm,
                   onPropose: handleProposeDeadline,
@@ -5475,12 +5646,12 @@ export default function TasksPage() {
                       timerActiveTaskId={timerActiveTaskId}
                       getDisplaySeconds={getDisplaySeconds}
                       getTimerSession={getTimerSession}
-                      timerStart={timerStart}
+                      timerStart={handleTimerStart}
                       deadlineFlow={{
-                        proposedDate: proposedDeadlineDate,
-                        proposedTime: proposedDeadlineTime,
-                        setDate: setProposedDeadlineDate,
-                        setTime: setProposedDeadlineTime,
+                        proposedDurationVal: proposedDurationVal,
+                        proposedDurationUnit: proposedDurationUnit,
+                        setDurationVal: setProposedDurationVal,
+                        setDurationUnit: setProposedDurationUnit,
                         proposing: proposingDeadline,
                         approving: approvingDeadline,
                         rejectReason,
@@ -5491,10 +5662,10 @@ export default function TasksPage() {
                         setShowExtend: setShowExtendForm,
                         showCounterForm,
                         setShowCounterForm,
-                        counterDate,
-                        setCounterDate,
-                        counterTime,
-                        setCounterTime,
+                        counterDurationVal,
+                        setCounterDurationVal,
+                        counterDurationUnit,
+                        setCounterDurationUnit,
                         counterMessage,
                         setCounterMessage,
                         counterBusy,
@@ -5505,8 +5676,8 @@ export default function TasksPage() {
                         setRejectCounterReason,
                         respondBusy,
                         handleRespondToCounter,
-                        empCounterDate, setEmpCounterDate,
-                        empCounterTime, setEmpCounterTime,
+                        empCounterDurationVal: empCounterDurationVal, setEmpCounterDurationVal,
+                        empCounterDurationUnit: empCounterDurationUnit, setEmpCounterDurationUnit,
                         empCounterMsg, setEmpCounterMsg,
                         showEmpCounterForm, setShowEmpCounterForm,
                         onPropose: handleProposeDeadline,
@@ -5678,7 +5849,7 @@ export default function TasksPage() {
             {/* Body */}
             <div style={{ padding: "16px 20px" }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
-                What did you work on? <span style={{ color: "#94A3B8", fontWeight: 400, textTransform: "none" }}>(optional)</span>
+                What did you work on? <span style={{ color: "#EF4444", fontWeight: 600, textTransform: "none" }}>*</span>
               </label>
               <textarea
                 autoFocus
@@ -5687,7 +5858,8 @@ export default function TasksPage() {
                 onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
                 placeholder="e.g. Fixed the login bug, updated UI layout…"
                 style={{
-                  width: "100%", padding: "10px 12px", border: "1.5px solid #E5E7EB",
+                  width: "100%", padding: "10px 12px",
+                  border: `1.5px solid ${commitMessage.trim() ? "#E5E7EB" : "#FCA5A5"}`,
                   borderRadius: 9, fontSize: 13, fontFamily: "inherit",
                   outline: "none", resize: "vertical", minHeight: 90,
                   color: "#0F172A", background: "#FAFAFA", boxSizing: "border-box",
@@ -5696,8 +5868,9 @@ export default function TasksPage() {
                 onFocus={e => e.target.style.borderColor = "#4F46E5"}
                 onBlur={e => e.target.style.borderColor = "#E5E7EB"}
               />
-              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>
-                💡 Ctrl+Enter to save quickly
+              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: "#EF4444" }}>*</span> Required — describe what you worked on
+                <span style={{ marginLeft: "auto" }}>💡 Ctrl+Enter to save</span>
               </div>
             </div>
 
@@ -5706,22 +5879,14 @@ export default function TasksPage() {
               padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end",
               borderTop: "1px solid #F1F5F9",
             }}>
-              <button onClick={() => handleCommitSubmit(true)}
-                disabled={savingCommit}
-                style={{
-                  padding: "8px 16px", borderRadius: 8, border: "1.5px solid #E5E7EB",
-                  background: "#F9FAFB", color: "#64748B", fontSize: 13, fontWeight: 500,
-                  cursor: "pointer", fontFamily: "inherit", opacity: savingCommit ? 0.5 : 1,
-                }}>
-                Skip
-              </button>
+
               <button onClick={() => handleCommitSubmit(false)}
-                disabled={savingCommit}
+                disabled={savingCommit || !commitMessage.trim()}
                 style={{
                   padding: "8px 20px", borderRadius: 8, border: "none",
-                  background: savingCommit ? "#E5E7EB" : "#4F46E5",
-                  color: savingCommit ? "#94A3B8" : "#fff",
-                  fontSize: 13, fontWeight: 700, cursor: savingCommit ? "not-allowed" : "pointer",
+                  background: savingCommit || !commitMessage.trim() ? "#E5E7EB" : "#4F46E5",
+                  color: savingCommit || !commitMessage.trim() ? "#94A3B8" : "#fff",
+                  fontSize: 13, fontWeight: 700, cursor: savingCommit || !commitMessage.trim() ? "not-allowed" : "pointer",
                   fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
                 }}>
                 {savingCommit ? (

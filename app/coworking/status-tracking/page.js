@@ -320,8 +320,17 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                             {/* Top: deadline time + state badge */}
                                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                                                 <span style={{ fontSize: 11, color: "#64748B" }}>
-                                                    Deadline: <strong style={{ color: "#0F172A" }}>
-                                                        {new Date(taskDue).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                                    Time given: <strong style={{ color: "#0F172A" }}>
+                                                        {askedForSecs ? fmtSecs(askedForSecs) : (
+                                                            (() => {
+                                                                const ms = new Date(taskDue).getTime() - (task.deadlineApprovedAt?.seconds ? task.deadlineApprovedAt.seconds * 1000 : Date.now());
+                                                                if (ms <= 0) return "—";
+                                                                const s = Math.round(Math.abs(ms) / 1000);
+                                                                if (s < 3600) return `${Math.round(s / 60)}m`;
+                                                                if (s < 86400) return `${Math.round(s / 3600)}h`;
+                                                                return `${Math.round(s / 86400)}d`;
+                                                            })()
+                                                        )}
                                                     </strong>
                                                 </span>
                                                 {ss.label && (
@@ -555,9 +564,16 @@ function DeadlineBar({ dueDate, workedSecs, isActive, lastStartTime }) {
                     <div style={{ position: "absolute", inset: 0, background: "repeating-linear-gradient(45deg,#FEE2E2,#FEE2E2 4px,#FECDD3 4px,#FECDD3 8px)", borderRadius: 99, opacity: 0.6 }} />
                 )}
             </div>
-            {/* Deadline date */}
+            {/* Deadline remaining */}
             <div style={{ fontSize: 9, color: "#94A3B8", marginTop: 2, textAlign: "right" }}>
-                Due: {new Date(dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                {(() => {
+                    const ms = new Date(dueDate).getTime() - Date.now();
+                    if (ms < 0) return "⚠ Overdue";
+                    const s = Math.round(ms / 1000);
+                    if (s < 3600) return `${Math.round(s / 60)}m left`;
+                    if (s < 86400) return `${Math.round(s / 3600)}h left`;
+                    return `${Math.round(s / 86400)}d left`;
+                })()}
             </div>
         </div>
     );
@@ -693,8 +709,8 @@ export default function StatusTrackingPage() {
     const [pendingDeadlineTasks, setPendingDeadlineTasks] = useState([]);
     const [approvingId, setApprovingId] = useState(null);
     const [counterFormTaskId, setCounterFormTaskId] = useState(null); // which task has suggest form open
-    const [counterDate, setCounterDate] = useState("");
-    const [counterTime, setCounterTime] = useState("09:00");
+    const [counterDurVal, setCounterDurVal] = useState("");
+    const [counterDurUnit, setCounterDurUnit] = useState("hours");
     const [counterMsg, setCounterMsg] = useState("");
     const [rejectFormTaskId, setRejectFormTaskId] = useState(null);
     const [rejectReason, setRejectReason] = useState("");
@@ -948,12 +964,14 @@ export default function StatusTrackingPage() {
     };
 
     const handleCounterPropose = async (taskId) => {
-        if (!counterDate) return;
+        if (!counterDurVal) return;
         setApprovingId(taskId);
         try {
-            const dt = `${counterDate}T${counterTime || "09:00"}:00`;
+            const n = parseFloat(counterDurVal);
+            const ms = counterDurUnit === "minutes" ? n * 60000 : counterDurUnit === "days" ? n * 86400000 : n * 3600000;
+            const dt = new Date(Date.now() + ms).toISOString();
             await taskForwardApi.tlCounterDeadline(taskId, dt, counterMsg.trim());
-            setCounterFormTaskId(null); setCounterDate(""); setCounterTime("09:00"); setCounterMsg("");
+            setCounterFormTaskId(null); setCounterDurVal(""); setCounterDurUnit("hours"); setCounterMsg("");
         } catch (e) { console.error(e); }
         finally { setApprovingId(null); }
     };
@@ -1212,7 +1230,12 @@ export default function StatusTrackingPage() {
                                 {task.proposedDeadline && (
                                     <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 8px", marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}>
                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                                        {new Date(task.proposedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                        {(() => {
+                                            const ms = new Date(task.proposedDeadline).getTime() - Date.now();
+                                            const s = Math.round(Math.abs(ms) / 1000);
+                                            const fmt = s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
+                                            return ms < 0 ? `⚠ ${fmt} overdue` : `⏱ ${fmt} left`;
+                                        })()}
                                     </div>
                                 )}
                                 {/* 3-tab action panel */}
@@ -1221,7 +1244,7 @@ export default function StatusTrackingPage() {
                                     const setTab = (t) => {
                                         setCounterFormTaskId(t === "suggest" ? task.id : null);
                                         setRejectFormTaskId(t === "reject" ? task.id : null);
-                                        if (t !== "suggest") { setCounterDate(""); setCounterTime("09:00"); setCounterMsg(""); }
+                                        if (t !== "suggest") { setCounterDurVal(""); setCounterDurUnit("hours"); setCounterMsg(""); }
                                         if (t !== "reject") setRejectReason("");
                                     };
                                     return (
@@ -1230,7 +1253,7 @@ export default function StatusTrackingPage() {
                                             <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB", marginBottom: activeTab ? 8 : 0 }}>
                                                 {[
                                                     { key: "approve", label: "✓ Approve", color: "#166534", activeBg: "#DCFCE7", border: "#BBF7D0" },
-                                                    { key: "suggest", label: "📅 Suggest Date", color: "#6D28D9", activeBg: "#EDE9FE", border: "#DDD6FE" },
+                                                    { key: "suggest", label: "⏱ Suggest Duration", color: "#6D28D9", activeBg: "#EDE9FE", border: "#DDD6FE" },
                                                     { key: "reject", label: "✕ Reject", color: "#991B1B", activeBg: "#FEE2E2", border: "#FECDD3" },
                                                 ].map((tab, i) => (
                                                     <button key={tab.key}
@@ -1254,18 +1277,23 @@ export default function StatusTrackingPage() {
                                             {activeTab === "suggest" && (
                                                 <div>
                                                     <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>
-                                                        <input type="date" value={counterDate} min={new Date().toISOString().split("T")[0]}
-                                                            onChange={e => setCounterDate(e.target.value)}
+                                                        <input type="number" min="1" max="999" placeholder="e.g. 4"
+                                                            value={counterDurVal}
+                                                            onChange={e => setCounterDurVal(e.target.value)}
                                                             style={{ flex: 1, padding: "6px 7px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
-                                                        <input type="time" value={counterTime} onChange={e => setCounterTime(e.target.value)}
-                                                            style={{ width: 74, padding: "6px 3px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+                                                        <select value={counterDurUnit} onChange={e => setCounterDurUnit(e.target.value)}
+                                                            style={{ width: 64, padding: "6px 3px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                                                            <option value="minutes">min</option>
+                                                            <option value="hours">hrs</option>
+                                                            <option value="days">days</option>
+                                                        </select>
                                                     </div>
                                                     <textarea value={counterMsg} onChange={e => setCounterMsg(e.target.value)}
                                                         placeholder="Message to employee (optional)..."
                                                         style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
-                                                    <button onClick={() => handleCounterPropose(task.id)} disabled={!counterDate || isBusy}
-                                                        style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !counterDate || isBusy ? "#E5E7EB" : "#7C3AED", color: !counterDate || isBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !counterDate || isBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                                                        {isBusy ? "Sending..." : "📅 Send Date to Employee"}
+                                                    <button onClick={() => handleCounterPropose(task.id)} disabled={!counterDurVal || isBusy}
+                                                        style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !counterDurVal || isBusy ? "#E5E7EB" : "#7C3AED", color: !counterDurVal || isBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !counterDurVal || isBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                                        {isBusy ? "Sending..." : "⏱ Send Duration to Employee"}
                                                     </button>
                                                 </div>
                                             )}

@@ -1,48 +1,72 @@
 /**
  * GRAV-CMS/components/coworking/tasks/DeadlineBadge.jsx
- * Shows deadline with color coding: green / orange / red
+ * Deadline based on WORKED TIME vs deadline window — not wall clock.
+ * deadline only counts when timer is running.
  */
 "use client";
 
-export function getDeadlineInfo(dueDate) {
-    if (!dueDate) return { status: "none", color: "#80868b", bg: "#f1f3f4", label: "No deadline" };
-    const now = Date.now();
-    const due = new Date(dueDate).getTime();
-    const diff = due - now;
-    const twoDays = 2 * 24 * 60 * 60 * 1000;
-    // Show time only if a time component is present (not midnight/default)
-    const hasTime = dueDate.includes("T") && !/T00:00/.test(dueDate);
-    const timeStr = hasTime
-        ? new Date(dueDate).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-        : null;
-    const dateStr = new Date(dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-    const fullStr = timeStr ? `${dateStr}, ${timeStr}` : dateStr;
-
-    if (diff < 0) {
-        const absMs = Math.abs(diff);
-        const overdueLabel = absMs < 3600000
-            ? `Overdue by ${Math.ceil(absMs / 60000)}m`
-            : absMs < 86400000
-                ? `Overdue by ${Math.ceil(absMs / 3600000)}h`
-                : `Overdue by ${Math.ceil(absMs / 86400000)}d`;
-        return { status: "overdue", color: "#d93025", bg: "#fce8e6", label: overdueLabel, icon: "🔴" };
+/**
+ * getDeadlineInfo
+ * @param {string} dueDate - ISO date string (still stored for reference)
+ * @param {number} deadlineWindowSecs - total seconds the employee asked for
+ * @param {number} workedSecs - total seconds already worked (from timer)
+ */
+export function getDeadlineInfo(dueDate, deadlineWindowSecs = 0, workedSecs = 0) {
+    // If we have a deadline window, use worked-time mode
+    if (deadlineWindowSecs > 0) {
+        const remaining = deadlineWindowSecs - workedSecs;
+        if (remaining <= 0) {
+            const over = Math.abs(remaining);
+            const overLabel = over < 3600
+                ? `${Math.ceil(over / 60)}m over`
+                : over < 86400
+                    ? `${Math.ceil(over / 3600)}h over`
+                    : `${Math.ceil(over / 86400)}d over`;
+            return { status: "overdue", color: "#d93025", bg: "#fce8e6", label: `⚠ ${overLabel}`, icon: "🔴" };
+        }
+        const twoHours = 2 * 3600;
+        if (remaining < twoHours) return {
+            status: "near", color: "#b06000", bg: "#fef7e0", icon: "🟠",
+            label: remaining < 3600
+                ? `${Math.ceil(remaining / 60)}m left`
+                : `${Math.ceil(remaining / 3600)}h left`,
+        };
+        return {
+            status: "safe", color: "#1e8e3e", bg: "#e6f4ea", icon: "🟢",
+            label: remaining < 86400
+                ? `${Math.ceil(remaining / 3600)}h left`
+                : `${Math.ceil(remaining / 86400)}d left`,
+        };
     }
-    if (diff < twoDays) return {
+
+    // Fallback: no window set yet — show nothing or "no deadline"
+    if (!dueDate) return { status: "none", color: "#80868b", bg: "#f1f3f4", label: "No deadline" };
+
+    // Legacy wall-clock fallback (for tasks approved before timer concept)
+    const now = Date.now();
+    const diff = new Date(dueDate).getTime() - now;
+    if (diff < 0) {
+        const over = Math.abs(diff);
+        return {
+            status: "overdue", color: "#d93025", bg: "#fce8e6", icon: "🔴",
+            label: over < 3600000 ? `${Math.ceil(over / 60000)}m over` : over < 86400000 ? `${Math.ceil(over / 3600000)}h over` : `${Math.ceil(over / 86400000)}d over`
+        };
+    }
+    if (diff < 7200000) return {
         status: "near", color: "#b06000", bg: "#fef7e0", icon: "🟠",
-        label: diff < 3600000
-            ? `Due in ${Math.ceil(diff / 60000)}m`
-            : diff < 86400000
-                ? `Due in ${Math.ceil(diff / 3600000)}h`
-                : `Due tomorrow${timeStr ? " · " + timeStr : ""}`,
+        label: diff < 3600000 ? `${Math.ceil(diff / 60000)}m left` : `${Math.ceil(diff / 3600000)}h left`,
     };
     return {
         status: "safe", color: "#1e8e3e", bg: "#e6f4ea", icon: "🟢",
-        label: `Due ${fullStr}`,
+        label: diff < 86400000 ? `${Math.ceil(diff / 3600000)}h left` : `${Math.ceil(diff / 86400000)}d left`,
     };
 }
 
-export default function DeadlineBadge({ dueDate, showFull = false }) {
-    const info = getDeadlineInfo(dueDate);
+export default function DeadlineBadge({ dueDate, deadlineWindowSecs = 0, workedSecs = 0, showFull = false }) {
+    // Don't show any badge until timer has actually been started
+    if (deadlineWindowSecs > 0 && workedSecs === 0) return null;
+
+    const info = getDeadlineInfo(dueDate, deadlineWindowSecs, workedSecs);
     if (info.status === "none") return null;
 
     return (

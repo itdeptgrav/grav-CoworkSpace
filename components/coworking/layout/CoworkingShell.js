@@ -1267,6 +1267,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
   // ── Own profile picture — live Firestore listener ────────────────────────
+  const [ownProfilePicUrl, setOwnProfilePicUrl] = useState("");
   useEffect(() => {
     if (!employeeId) return;
     const unsub = onSnapshot(doc(firebaseDb, "cowork_employees", employeeId), (snap) => {
@@ -1300,8 +1301,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [activeChatReq, setActiveChatReq] = useState(null); // full request object for header
   const [chatThreads, setChatThreads] = useState({});
 
-  // ── Own profile picture — live listener so it updates instantly after upload ──
-  const [ownProfilePicUrl, setOwnProfilePicUrl] = useState("");
+  // ── Chat input state ──
   const [chatInput, setChatInput] = useState({});
   const [chatUploading, setChatUploading] = useState({});
   const chatEndRefs = useRef({});
@@ -2193,15 +2193,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                           : item.id === "meetings" ? meetingUnreadCount   // notification-based
                             : 0;
 
-                  // NEW badge on Settings — always visible
-                  if (item.id === "settings") return (
+                  // NEW badge on Settings — only when no profile pic uploaded yet
+                  if (item.id === "settings" && !ownProfilePicUrl) return (
                     <span style={{
-                      fontSize: 9, fontWeight: 800, color: "#fff",
-                      background: "linear-gradient(135deg,#EF4444,#DC2626)",
+                      fontSize: 8, fontWeight: 900, color: "#FACC15",
+                      background: "#DC2626",
                       padding: "2px 6px", borderRadius: 99,
-                      letterSpacing: "0.04em", boxShadow: "0 1px 4px rgba(239,68,68,0.4)",
-                      animation: "newBadgePulse 2s ease-in-out infinite",
-                    }}>NEW</span>
+                      letterSpacing: "0.06em",
+                      boxShadow: "0 0 0 1.5px #fff, 0 2px 6px rgba(220,38,38,0.5)",
+                      animation: "newBadgePulse 1.8s ease-in-out infinite",
+                      textTransform: "uppercase",
+                    }}>NEW!</span>
                   );
 
                   if (cnt <= 0) return null;
