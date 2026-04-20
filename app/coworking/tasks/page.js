@@ -376,7 +376,7 @@ function TreeNode({ node, allTaskMap, allTasks, selectedId, onSelect, expandedId
 /* ─── EmployeeGroup — Groups tasks under employee name ─── */
 /* ─── EmployeeGroup — Groups tasks under employee name with complete features ─── */
 function EmployeeGroup({
-  empId, empName, tasks, allTaskMap, allTasks, selectedId, onSelect,
+  empId, empName, tasks, allTaskMap, allTasks, empPicUrl, selectedId, onSelect,
   expandedIds, toggleExpand, expandedEmps, toggleEmp,
   viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes
 }) {
@@ -418,7 +418,7 @@ function EmployeeGroup({
     <div className="gv-emp-group">
       <div className="gv-emp-header" onClick={() => toggleEmp(empId)}>
         {/* Avatar */}
-        <GwAvatar name={empName} size={24} style={{ marginRight: 4, flexShrink: 0 }} />
+        <GwAvatar name={empName} size={24} url={empPicUrl} style={{ marginRight: 4, flexShrink: 0 }} />
 
         {/* Folder icon */}
         <span className="gv-emp-folder-icon" style={{ marginRight: 4 }}>
@@ -643,7 +643,7 @@ function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewR
 
 function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setActiveDetailTab,
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
-  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, chatMessages,
+  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
   deadlineFlow, onUpdatePriority }) {
   const st = STATUS[task.status] || STATUS.open;
@@ -757,13 +757,19 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                 {(task.assigneeIds || []).length > 0
                   ? (task.assigneeIds || []).map((id, i) => {
+                    const empFull = employeeMapFull?.get(id);
                     const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
+                    const picUrl = empFull?.profilePicUrl || "";
                     const [c1, c2] = getAvatarColors(nm || id);
                     return (
                       <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px 3px 3px", borderRadius: 99, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 500 }}>
-                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {(nm || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                        </span>
+                        {picUrl ? (
+                          <img src={picUrl} alt={nm} style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }} />
+                        ) : (
+                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {(nm || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                          </span>
+                        )}
                         {nm}
                       </span>
                     );
@@ -3655,11 +3661,16 @@ export default function TasksPage() {
                 <div style={{ display: "flex" }}>
                   {shown.map((id, i) => {
                     const name = employeeMap?.get(id) || t.assigneeNameMap?.[id] || (t.assigneeNames?.[idx] ?? null) || id || "?";
+                    const picUrl = employeeMapFull?.get(id)?.profilePicUrl || "";
                     const [c1, c2] = getAvatarColors(name);
                     return (
-                      <div key={id} style={{ width: 20, height: 20, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff", marginLeft: i > 0 ? -6 : 0, flexShrink: 0, position: "relative", zIndex: shown.length - i }}>
-                        {name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                      </div>
+                      picUrl ? (
+                        <img key={id} src={picUrl} alt={name} style={{ width: 20, height: 20, borderRadius: "50%", objectFit: "cover", border: "2px solid #fff", marginLeft: i > 0 ? -6 : 0, flexShrink: 0, position: "relative", zIndex: shown.length - i }} />
+                      ) : (
+                        <div key={id} style={{ width: 20, height: 20, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff", marginLeft: i > 0 ? -6 : 0, flexShrink: 0, position: "relative", zIndex: shown.length - i }}>
+                          {name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                        </div>
+                      )
                     );
                   })}
                   {extra > 0 && <div style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--bg2)", color: "var(--text-3)", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff", marginLeft: -6 }}>+{extra}</div>}
@@ -5269,6 +5280,7 @@ export default function TasksPage() {
                 timerStart={timerStart}
                 timerPause={handleTimerPause}
                 onUpdatePriority={handleUpdatePriority}
+                employeeMapFull={employeeMapFull}
                 watchedTimers={assigneeAllTimers}
                 deadlineFlow={{
                   proposedDate: proposedDeadlineDate,
@@ -5502,6 +5514,7 @@ export default function TasksPage() {
                       }}
                       timerPause={handleTimerPause}
                       onUpdatePriority={handleUpdatePriority}
+                      employeeMapFull={employeeMapFull}
                       watchedTimers={assigneeAllTimers}
                     />
                   )}

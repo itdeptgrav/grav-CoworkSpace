@@ -186,14 +186,21 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
 
                 {/* Header */}
                 <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 20px 0", }}>
-                    <div style={{
-                        width: 46, height: 46, borderRadius: 12, flexShrink: 0,
-                        background: `linear-gradient(135deg,${c1},${c2})`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        color: "#fff", fontSize: 15, fontWeight: 800,
-                    }}>
-                        {initials(emp.name)}
-                    </div>
+                    {emp.profilePicUrl ? (
+                        <img src={emp.profilePicUrl} alt={emp.name} style={{
+                            width: 46, height: 46, borderRadius: 12, objectFit: "cover", flexShrink: 0,
+                            border: "2px solid #E2E8F0",
+                        }} />
+                    ) : (
+                        <div style={{
+                            width: 46, height: 46, borderRadius: 12, flexShrink: 0,
+                            background: `linear-gradient(135deg,${c1},${c2})`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            color: "#fff", fontSize: 15, fontWeight: 800,
+                        }}>
+                            {initials(emp.name)}
+                        </div>
+                    )}
                     <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A" }}>{emp.name}</div>
                         <div style={{ fontSize: 12, color: "#64748B", marginTop: 2, display: "flex", gap: 10 }}>
@@ -573,14 +580,21 @@ function EmployeeRow({ emp, onClick }) {
         >
             {/* Avatar */}
             <div style={{ position: "relative", flexShrink: 0, marginTop: 2 }}>
-                <div style={{
-                    width: 40, height: 40, borderRadius: 10,
-                    background: `linear-gradient(135deg,${c1},${c2})`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: "#fff", fontSize: 13, fontWeight: 800,
-                }}>
-                    {initials(emp.name)}
-                </div>
+                {emp.profilePicUrl ? (
+                    <img src={emp.profilePicUrl} alt={emp.name} style={{
+                        width: 40, height: 40, borderRadius: 10, objectFit: "cover",
+                        border: "2px solid #E2E8F0", display: "block",
+                    }} />
+                ) : (
+                    <div style={{
+                        width: 40, height: 40, borderRadius: 10,
+                        background: `linear-gradient(135deg,${c1},${c2})`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "#fff", fontSize: 13, fontWeight: 800,
+                    }}>
+                        {initials(emp.name)}
+                    </div>
+                )}
                 <span style={{
                     position: "absolute", bottom: -1, right: -1,
                     width: 11, height: 11, borderRadius: "50%",
@@ -760,7 +774,7 @@ export default function StatusTrackingPage() {
                         const empDoc = await getDoc(doc(firebaseDb, "cowork_employees", id));
                         if (empDoc.exists()) {
                             const d = empDoc.data();
-                            infoMap.set(id, { name: d.name || id, department: d.department || "", email: d.email || "" });
+                            infoMap.set(id, { name: d.name || id, department: d.department || "", email: d.email || "", profilePicUrl: d.profilePicUrl || "" });
                         } else {
                             infoMap.set(id, { name: id, department: "", email: "" });
                         }
@@ -868,6 +882,7 @@ export default function StatusTrackingPage() {
 
         return {
             employeeId: empId, name: info.name, department: info.department,
+            profilePicUrl: info.profilePicUrl || "",
             isWorking, activeTaskTitle, activeTaskId,
             activeSessionBase, activeSessionStart,
             lastTaskTitle, lastActiveAt, totalSecondsAll,

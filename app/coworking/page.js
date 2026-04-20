@@ -278,9 +278,11 @@ function TaskSidePanel({ task, onTaskClick, empMap, employeeId, employeeName, on
           <div style={{ padding: "9px 10px", borderBottom: "1px solid #F3F4F6" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <div style={{ width: 18, height: 18, borderRadius: "50%", background: avC(recentMsg.senderId || recentMsg.senderName || ""), color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {(recentMsg.senderName || "?")[0]?.toUpperCase()}
-                </div>
+                {empMap[recentMsg.senderId]?.profilePicUrl
+                  ? <img src={empMap[recentMsg.senderId].profilePicUrl} alt={recentMsg.senderName} style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                  : <div style={{ width: 18, height: 18, borderRadius: "50%", background: avC(recentMsg.senderId || recentMsg.senderName || ""), color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {(recentMsg.senderName || "?")[0]?.toUpperCase()}
+                  </div>}
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#374151" }}>{recentMsg.senderName || "Unknown"}</span>
               </div>
               <span style={{ fontSize: 9, color: "#9CA3AF" }}>{timeAgo(recentMsg.createdAt)}</span>
@@ -679,9 +681,12 @@ function ReqCard({ req, empMap }) {
       onClick={() => window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received", requestId: req.requestId || req.id } }))}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: avC(req.fromName || empMap?.[req.fromId]?.name || ""), color: "#fff", fontSize: 8.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            {(req.fromName || empMap?.[req.fromId]?.name || "?")[0].toUpperCase()}
-          </div>
+          {empMap?.[req.fromId]?.profilePicUrl
+            ? <img src={empMap[req.fromId].profilePicUrl} alt={req.fromName} style={{ width: 24, height: 24, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+            : <div style={{ width: 24, height: 24, borderRadius: "50%", background: avC(req.fromName || empMap?.[req.fromId]?.name || ""), color: "#fff", fontSize: 8.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {(req.fromName || empMap?.[req.fromId]?.name || "?")[0].toUpperCase()}
+            </div>
+          }
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{req.fromName || empMap?.[req.fromId]?.name || "Unknown"}</span>
@@ -834,7 +839,7 @@ export default function Dashboard() {
     if (!employeeId) return;
     getDocs(collection(firebaseDb, "cowork_employees")).then(snap => {
       const m = {};
-      snap.forEach(d => { const e = d.data(); m[d.id] = { name: e.name, department: e.department, role: e.role }; });
+      snap.forEach(d => { const e = d.data(); m[d.id] = { name: e.name, department: e.department, role: e.role, profilePicUrl: e.profilePicUrl || "" }; });
       setEmpMap(m);
     }).catch(() => { });
   }, [employeeId]);

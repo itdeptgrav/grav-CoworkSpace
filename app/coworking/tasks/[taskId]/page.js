@@ -451,7 +451,7 @@ export default function TaskDetailPage() {
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                                     {task.assigneeDetails.map(a => (
                                         <div key={a.employeeId} style={s.assigneeChip}>
-                                            <GwAvatar name={a.name} size={22} />
+                                            <GwAvatar name={a.name} size={22} url={a.profilePicUrl || ""} />
                                             <span style={{ fontSize: 12 }}>{a.name}</span>
                                         </div>
                                     ))}
@@ -866,7 +866,7 @@ export default function TaskDetailPage() {
                                         <div key={r.id || i} style={s.reportCard}>
                                             <div style={s.reportHeader}>
                                                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                                    <GwAvatar name={r.employeeName} size={36} />
+                                                    <GwAvatar name={r.employeeName} size={36} url={r.profilePicUrl || ""} />
                                                     <div>
                                                         <div style={{ fontSize: 14, fontWeight: 600, color: "#202124" }}>{r.employeeName}</div>
                                                         <div style={{ fontSize: 12, color: "#9aa0a6" }}>{r.reportDate} · {new Date(r.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>

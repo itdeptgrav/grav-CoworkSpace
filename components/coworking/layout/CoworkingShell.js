@@ -1266,6 +1266,15 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
+  // ── Own profile picture — live Firestore listener ────────────────────────
+  useEffect(() => {
+    if (!employeeId) return;
+    const unsub = onSnapshot(doc(firebaseDb, "cowork_employees", employeeId), (snap) => {
+      if (snap.exists()) setOwnProfilePicUrl(snap.data().profilePicUrl || "");
+    });
+    return () => unsub();
+  }, [employeeId]);
+
   // ── Auth toasts (login success) ──────────────────────────────────────────
   const [authToast, setAuthToast] = useState(null); // { type: "login"|"logout", name }
   useEffect(() => {
@@ -1290,6 +1299,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [pipCamOn, setPipCamOn] = useState(false); // cam default off in pip
   const [activeChatReq, setActiveChatReq] = useState(null); // full request object for header
   const [chatThreads, setChatThreads] = useState({});
+
+  // ── Own profile picture — live listener so it updates instantly after upload ──
+  const [ownProfilePicUrl, setOwnProfilePicUrl] = useState("");
   const [chatInput, setChatInput] = useState({});
   const [chatUploading, setChatUploading] = useState({});
   const chatEndRefs = useRef({});
@@ -1588,6 +1600,10 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         </div>
       )}
       <style>{`
+        @keyframes newBadgePulse {
+          0%, 100% { transform: scale(1); box-shadow: 0 1px 4px rgba(239,68,68,0.4); }
+          50% { transform: scale(1.12); box-shadow: 0 2px 8px rgba(239,68,68,0.7); }
+        }
         @keyframes authToastIn {
           from { opacity: 0; transform: translateX(60px) scale(0.92); }
           to   { opacity: 1; transform: translateX(0) scale(1); }
@@ -2176,6 +2192,18 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                         : item.id === "tasks" ? taskChatUnreadCount  // per-message readBy live
                           : item.id === "meetings" ? meetingUnreadCount   // notification-based
                             : 0;
+
+                  // NEW badge on Settings — always visible
+                  if (item.id === "settings") return (
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, color: "#fff",
+                      background: "linear-gradient(135deg,#EF4444,#DC2626)",
+                      padding: "2px 6px", borderRadius: 99,
+                      letterSpacing: "0.04em", boxShadow: "0 1px 4px rgba(239,68,68,0.4)",
+                      animation: "newBadgePulse 2s ease-in-out infinite",
+                    }}>NEW</span>
+                  );
+
                   if (cnt <= 0) return null;
                   const bg =
                     item.id === "tasks" ? "#8B5CF6"
@@ -2276,7 +2304,13 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           <div className="cw-sidebar-footer">
 
             <div className="cw-user-card">
-              <div className="cw-user-avatar">{initials(employeeName)}</div>
+              {ownProfilePicUrl ? (
+                <img src={ownProfilePicUrl} alt={employeeName}
+                  className="cw-user-avatar"
+                  style={{ objectFit: "cover", border: "2px solid rgba(255,255,255,0.2)" }} />
+              ) : (
+                <div className="cw-user-avatar">{initials(employeeName)}</div>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="cw-user-name">{employeeName}</div>
                 <div className="cw-user-role">{roleLabel}</div>
@@ -2411,8 +2445,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 )}
               </button>
 
-              <div className="cw-topbar-avatar" title={employeeName}>
-                {initials(employeeName)}
+              <div className="cw-topbar-avatar" title={employeeName}
+                style={{ overflow: "hidden", padding: 0 }}>
+                {ownProfilePicUrl ? (
+                  <img src={ownProfilePicUrl} alt={employeeName}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                ) : initials(employeeName)}
               </div>
             </div>
           </header>

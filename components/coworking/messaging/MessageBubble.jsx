@@ -201,7 +201,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
             {/* Avatar — only for other users */}
             {!isMe && (
                 showAvatar
-                    ? <GwAvatar name={msg.senderName || "?"} size={28} />
+                    ? <GwAvatar name={msg.senderName || "?"} size={28} url={msg.senderPicUrl || ""} />
                     : <div style={{ width: 28 }} />
             )}
 

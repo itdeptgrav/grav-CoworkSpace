@@ -231,6 +231,8 @@ export default function GroupChatPage() {
 
   const [group, setGroup] = useState(null);   // group doc
   const [members, setMembers] = useState([]);     // member details
+  // Quick lookup: employeeId → profilePicUrl
+  const memberPicMap = new Map(members.map(m => [m.employeeId, m.profilePicUrl || ""]));
   const [messages, setMessages] = useState([]);     // real-time
   const [msgsLoading, setMsgsLoading] = useState(true);
   const [showMembers, setShowMembers] = useState(false);
@@ -988,7 +990,7 @@ export default function GroupChatPage() {
               return (
                 <MessageBubble
                   key={item.messageId || item.id || i}
-                  msg={item}
+                  msg={{ ...item, senderPicUrl: memberPicMap.get(item.senderId) || "" }}
                   isMe={item.senderId === employeeId}
                   showSender={showAvatar}
                   showAvatar={showAvatar}
@@ -1124,9 +1126,13 @@ export default function GroupChatPage() {
                         <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${sel ? "#2563EB" : "#CBD5E1"}`, background: sel ? "#2563EB" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                           {sel && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                         </div>
-                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: color, color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {(m.name || m.employeeId)[0].toUpperCase()}
-                        </div>
+                        {m.profilePicUrl ? (
+                          <img src={m.profilePicUrl} alt={m.name} style={{ width: 22, height: 22, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                        ) : (
+                          <div style={{ width: 22, height: 22, borderRadius: "50%", background: color, color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {(m.name || m.employeeId)[0].toUpperCase()}
+                          </div>
+                        )}
                         <span style={{ fontSize: 12, color: "#0F172A", flex: 1 }}>{m.name || m.employeeId}</span>
                         {m.role && m.role !== "employee" && (
                           <span style={{ fontSize: 9, color: "#0891B2", background: "#E0F2FE", border: "1px solid #BAE6FD", borderRadius: 4, padding: "1px 5px", fontWeight: 700, textTransform: "uppercase" }}>{m.role}</span>

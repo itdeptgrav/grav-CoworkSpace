@@ -1,8 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { changePassword, changeEmail } from "../../../lib/coworkApi";
+import { firebaseDb } from "../../../lib/coworkFirebase";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 export default function SettingsPage() {
   const { user, role, employeeId, employeeName, passwordChanged, tempPassword, loading } = useCoworkAuth();
@@ -15,6 +17,72 @@ export default function SettingsPage() {
   const [showNew, setShowNew] = useState(false);
   const [showConf, setShowConf] = useState(false);
   const [strength, setStrength] = useState(0); // 0-4
+
+  // ── Profile picture ──
+  const [profilePicUrl, setProfilePicUrl] = useState("");
+  const [picUploading, setPicUploading] = useState(false);
+  const [picSuccess, setPicSuccess] = useState(false);
+  const [showNewFeaturePopup, setShowNewFeaturePopup] = useState(false);
+
+  // Show new feature popup every time the settings page is visited
+  useEffect(() => {
+    const t = setTimeout(() => setShowNewFeaturePopup(true), 500);
+    return () => clearTimeout(t);
+  }, []);
+
+  const dismissPopup = () => {
+    setShowNewFeaturePopup(false);
+  };
+
+  const fileInputRef = useRef(null);
+
+  // Load current profile pic from Firestore
+  useEffect(() => {
+    if (!employeeId) return;
+    getDoc(doc(firebaseDb, "cowork_employees", employeeId)).then(snap => {
+      if (snap.exists()) setProfilePicUrl(snap.data().profilePicUrl || "");
+    }).catch(() => { });
+  }, [employeeId]);
+
+  const handlePicUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !employeeId) return;
+    if (!file.type.startsWith("image/")) { alert("Please select an image file."); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Image must be under 10MB."); return; }
+    setPicUploading(true);
+    try {
+      // Compress image to 160x160 JPEG thumbnail using canvas (~8KB)
+      // Stored as base64 directly in Firestore — no external storage needed
+      const base64 = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const SIZE = 160;
+          const canvas = document.createElement("canvas");
+          canvas.width = SIZE; canvas.height = SIZE;
+          const ctx = canvas.getContext("2d");
+          // Crop to square from center
+          const minSide = Math.min(img.width, img.height);
+          const sx = (img.width - minSide) / 2;
+          const sy = (img.height - minSide) / 2;
+          ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, SIZE, SIZE);
+          resolve(canvas.toDataURL("image/jpeg", 0.75));
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+      // Save compressed base64 directly to Firestore employee record
+      await updateDoc(doc(firebaseDb, "cowork_employees", employeeId), { profilePicUrl: base64 });
+      setProfilePicUrl(base64);
+      setPicSuccess(true);
+      setTimeout(() => setPicSuccess(false), 3000);
+    } catch (err) {
+      console.error("Profile pic upload error:", err);
+      alert("Upload failed. Please try again.");
+    } finally {
+      setPicUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   // ── Email change state (CEO only) ──
   const [newEmail, setNewEmail] = useState("");
@@ -94,7 +162,86 @@ export default function SettingsPage() {
 
   return (
     <>
+      {/* ── New Feature Popup ── */}
+      {showNewFeaturePopup && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 99999,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 16, backdropFilter: "blur(4px)",
+          animation: "nfFadeIn 0.25s ease",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 20, padding: "32px 28px 24px",
+            width: "min(380px, 95vw)", boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
+            position: "relative", animation: "nfSlideUp 0.3s cubic-bezier(0.2,0,0,1)",
+          }}>
+            {/* Close button */}
+            <button onClick={dismissPopup} style={{
+              position: "absolute", top: 14, right: 14,
+              width: 28, height: 28, borderRadius: "50%", border: "none",
+              background: "#F1F5F9", cursor: "pointer", fontSize: 16,
+              display: "flex", alignItems: "center", justifyContent: "center", color: "#64748B",
+            }}>✕</button>
+
+            {/* Icon */}
+            <div style={{
+              width: 64, height: 64, borderRadius: 18, margin: "0 auto 16px",
+              background: "linear-gradient(135deg,#3B82F6,#1D4ED8)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+
+            {/* NEW label */}
+            <div style={{ textAlign: "center", marginBottom: 8 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: "0.1em",
+                color: "#fff", background: "linear-gradient(135deg,#EF4444,#DC2626)",
+                padding: "3px 10px", borderRadius: 99,
+              }}>✦ NEW FEATURE</span>
+            </div>
+
+            {/* Title */}
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#0F172A", textAlign: "center", marginBottom: 10 }}>
+              Profile Pictures are here! 🎉
+            </div>
+
+            {/* Body */}
+            <div style={{ fontSize: 13, color: "#64748B", textAlign: "center", lineHeight: 1.7, marginBottom: 20 }}>
+              You can now add your own profile picture to CoWork. Your photo will appear everywhere — in messages, tasks, group chats, meetings and more.
+            </div>
+
+            {/* Divider */}
+            <div style={{ height: 1, background: "#F1F5F9", margin: "0 -28px 20px" }} />
+
+            {/* Steps */}
+            {[
+              ["📷", "Tap your avatar above to upload a photo"],
+              ["✂️", "It's auto-cropped to a perfect circle"],
+              ["🌐", "Shows everywhere across CoWork instantly"],
+            ].map(([icon, text]) => (
+              <div key={text} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>{icon}</span>
+                <span style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>{text}</span>
+              </div>
+            ))}
+
+            {/* CTA */}
+            <button onClick={dismissPopup} style={{
+              width: "100%", marginTop: 16, padding: "12px 0",
+              background: "linear-gradient(135deg,#3B82F6,#1D4ED8)",
+              color: "#fff", border: "none", borderRadius: 12,
+              fontSize: 14, fontWeight: 700, cursor: "pointer",
+              boxShadow: "0 4px 16px rgba(59,130,246,0.4)",
+            }}>Got it, let's set up my photo!</button>
+          </div>
+        </div>
+      )}
       <style>{`
+        @keyframes nfFadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes nfSlideUp { from{opacity:0;transform:translateY(24px) scale(0.96)} to{opacity:1;transform:translateY(0) scale(1)} }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
         .stg-page {
@@ -384,28 +531,97 @@ export default function SettingsPage() {
             </div>
             <div className="stg-card-body">
 
-              {/* Avatar + name header */}
-              <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "4px 0 18px", borderBottom: "1px solid #F1F5F9", marginBottom: 16 }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 14, flexShrink: 0,
-                  background: "linear-gradient(135deg,#3B82F6,#1D4ED8)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 20, fontWeight: 700, color: "#fff",
+              {/* ── WhatsApp-style profile picture section ── */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "8px 0 24px", borderBottom: "1px solid #F1F5F9", marginBottom: 16 }}>
+
+                {/* Big circular avatar with hover overlay */}
+                <div
+                  onClick={() => !picUploading && fileInputRef.current?.click()}
+                  style={{ position: "relative", cursor: picUploading ? "not-allowed" : "pointer", marginBottom: 12 }}
+                  title="Change profile picture"
+                >
+                  {/* Photo or initials */}
+                  {profilePicUrl ? (
+                    <img src={profilePicUrl} alt={employeeName}
+                      style={{ width: 96, height: 96, borderRadius: "50%", objectFit: "cover", display: "block", border: "3px solid #E2E8F0" }} />
+                  ) : (
+                    <div style={{
+                      width: 96, height: 96, borderRadius: "50%",
+                      background: "linear-gradient(135deg, #3B82F6, #1D4ED8)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 32, fontWeight: 700, color: "#fff",
+                      border: "3px solid #E2E8F0",
+                    }}>
+                      {(employeeName || "?").trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+
+                  {/* WhatsApp-style dark overlay on hover with camera icon */}
+                  <div style={{
+                    position: "absolute", inset: 0, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.45)",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+                    opacity: picUploading ? 1 : 0,
+                    transition: "opacity 0.2s",
+                    border: "3px solid transparent",
+                  }}
+                    className="pic-overlay"
+                  >
+                    {picUploading ? (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+                    ) : (
+                      <>
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" />
+                        </svg>
+                        <span style={{ fontSize: 9, color: "#fff", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                          {profilePicUrl ? "CHANGE" : "ADD"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Green + badge when no pic yet */}
+                  {!profilePicUrl && !picUploading && (
+                    <div style={{
+                      position: "absolute", bottom: 2, right: 2,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: "#22C55E", border: "2px solid #fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                    }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                    </div>
+                  )}
+
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePicUpload} style={{ display: "none" }} />
+                </div>
+
+                {/* Name + role */}
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>{employeeName}</div>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: "2px 10px", borderRadius: 20,
+                  letterSpacing: "0.03em", background: roleColor.bg, color: roleColor.color, border: `1px solid ${roleColor.border}`,
                 }}>
-                  {(employeeName || "?").trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A" }}>{employeeName}</div>
-                  <span style={{
-                    display: "inline-block", marginTop: 4,
-                    fontSize: 11, fontWeight: 600, padding: "2px 9px",
-                    borderRadius: 20, letterSpacing: "0.03em",
-                    background: roleColor.bg, color: roleColor.color, border: `1px solid ${roleColor.border}`,
-                  }}>
-                    {roleLabel}
-                  </span>
-                </div>
+                  {roleLabel}
+                </span>
+
+                {/* Hint / success */}
+                {picSuccess ? (
+                  <div style={{ fontSize: 11, color: "#16A34A", fontWeight: 600, marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                    Profile picture updated!
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8 }}>
+                    {picUploading ? "Uploading…" : "Tap photo to change"}
+                  </div>
+                )}
               </div>
+
+              <style>{`
+                div:hover > .pic-overlay { opacity: 1 !important; }
+              `}</style>
 
               {/* Info rows */}
               {[

@@ -14,7 +14,7 @@
  *  ✅ Bottom toolbar: Share screen | Chat | Leave (Zoom-style)
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { getMeet } from "../../../lib/coworkApi";
@@ -29,7 +29,10 @@ import {
     RoomAudioRenderer,
     useParticipants,
     useLocalParticipant,
+    useRoomContext,
+    useTracks,
 } from "@livekit/components-react";
+import { Track, RoomEvent } from "livekit-client";
 import "@livekit/components-styles";
 
 const LK_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL;
@@ -49,6 +52,8 @@ export default function CoworkMeetingRoom() {
     const [info, setInfo] = useState(null);
     const [token, setToken] = useState(null);
     const [phase, setPhase] = useState("loading");
+    // Profile pic map: employeeId OR name → profilePicUrl
+    const [participantPicMap, setParticipantPicMap] = useState({});
     const [pipMode, setPipMode] = useState(false);       // mini floating box
     const [pipCollapsed, setPipCollapsed] = useState(false); // collapsed to tiny bar
     const [pipPos, setPipPos] = useState({ x: null, y: null }); // drag position
@@ -93,6 +98,22 @@ export default function CoworkMeetingRoom() {
                 setInfo(infoRes);
                 if (meetRes.meet?.status === "ended") { setPhase("ended"); return; }
                 setPhase("lobby");
+
+                // Build profile pic map from all participants
+                try {
+                    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+                    const { collection, getDocs } = await import("firebase/firestore");
+                    const snap = await getDocs(collection(firebaseDb, "cowork_employees"));
+                    const picMap = {};
+                    snap.forEach(d => {
+                        const e = d.data();
+                        if (e.profilePicUrl) {
+                            if (e.employeeId) picMap[e.employeeId] = e.profilePicUrl;
+                            if (e.name) picMap[e.name] = e.profilePicUrl;
+                        }
+                    });
+                    setParticipantPicMap(picMap);
+                } catch (_) { }
             } catch (e) { setError(e.message); setPhase("lobby"); }
         })();
     }, [user, loading, meetId]);
@@ -156,15 +177,18 @@ export default function CoworkMeetingRoom() {
         router.push("/coworking/schedule-meet");
     };
 
-    // ── Minimize to PiP — NO navigation, CSS overlay only ──────────────────
-    // Meeting page stays at /coworking/cowork-meeting/[meetId]
-    // LiveKit room stays mounted and connected — no disconnect
+    // ── Minimize to PiP — hand off to CoworkingShell's PiP system ───────────
+    // Stores token in pipMeetingStore → CoworkingShell renders the floating widget
+    // Navigates to dashboard so user sees actual page with PiP overlay on top
     const handleMinimize = () => {
-        setPipMode(true);
-        setPipCollapsed(false);
-        if (pipPos.x === null) {
-            setPipPos({ x: window.innerWidth - 320, y: window.innerHeight - 220 });
-        }
+        storePipMeeting({
+            token,
+            meetId,
+            title: meet?.title || "Meeting",
+            serverUrl: LK_URL,
+            userChoices,
+        });
+        router.push("/coworking");
     };
 
     const handleRestorePip = () => {
@@ -195,10 +219,63 @@ export default function CoworkMeetingRoom() {
         window.addEventListener("mouseup", onUp);
     };
 
+    // Stores the intended destination when user navigates away mid-meeting
+    const navigateAfterLeave = useRef(null);
+
     const handleDisconnected = () => {
-        // Always redirect when disconnected — covers both our button + LiveKit built-in leave button
-        router.push("/coworking/schedule-meet");
+        const dest = navigateAfterLeave.current || "/coworking/schedule-meet";
+        navigateAfterLeave.current = null;
+        router.push(dest);
     };
+
+    // ── Auto-leave when navigating to another page ────────────────────────────
+    // Intercepts clicks on sidebar nav links while in-room
+    useEffect(() => {
+        if (phase !== "room") return;
+
+        const handleClick = (e) => {
+            const anchor = e.target.closest("a[href]");
+            if (!anchor) return;
+            const href = anchor.getAttribute("href");
+            if (!href) return;
+            // Ignore same-page or meeting links
+            if (href.includes("cowork-meeting")) return;
+            if (href === window.location.pathname) return;
+            // Navigation away = FULL LEAVE (not PiP)
+            // Store destination so handleDisconnected goes there, not schedule-meet
+            e.preventDefault();
+            e.stopPropagation();
+            navigateAfterLeave.current = href;
+            intentionalLeave.current = true;
+            setToken(null); // triggers LiveKit disconnect → handleDisconnected → router.push(dest)
+        };
+
+        document.addEventListener("click", handleClick, true); // capture phase
+        return () => document.removeEventListener("click", handleClick, true);
+    }, [phase, router]);
+    useEffect(() => {
+        if (phase !== "room") return;
+
+        // 1. Browser back button — popstate fires when history goes back
+        const handlePopState = () => {
+            intentionalLeave.current = true;
+            setToken(null);
+            // Don't push — the back navigation already changed URL
+        };
+        window.addEventListener("popstate", handlePopState);
+
+        // 2. Tab/window close or hard navigation
+        const handleBeforeUnload = (e) => {
+            e.preventDefault();
+            e.returnValue = "You are in a meeting. Are you sure you want to leave?";
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener("popstate", handlePopState);
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, [phase]);
 
     // ── Render ────────────────────────────────────────────────────────────────
     if (loading || phase === "loading") return <FullLoader />;
@@ -227,7 +304,7 @@ export default function CoworkMeetingRoom() {
                         >
                             <MuteWatcher onMuteChange={recording.setMuted} />
                             <PipMediaControls onReady={pipControlsCallbackRef} />
-                            <AvatarColorInjector />
+                            <AvatarColorInjector picMap={participantPicMap} />
                             <TopBar
                                 meet={meet}
                                 isHost={isHost}
@@ -240,7 +317,7 @@ export default function CoworkMeetingRoom() {
                                 employeeName={employeeName}
                             />
                             <div style={{ flex: 1, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                                <VideoConference />
+                                <SmartVideoConference />
                             </div>
                             <RoomAudioRenderer />
                         </LiveKitRoom>
@@ -361,6 +438,7 @@ export default function CoworkMeetingRoom() {
             setError={setError}
             employeeName={employeeName}
             employeeId={employeeId}
+            ownPicUrl={participantPicMap[employeeId] || ""}
             onStart={handleStart}
             onDirectJoin={handleDirectJoin}
             onJoinByCode={handleJoinByCode}
@@ -370,43 +448,67 @@ export default function CoworkMeetingRoom() {
 }
 
 // ── AvatarColorInjector ───────────────────────────────────────────────────────
-// Watches LiveKit DOM and injects --lk-av-color + data-lk-participant-name
-// so the CSS ::before circle shows the right colour and initials.
+// Watches LiveKit DOM and injects profile pics OR coloured initials
+// into participant placeholder tiles when camera is off.
 const AVATAR_COLORS_LIST = ["#1A73E8", "#0F9D58", "#F29900", "#7B1FA2", "#D93025", "#00ACC1", "#E64A19", "#0097A7"];
 function getAvatarColor(name = "") { return AVATAR_COLORS_LIST[(name.charCodeAt(0) || 0) % AVATAR_COLORS_LIST.length]; }
 function getInitials(name = "") { return name.trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?"; }
 
-function AvatarColorInjector() {
+function AvatarColorInjector({ picMap = {} }) {
     useEffect(() => {
-        const applyColors = () => {
-            // Find all participant tiles
+        const applyAvatars = () => {
             const tiles = document.querySelectorAll(".lk-participant-tile");
             tiles.forEach(tile => {
-                // Get participant name from the name label inside the tile
                 const nameEl = tile.querySelector(".lk-participant-name, [class*='participantName'], .lk-participant-metadata-item");
                 const name = nameEl?.textContent?.replace(/\(you\)/i, "").trim() || "";
                 if (!name) return;
+
+                const placeholder = tile.querySelector(".lk-participant-placeholder, [class*='participantPlaceholder']");
+                if (!placeholder) return;
+
+                // Already injected?
+                if (placeholder.dataset.picInjected === name) return;
+                placeholder.dataset.picInjected = name;
+
+                const picUrl = picMap[name] || "";
                 const color = getAvatarColor(name);
                 const inits = getInitials(name);
-                // Set CSS variable for background colour
+
+                // Clear previous injection
+                const old = placeholder.querySelector(".cw-injected-av");
+                if (old) old.remove();
+
+                // Set tile CSS var for any remaining CSS usage
                 tile.style.setProperty("--lk-av-color", color);
-                // Set data attribute so CSS content: attr() shows the initials
-                const placeholder = tile.querySelector(".lk-participant-placeholder, [class*='participantPlaceholder']");
-                if (placeholder) {
-                    placeholder.setAttribute("data-lk-participant-name", inits);
-                    placeholder.style.setProperty("--lk-av-color", color);
+                placeholder.setAttribute("data-lk-participant-name", inits);
+                placeholder.style.setProperty("--lk-av-color", color);
+
+                // Inject profile pic or initials circle
+                const av = document.createElement("div");
+                av.className = "cw-injected-av";
+                av.style.cssText = `
+                    position:absolute; inset:0; display:flex; align-items:center;
+                    justify-content:center; z-index:2; pointer-events:none;
+                `;
+                if (picUrl) {
+                    av.innerHTML = `<img src="${picUrl}" alt="${name}" style="width:88px;height:88px;border-radius:50%;object-fit:cover;box-shadow:0 4px 16px rgba(0,0,0,0.4);" />`;
+                } else {
+                    av.innerHTML = `<div style="width:88px;height:88px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#fff;letter-spacing:-1px;">${inits}</div>`;
                 }
+
+                // Make placeholder relative so our injected div positions correctly
+                placeholder.style.position = "relative";
+                placeholder.appendChild(av);
             });
         };
 
-        // Run immediately and also watch for DOM changes
-        applyColors();
-        const observer = new MutationObserver(applyColors);
+        applyAvatars();
+        const observer = new MutationObserver(applyAvatars);
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-        const interval = setInterval(applyColors, 1000); // fallback poll
+        const interval = setInterval(applyAvatars, 1500);
 
         return () => { observer.disconnect(); clearInterval(interval); };
-    }, []);
+    }, [picMap]);
     return null;
 }
 
@@ -422,6 +524,43 @@ function MuteWatcher({ onMuteChange }) {
         return () => clearInterval(interval);
     }, [localParticipant, onMuteChange]);
     return null;
+}
+
+// ── SmartVideoConference — fixes presenter layout stuck after screen share ends
+// ROOT CAUSE: VideoConference remounts but React's useTracks state hasn't
+// cleared yet → VideoConference immediately re-pins the track → stuck again.
+// FIX: Wait for React state (useTracks) to confirm tracks are gone BEFORE
+// remounting VideoConference. Only then is it safe to remount to grid layout.
+function SmartVideoConference() {
+    const [vcKey, setVcKey] = useState(0);
+    const [pendingReset, setPendingReset] = useState(false);
+    const room = useRoomContext();
+
+    // Watch screen share tracks via React state (not JS events)
+    const screenTracks = useTracks([Track.Source.ScreenShare]);
+
+    // Step 1: JS event fires → mark pending reset
+    useEffect(() => {
+        if (!room) return;
+        const onUnsubscribed = (track) => {
+            if (track.source === Track.Source.ScreenShare) {
+                setPendingReset(true);
+            }
+        };
+        room.on(RoomEvent.TrackUnsubscribed, onUnsubscribed);
+        return () => room.off(RoomEvent.TrackUnsubscribed, onUnsubscribed);
+    }, [room]);
+
+    // Step 2: Only remount AFTER React confirms tracks are gone
+    // This ensures new VideoConference won't find stale track data and re-pin
+    useEffect(() => {
+        if (pendingReset && screenTracks.length === 0) {
+            setVcKey(k => k + 1);
+            setPendingReset(false);
+        }
+    }, [pendingReset, screenTracks.length]);
+
+    return <VideoConference key={vcKey} />;
 }
 
 // ── PipMediaControls — inside LiveKitRoom, exposes mic/cam state via callback ─
@@ -463,6 +602,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
     const [copied, setCopied] = useState(false);
     const [elapsed, setElapsed] = useState(0); // seconds since meeting started
     const participants = useParticipants();
+    const { localParticipant } = useLocalParticipant();
 
     // Tick every second — count from when user actually joined (not scheduled time)
     const joinedAtRef = useRef(Date.now());
@@ -480,6 +620,23 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
         setTimeout(() => setCopied(false), 2000);
     };
 
+    // Back: always stop screen share first, wait for remote layout to reset, then PiP
+    const handleBack = useCallback(async () => {
+        if (localParticipant) {
+            try {
+                // Always call unconditionally — no-op if not sharing,
+                // but properly signals ALL remote clients to drop presenter layout
+                await localParticipant.setScreenShareEnabled(false);
+                // 800ms lets LiveKit propagate track removal AND remote VideoConference
+                // switch from presenter-layout back to grid before we hide our room
+                await new Promise(r => setTimeout(r, 800));
+            } catch (e) {
+                console.warn("[TopBar] screen share stop:", e.message);
+            }
+        }
+        onMinimize?.();
+    }, [localParticipant, onMinimize]);
+
     // Format elapsed time as  0:05  /  1:23  /  1:23:45
     const fmtElapsed = (s) => {
         const h = Math.floor(s / 3600);
@@ -496,7 +653,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
             {/* Left: LIVE + meeting name + elapsed duration */}
             <div className="tb-left">
                 {onMinimize && (
-                    <button onClick={onMinimize} title="Back to dashboard — meeting continues in mini view"
+                    <button onClick={handleBack} title="Back to dashboard — meeting continues in mini view"
                         style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#E8EAED", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: 6, flexShrink: 0 }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
                         Back
@@ -528,7 +685,11 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
                                 const camOn = p.isCameraEnabled;
                                 return (
                                     <div key={p.identity || i} style={S.personRow}>
-                                        <div style={{ ...S.personAvatar, background: avColor(name) }}>{initials(name)}</div>
+                                        {participantPicMap[p.identity] || participantPicMap[name]
+                                            ? <img src={participantPicMap[p.identity] || participantPicMap[name]} alt={name}
+                                                style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                                            : <div style={{ ...S.personAvatar, background: avColor(name) }}>{initials(name)}</div>
+                                        }
                                         <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#E8EAED", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                             {name}{isMe && <span style={{ fontSize: 10, color: "#9AA0A6", marginLeft: 6 }}>(you)</span>}
                                         </div>
@@ -592,7 +753,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
 
 
 // ── Lobby screen — sits inside CoworkingShell (no fixed positioning) ──────────
-function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, employeeName, employeeId, onStart, onDirectJoin, onJoinByCode, onBack }) {
+function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, employeeName, employeeId, ownPicUrl, onStart, onDirectJoin, onJoinByCode, onBack }) {
     const [phase, setPhase] = useState("lobby");
     const [codeInput, setCodeInput] = useState("");
     const [joining, setJoining] = useState(false);
@@ -612,6 +773,7 @@ function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, emp
             <PreJoin
                 meetTitle={meet?.title}
                 employeeName={employeeName}
+                ownPicUrl={ownPicUrl}
                 isHost={isHost}
                 onBack={() => setPhase("lobby")}
                 onJoin={handlePreJoinDone}
@@ -885,7 +1047,7 @@ function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, emp
 }
 
 // ── PreJoin — sits inside CoworkingShell, Google Meet style ──────────────────
-function PreJoin({ meetTitle, employeeName, isHost, onBack, onJoin }) {
+function PreJoin({ meetTitle, employeeName, ownPicUrl, isHost, onBack, onJoin }) {
     const [micOn, setMicOn] = useState(true);
     const [camOn, setCamOn] = useState(true);
     const [stream, setStream] = useState(null);
@@ -1025,9 +1187,12 @@ function PreJoin({ meetTitle, employeeName, isHost, onBack, onJoin }) {
                                 ? <video ref={videoRef} autoPlay muted playsInline className="pj-cam-video" />
                                 : (
                                     <div className="pj-cam-off">
-                                        <div className="pj-cam-avatar" style={{ background: avColor(employeeName || "?") }}>
-                                            {(employeeName || "?")[0].toUpperCase()}
-                                        </div>
+                                        {ownPicUrl
+                                            ? <img src={ownPicUrl} alt={employeeName} style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover" }} />
+                                            : <div className="pj-cam-avatar" style={{ background: avColor(employeeName || "?") }}>
+                                                {(employeeName || "?")[0].toUpperCase()}
+                                            </div>
+                                        }
                                         <span className="pj-cam-label">
                                             {camErr ? "Camera unavailable" : "Camera is off"}
                                         </span>
@@ -1060,8 +1225,11 @@ function PreJoin({ meetTitle, employeeName, isHost, onBack, onJoin }) {
 
                         {/* Name tag + status */}
                         <div className="pj-name-tag">
-                            <div className="pj-name-av" style={{ background: avColor(employeeName || "?") }}>
-                                {(employeeName || "?")[0].toUpperCase()}
+                            <div className="pj-name-av" style={{ background: ownPicUrl ? "transparent" : avColor(employeeName || "?"), overflow: "hidden", padding: 0 }}>
+                                {ownPicUrl
+                                    ? <img src={ownPicUrl} alt={employeeName} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                                    : (employeeName || "?")[0].toUpperCase()
+                                }
                             </div>
                             <span style={{ fontSize: 14, fontWeight: 500, color: "#202124", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {employeeName || "You"}
@@ -1406,9 +1574,12 @@ function ShareMeetingModal({ meet, joinCode, senderId, senderName, onClose }) {
                                 <div style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${isSel ? "#1a73e8" : "#DADCE0"}`, background: isSel ? "#1a73e8" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.1s" }}>
                                     {isSel && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                                 </div>
-                                <div style={{ width: 36, height: 36, borderRadius: "50%", background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
-                                    {initials(emp.name || "?")}
-                                </div>
+                                {emp.profilePicUrl
+                                    ? <img src={emp.profilePicUrl} alt={emp.name} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                                    : <div style={{ width: 36, height: 36, borderRadius: "50%", background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                                        {initials(emp.name || "?")}
+                                    </div>
+                                }
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 14, fontWeight: 500, color: "#202124" }}>
                                         {emp.name}

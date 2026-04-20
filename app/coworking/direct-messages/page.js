@@ -274,9 +274,9 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
         {/* Avatar */}
         <div style={{ width: 28, height: 28, flexShrink: 0 }}>
           {showAvatar && !isMe && (
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>
-              {getInit(msg.senderName || "")}
-            </div>
+            msg.senderPicUrl
+              ? <img src={msg.senderPicUrl} alt={msg.senderName} style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }} />
+              : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>{getInit(msg.senderName || "")}</div>
           )}
         </div>
 
@@ -395,9 +395,11 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
       {/* Avatar */}
       <div style={{ width: 28, height: 28, flexShrink: 0 }}>
         {showAvatar && !isMe && (
-          <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>
-            {getInit(msg.senderName || "")}
-          </div>
+          msg.senderPicUrl
+            ? <img src={msg.senderPicUrl} alt={msg.senderName} style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }} />
+            : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>
+              {getInit(msg.senderName || "")}
+            </div>
         )}
       </div>
       {/* Column */}
@@ -451,7 +453,10 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
 }
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
-function Av({ name, size = 40 }) {
+function Av({ name, size = 40, url }) {
+  if (url) return (
+    <img src={url} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+  );
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", background: avBg(name || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: size * 0.35, fontWeight: 700, flexShrink: 0, letterSpacing: "0.02em" }}>
       {getInit(name || "")}
@@ -856,7 +861,7 @@ export default function DirectMessagesPage() {
                 return (
                   <div key={conv.id} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(other)} role="button">
                     <div style={{ position: "relative", flexShrink: 0 }}>
-                      <Av name={name} size={42} />
+                      <Av name={name} size={42} url={other?.profilePicUrl || ""} />
                       {n > 0 && <div className="dm-av-dot" />}
                     </div>
                     <div className="dm-row-info">
@@ -889,7 +894,7 @@ export default function DirectMessagesPage() {
                 const isAct = selectedPerson?.employeeId === emp.employeeId;
                 return (
                   <div key={emp.employeeId} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(emp)} role="button">
-                    <Av name={emp.name || emp.employeeId} size={38} />
+                    <Av name={emp.name || emp.employeeId} size={38} url={emp.profilePicUrl || ""} />
                     <div className="dm-row-info">
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <div className="dm-row-name">{emp.name || emp.employeeId}</div>
@@ -924,7 +929,7 @@ export default function DirectMessagesPage() {
                   Back
                 </button>
                 <div style={{ position: "relative", flexShrink: 0 }}>
-                  <Av name={selectedPerson.name || selectedPerson.employeeId} size={44} />
+                  <Av name={selectedPerson.name || selectedPerson.employeeId} size={44} url={selectedPerson.profilePicUrl || ""} />
                   <div style={{ position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%", background: "#22C55E", border: "2px solid #fff" }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -988,7 +993,7 @@ export default function DirectMessagesPage() {
                   <div className="dm-center"><GwSpinner size={24} /></div>
                 ) : withSep.length === 0 ? (
                   <div className="dm-chat-empty">
-                    <Av name={selectedPerson.name || "?"} size={52} />
+                    <Av name={selectedPerson.name || "?"} size={52} url={selectedPerson.profilePicUrl || ""} />
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
                     <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
                   </div>
@@ -1015,7 +1020,7 @@ export default function DirectMessagesPage() {
                       </div>
                     );
                     return (
-                      <Bubble key={item.messageId || item.id || i} msg={item} isMe={item.isMe} showAvatar={item.showAvatar} onImg={setLightbox} onDl={dlFile} isHost={isCeoOrTl} onViewSummary={handleViewSummary} onCancel={handleCancelMeet} onEdit={setEditModal} />
+                      <Bubble key={item.messageId || item.id || i} msg={{ ...item, senderPicUrl: item.isMe ? "" : (selectedPerson?.profilePicUrl || "") }} isMe={item.isMe} showAvatar={item.showAvatar} onImg={setLightbox} onDl={dlFile} isHost={isCeoOrTl} onViewSummary={handleViewSummary} onCancel={handleCancelMeet} onEdit={setEditModal} />
                     );
                   });
                 })()}

@@ -316,7 +316,13 @@ export default function ConversationPage() {
             groupedMsgs.map((msg, i) => (
               <MessageBubble
                 key={msg.messageId || msg.id || i}
-                msg={msg}
+                msg={{
+                  ...msg,
+                  // Inject profile pic: other user's pic for received messages, own pic for sent
+                  senderPicUrl: msg.senderId === employeeId
+                    ? ""  // own pic not shown (isMe side has no avatar)
+                    : (otherEmployee?.profilePicUrl || ""),
+                }}
                 isMe={msg.senderId === employeeId}
                 showSender={msg.showSender}
                 showAvatar={msg.showAvatar}

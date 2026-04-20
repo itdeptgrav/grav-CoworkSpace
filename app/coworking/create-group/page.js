@@ -68,7 +68,10 @@ function avatarColor(name = "") {
 }
 
 // ── Small Avatar ─────────────────────────────────────────
-function SmallAvatar({ name = "", size = 30 }) {
+function SmallAvatar({ name = "", size = 30, url = "" }) {
+  if (url) return (
+    <img src={url} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+  );
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%", flexShrink: 0,
@@ -194,7 +197,7 @@ function GroupFormModal({ mode, group, allEmployees, currentEmployeeId, onClose,
                         borderColor: sel ? "#BFDBFE" : "#F1F3F4",
                       }}
                     >
-                      <SmallAvatar name={emp.name} size={28} />
+                      <SmallAvatar name={emp.name} size={28} url={emp.profilePicUrl || ""} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 500, color: "#202124" }}>{emp.name}</div>
                         <div style={{ fontSize: 10, color: "#9AA0A6" }}>{emp.department || emp.employeeId}</div>
@@ -285,7 +288,7 @@ function AddMemberModal({ group, allEmployees, onClose, onSuccess }) {
             ) : (
               nonMembers.map(emp => (
                 <div key={emp.employeeId} style={{ ...ms.memberRow, borderColor: "#F1F3F4" }}>
-                  <SmallAvatar name={emp.name} size={28} />
+                  <SmallAvatar name={emp.name} size={28} url={emp.profilePicUrl || ""} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 500, color: "#202124" }}>{emp.name}</div>
                     <div style={{ fontSize: 10, color: "#9AA0A6" }}>{emp.department || emp.employeeId}</div>
@@ -354,7 +357,7 @@ function ManageMembersModal({ group, allEmployees, currentEmployeeId, onClose, o
               const isCreator = id === group.createdBy;
               return (
                 <div key={id} style={{ ...ms.memberRow, borderColor: "#F1F3F4" }}>
-                  <SmallAvatar name={name} size={30} />
+                  <SmallAvatar name={name} size={30} url={empMap[id]?.profilePicUrl || ""} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: "#202124", display: "flex", alignItems: "center", gap: 5 }}>
                       {name}
@@ -474,7 +477,7 @@ function GroupCard({ group, currentEmployeeId, isCEO, allEmployees, onOpenChat, 
                 const e = empMap[id];
                 return (
                   <div key={id} style={{ marginLeft: i === 0 ? 0 : -6, zIndex: 4 - i }}>
-                    <SmallAvatar name={e?.name || id} size={18} />
+                    <SmallAvatar name={e?.name || id} size={18} url={e?.profilePicUrl || ""} />
                   </div>
                 );
               })}

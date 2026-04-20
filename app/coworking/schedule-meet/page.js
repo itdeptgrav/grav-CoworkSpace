@@ -200,8 +200,8 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
                 const checked = participantIds.includes(emp.employeeId);
                 return (
                   <div key={emp.employeeId} className="sm-edit-emp-item" onClick={() => togglePart(emp.employeeId)}>
-                    <div className="sm-edit-emp-av" style={{ background: avBg(emp.employeeId) }}>
-                      {initials(emp.name || "")}
+                    <div className="sm-edit-emp-av" style={{ background: avBg(emp.employeeId), overflow: "hidden", padding: 0 }}>
+                      {emp.profilePicUrl ? <img src={emp.profilePicUrl} alt={emp.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initials(emp.name || "")}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="sm-edit-emp-name">{emp.name || emp.employeeId}</div>
@@ -644,7 +644,7 @@ export default function MeetingsPage() {
         const map = {};
         snap.forEach(d => {
           const e = d.data();
-          if (e.employeeId) map[e.employeeId] = { name: e.name || "?", department: e.department || "" };
+          if (e.employeeId) map[e.employeeId] = { name: e.name || "?", department: e.department || "", profilePicUrl: e.profilePicUrl || "" };
         });
         setEmpMap(map);
       })

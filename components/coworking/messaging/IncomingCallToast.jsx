@@ -23,6 +23,7 @@ function avColor(name = "") {
 export default function IncomingCallToast({ employeeId }) {
     const router = useRouter();
     const [call, setCall] = useState(null); // { fromEmployeeId, fromName, convId }
+    const [callerPic, setCallerPic] = useState("");
     const [mounted, setMounted] = useState(false);
     const callRef = useRef(null);
     const ringtoneRef = useRef({});
@@ -67,6 +68,15 @@ export default function IncomingCallToast({ employeeId }) {
             callRef.current = info;
             setCall(info);
             playRingtone();
+            // Fetch caller's profile pic asynchronously
+            (async () => {
+                try {
+                    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+                    const { doc, getDoc } = await import("firebase/firestore");
+                    const snap = await getDoc(doc(firebaseDb, "cowork_employees", fromEmployeeId));
+                    if (snap.exists()) setCallerPic(snap.data().profilePicUrl || "");
+                } catch (_) { }
+            })();
             // Auto-dismiss after 30s (missed call)
             timeoutRef.current = setTimeout(() => dismiss(), 30000);
         };
@@ -107,7 +117,10 @@ export default function IncomingCallToast({ employeeId }) {
             <div style={s.pulse} />
 
             {/* Avatar */}
-            <div style={{ ...s.avatar, background: bg }}>{ini}</div>
+            {callerPic
+                ? <img src={callerPic} alt={call.fromName} style={{ ...s.avatar, objectFit: "cover", background: "transparent" }} />
+                : <div style={{ ...s.avatar, background: bg }}>{ini}</div>
+            }
 
             {/* Info */}
             <div style={s.info}>

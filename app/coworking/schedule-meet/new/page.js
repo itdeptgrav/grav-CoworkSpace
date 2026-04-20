@@ -589,7 +589,9 @@ export default function NewMeetPage() {
                         <button key={emp.employeeId} type="button"
                           className={`sm-emp-chip${sel ? " sel" : ""}`}
                           onClick={() => toggleParticipant(emp.employeeId)}>
-                          <span className="sm-emp-avatar">{initials(emp.name)}</span>
+                          <span className="sm-emp-avatar" style={{ overflow: "hidden", padding: 0 }}>
+                            {emp.profilePicUrl ? <img src={emp.profilePicUrl} alt={emp.name} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : initials(emp.name)}
+                          </span>
                           <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {emp.name}
                           </span>
@@ -640,7 +642,9 @@ export default function NewMeetPage() {
                   </div>
                 ) : selectedEmps.map(emp => (
                   <div key={emp.employeeId} className="sm-participant-row">
-                    <div className="sm-p-avatar">{initials(emp.name)}</div>
+                    <div className="sm-p-avatar" style={{ overflow: "hidden", padding: 0 }}>
+                      {emp.profilePicUrl ? <img src={emp.profilePicUrl} alt={emp.name} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : initials(emp.name)}
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="sm-p-name">{emp.name}</div>
                       <div className="sm-p-dept">
