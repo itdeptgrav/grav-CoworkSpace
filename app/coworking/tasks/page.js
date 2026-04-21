@@ -18,6 +18,19 @@ import EditDeadlineModal from "../../../components/coworking/tasks/EditDeadlineM
 import SubmitCompletionModal from "../../../components/coworking/tasks/SubmitCompletionModal";
 import ReviewCompletionModal from "../../../components/coworking/tasks/ReviewCompletionModal";
 import DeadlineBadge, { getDeadlineInfo } from "../../../components/coworking/tasks/DeadlineBadge";
+import ImageLightbox from "../../../components/coworking/tasks/ImageLightbox";
+import SwipeableMessage from "../../../components/coworking/tasks/SwipeableMessage";
+import { ReportCard, ReportDateGroup } from "../../../components/coworking/tasks/ReportCard";
+import WorkCommitModal from "../../../components/coworking/tasks/WorkCommitModal";
+import {
+  PRI,
+  getPriDisplay,
+  getAvatarColors,
+  computeLiveDeadline,
+  fmtLiveDeadlineDate,
+  fmtLiveDeadlineDateTime,
+  groupByDate,
+} from "../../../lib/tasksPageHelpers";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
@@ -80,193 +93,6 @@ const COMP = {
   ceo_approved: { label: "Approved — Complete!", color: "#16A34A", bg: "#DCFCE7", icon: "🏆" },
   ceo_rejected: { label: "CEO Rejected", color: "#EF4444", bg: "#FEF2F2", icon: "✕" },
 };
-
-const PRI = {
-  high: { label: "Urgent", color: "#B91C1C", bg: "#FEF2F2", dot: "#B91C1C" },
-  medium: { label: "Normal", color: "#92400E", bg: "#FFFBEB", dot: "#D97706" },
-  low: { label: "Lowest", color: "#166534", bg: "#F0FDF4", dot: "#16A34A" }
-};
-
-// Helper for numeric priority (1-10)
-function getPriDisplay(priority) {
-  const n = typeof priority === "number" ? priority : (typeof priority === "string" && !isNaN(Number(priority)) ? Number(priority) : null);
-  if (n !== null) {
-    const level = n >= 8 ? "high" : n >= 5 ? "medium" : "low";
-    return { ...PRI[level], label: `P${n}`, dot: PRI[level].dot };
-  }
-  return PRI[priority] || PRI.medium;
-}
-
-// Avatar Color Helper
-const AVATAR_COLORS = [
-  ["#3B4252", "#4C566A"], ["#2563EB", "#3B82F6"], ["#0F766E", "#14B8A6"],
-  ["#7C2D12", "#B91C1C"], ["#6D28D9", "#7C3AED"], ["#0E7490", "#06B6D4"],
-  ["#9D174D", "#EC4899"], ["#374151", "#6B7280"],
-];
-
-function getAvatarColors(name = "") {
-  const idx = name.charCodeAt(0) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[idx];
-}
-
-// ── Live (dynamic) deadline ───────────────────────────────────────────────────
-// Computes the wall-clock timestamp when this task will actually finish based
-// on the employee's real work/pause behavior, NOT the static dueDate from the
-// original proposal. Behavior:
-//   • Running   → lastStartTime + (estimate − totalSecondsAtResume)   (fixed during this run)
-//   • Paused    → pauseTime (=updatedAt when !isActive) + (estimate − totalSeconds)   (frozen)
-//   • Never started → now + estimate   (slides forward until they hit Play — "if started now")
-//   • No estimate → fall back to the static task.dueDate (legacy)
-// Both employee and CEO/TL see the same value because both sides read the same
-// timer session doc from Firestore (via useTaskTimer / useWatchEmployeeTimers).
-function computeLiveDeadline(task, sess) {
-  const E = Number(task?.deadlineWindowSecs) || 0;
-  if (!E) return task?.dueDate ? new Date(task.dueDate).getTime() : null;
-  const W = Number(sess?.totalSeconds) || 0;
-  const remainingMs = (E - W) * 1000;
-  if (sess?.isActive && sess?.lastStartTime) {
-    return sess.lastStartTime + remainingMs;
-  }
-  if (sess?.updatedAt && W > 0) {
-    return sess.updatedAt + remainingMs;
-  }
-  return Date.now() + remainingMs;
-}
-
-function fmtLiveDeadlineDate(task, sess) {
-  const ms = computeLiveDeadline(task, sess);
-  if (!ms) return null;
-  return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function fmtLiveDeadlineDateTime(task, sess) {
-  const ms = computeLiveDeadline(task, sess);
-  if (!ms) return null;
-  return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-// Helper Functions
-function groupByDate(messages) {
-  const groups = [];
-  let lastDate = null;
-  messages.forEach(msg => {
-    const d = msg.createdAt ? new Date(msg.createdAt) : new Date();
-    const dateStr = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-    if (dateStr !== lastDate) {
-      groups.push({ type: "date", label: dateStr });
-      lastDate = dateStr;
-    }
-    groups.push({ type: "msg", ...msg });
-  });
-  return groups;
-}
-
-/* ─── Image Lightbox Modal ─── */
-function ImageLightbox({ url, onClose, onDownload }) {
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose]);
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.9)",
-        zIndex: 10000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        animation: "fadeIn 0.2s ease",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: "relative",
-          maxWidth: "90vw",
-          maxHeight: "90vh",
-          background: "transparent",
-        }}
-      >
-        <img
-          src={url}
-          alt="Enlarged view"
-          style={{
-            maxWidth: "100%",
-            maxHeight: "90vh",
-            objectFit: "contain",
-            borderRadius: "12px",
-            boxShadow: "0 20px 40px rgba(0,0,0,0.3)",
-          }}
-        />
-        <button
-          onClick={onDownload}
-          style={{
-            position: "absolute",
-            bottom: "20px",
-            right: "20px",
-            background: "rgba(0,0,0,0.7)",
-            border: "none",
-            borderRadius: "50%",
-            width: "48px",
-            height: "48px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            color: "#fff",
-            transition: "all 0.2s",
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.9)"}
-          onMouseLeave={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.7)"}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-        </button>
-        <button
-          onClick={onClose}
-          style={{
-            position: "absolute",
-            top: "20px",
-            right: "20px",
-            background: "rgba(0,0,0,0.7)",
-            border: "none",
-            borderRadius: "50%",
-            width: "40px",
-            height: "40px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            color: "#fff",
-            fontSize: "24px",
-            transition: "all 0.2s",
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.9)"}
-          onMouseLeave={(e) => e.currentTarget.style.background = "rgba(0,0,0,0.7)"}
-        >
-          ✕
-        </button>
-        <style>{`
-          @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-        `}</style>
-      </div>
-    </div>
-  );
-}
 
 /* ─── TreeNode ─── */
 function TreeNode({ node, allTaskMap, allTasks, selectedId, onSelect, expandedIds, toggleExpand, depth, viewerRole, viewerEmployeeId, unreadTaskIds, unreadCounts, lastMsgTimes }) {
@@ -562,64 +388,6 @@ if (!document.querySelector('#employee-group-styles')) {
 
 
 /* ─── ReportCard ─── */
-function ReportCard({ report }) {
-  const pct = report.progressPercent || 0;
-  const pctColor = pct >= 100 ? "#16A34A" : pct >= 50 ? "var(--p,#5B5EF4)" : "#F59E0B";
-  const pctBg = pct >= 100 ? "#DCFCE7" : pct >= 50 ? "var(--p-lt,#EDEDFE)" : "#FEF3C7";
-  return (
-    <div className="gv-report-card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <GwAvatar name={report.employeeName} size={30} />
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-1,#0C0E1A)" }}>{report.employeeName}</div>
-            <div style={{ fontSize: 10, color: "var(--text-4,#A8AFCC)", marginTop: 1, fontFamily: "var(--mono,monospace)" }}>{report.reportDate}</div>
-          </div>
-        </div>
-        <span style={{ padding: "3px 9px", borderRadius: 99, fontSize: 11, fontWeight: 800, color: pctColor, background: pctBg, fontFamily: "var(--mono,monospace)" }}>{pct}%</span>
-      </div>
-      <p style={{ margin: "0 0 8px", fontSize: 12.5, color: "var(--text-2,#3D4060)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{report.message}</p>
-      {report.imageUrls?.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(56px,1fr))", gap: 4, marginTop: 6 }}>
-          {report.imageUrls.map((url, i) => (
-            <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-              <img src={url} alt="" style={{ width: "100%", height: 56, objectFit: "cover", borderRadius: 7, border: "1px solid var(--border,rgba(0,0,0,0.07))", display: "block" }} />
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-
-/* ─── ReportDateGroup — collapsible date group for daily reports ─── */
-function ReportDateGroup({ dateLabel, reports }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div style={{ marginBottom: 2 }}>
-      {/* Date header */}
-      <button onClick={() => setOpen(v => !v)}
-        style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#F8FAFC", border: "none", borderTop: "1px solid #E5E7EB", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
-          <path d="M2.5 1.5l5 3.5-5 3.5" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", letterSpacing: "0.04em" }}>📅 {dateLabel}</span>
-        <span style={{ marginLeft: "auto", fontSize: 10, color: "#94A3B8", fontWeight: 600 }}>{reports.length} report{reports.length !== 1 ? "s" : ""}</span>
-      </button>
-      {open && (
-        <div style={{ padding: "4px 0" }}>
-          {reports.map((r, i) => <ReportCard key={r.id || i} report={r} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-
-
 /* ─── TaskRequestsPanel ─── */
 function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewRequest }) {
   const [requests, setRequests] = useState([]);
@@ -700,6 +468,7 @@ function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewR
     </div>
   );
 }
+
 
 function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setActiveDetailTab,
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
@@ -1691,90 +1460,6 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
 
 
 /* ─── SwipeableMessage — swipe right to reply (WhatsApp-style) ─── */
-function SwipeableMessage({ children, isMe, onReply, onContextMenu, onLongPressStart, onLongPressEnd, style }) {
-  const [swipeX, setSwipeX] = useState(0);
-  const [swiping, setSwiping] = useState(false);
-  const [triggered, setTriggered] = useState(false);
-  const startXRef = useRef(0);
-  const THRESHOLD = 60;
-
-  const handleTouchStart = (e) => {
-    startXRef.current = e.touches[0].clientX;
-    setSwiping(true);
-    setTriggered(false);
-    onLongPressStart?.();
-  };
-
-  const handleTouchMove = (e) => {
-    const dx = e.touches[0].clientX - startXRef.current;
-    // Only allow right swipe for replies (both sides swipe right to reply like WhatsApp)
-    if (dx > 0 && dx <= THRESHOLD + 20) {
-      setSwipeX(dx);
-      if (dx >= THRESHOLD && !triggered) {
-        setTriggered(true);
-        // Haptic feedback if available
-        if (navigator?.vibrate) navigator.vibrate(40);
-      }
-    }
-  };
-
-  const handleTouchEnd = (e) => {
-    onLongPressEnd?.();
-    if (triggered) onReply?.();
-    setSwiping(false);
-    setTriggered(false);
-    setSwipeX(0);
-  };
-
-  const progress = Math.min(swipeX / THRESHOLD, 1);
-
-  return (
-    <div
-      style={{ ...style, position: "relative", overflow: "visible" }}
-      onContextMenu={onContextMenu}
-    >
-      {/* Reply icon that appears on swipe */}
-      {swipeX > 8 && (
-        <div style={{
-          position: "absolute",
-          left: isMe ? "auto" : Math.min(swipeX - 8, THRESHOLD - 4),
-          right: isMe ? Math.min(swipeX - 8, THRESHOLD - 4) : "auto",
-          top: "50%", transform: "translateY(-50%)",
-          width: 28, height: 28,
-          borderRadius: "50%",
-          background: `rgba(79,70,229,${Math.min(progress, 1) * 0.15})`,
-          border: `1.5px solid rgba(79,70,229,${Math.min(progress, 1) * 0.5})`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          transition: triggered ? "transform 0.15s" : "none",
-          transform: `translateY(-50%) scale(${triggered ? 1.2 : 0.8 + progress * 0.4})`,
-          pointerEvents: "none",
-          zIndex: 5,
-        }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-            stroke={`rgba(79,70,229,${0.4 + progress * 0.6})`}
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 00-4-4H4" />
-          </svg>
-        </div>
-      )}
-      {/* Message content shifted on swipe */}
-      <div
-        className={`gv-msg-group${isMe ? " me" : ""}`}
-        style={{
-          transform: swipeX > 0 ? `translateX(${isMe ? -swipeX : swipeX}px)` : "none",
-          transition: swiping ? "none" : "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
-        }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 /* ─── Main Page ─── */
 export default function TasksPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
@@ -1852,6 +1537,10 @@ export default function TasksPage() {
   const [listSearch, setListSearch] = useState("");
   const [activeStatTab, setActiveStatTab] = useState("all");
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  // Group mode for list panel: "person" (default, per-assignee with drag-in-group) or "status"
+  // Collapsed state for per-person groups lives inside `collapsedGroups` under keys like
+  //   "person_{sectionKey}_{assigneeId}"  — by default ALL person groups start collapsed.
+  const [groupByMode, setGroupByMode] = useState("person");
   const [rowMenuOpen, setRowMenuOpen] = useState(null);
   const [rowMenuPos, setRowMenuPos] = useState({ x: 0, y: 0 });
   const [sheetTask, setSheetTask] = useState(null); // mobile bottom sheet task
@@ -2076,6 +1765,24 @@ export default function TasksPage() {
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
+
+    // ── Same-assignee guard ────────────────────────────────────────────────
+    // In Person grouping mode the UI shows one card per assignee. Dragging a
+    // task from Alice's group onto Bob's group would silently change nothing
+    // visually (because each person's group is a separate ordered list) and
+    // would be confusing. So reject cross-assignee drops here — the user can
+    // still reassign via the detail panel.
+    //
+    // A task is in an "assignee group" for each ID in assigneeIds. We treat
+    // the drop as valid if the two tasks share at least one common assignee,
+    // OR if both are unassigned.
+    const dragAssignees = new Set(dragTask.assigneeIds || []);
+    const dropAssignees = new Set(dropTask.assigneeIds || []);
+    const bothUnassigned = dragAssignees.size === 0 && dropAssignees.size === 0;
+    const sharesAssignee = [...dragAssignees].some(a => dropAssignees.has(a));
+    if (!bothUnassigned && !sharesAssignee) {
+      return; // silent reject — cross-person drop
+    }
 
     // ── SAME LEVEL vs CROSS-LEVEL ──
     const dragParent = dragTask.parentTaskId || null;
@@ -4772,6 +4479,42 @@ export default function TasksPage() {
 
                       {hasFilter && <button onClick={clearAll} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, whiteSpace: "nowrap", flexShrink: 0 }}>Clear</button>}
 
+                      {/* ── Group by: Person (default) / Status ── */}
+                      <div style={{
+                        display: "inline-flex", alignItems: "center",
+                        border: "1px solid var(--border)", borderRadius: 7,
+                        overflow: "hidden", flexShrink: 0,
+                      }}
+                        title="Group tasks by person (drag to reorder within a person's group) or by status"
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", padding: "0 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                          Group
+                        </span>
+                        {[
+                          { key: "person", label: "Person" },
+                          { key: "status", label: "Status" },
+                        ].map(({ key, label }) => {
+                          const active = groupByMode === key;
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => setGroupByMode(key)}
+                              style={{
+                                padding: "5px 10px",
+                                border: "none",
+                                borderLeft: "1px solid var(--border)",
+                                background: active ? "var(--p)" : "var(--surface)",
+                                color: active ? "#fff" : "var(--text-2)",
+                                fontSize: 11, fontWeight: 600, cursor: "pointer",
+                                fontFamily: "var(--font)", transition: "all 0.12s",
+                              }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
                       {/* ── Export CSV ── */}
                       <button onClick={doExport}
                         style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text-2)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0, whiteSpace: "nowrap" }}
@@ -4917,9 +4660,113 @@ export default function TasksPage() {
                       return false;
                     });
 
-                    // Render table rows + column header for a list of tasks inside a section
-                    const renderTaskGroup = (tasks, sectionKey) =>
-                      STATUS_GROUPS_TABLE.map(grp => {
+                    // Render table rows + column header for a list of tasks inside a section.
+                    // Two modes: "status" (original) and "person" (new, grouped by assignee).
+                    // Person-mode is collapsed-by-default and supports drag-reorder within each group.
+                    const renderTaskGroup = (tasks, sectionKey) => {
+                      if (groupByMode === "person") {
+                        // ── Group by assignee (one bucket per employee; Unassigned bucket last) ──
+                        const UNASSIGNED = "__unassigned__";
+                        const buckets = new Map(); // id → { name, picUrl, tasks: [] }
+                        tasks.forEach(t => {
+                          const ids = (t.assigneeIds || []);
+                          if (ids.length === 0) {
+                            if (!buckets.has(UNASSIGNED)) buckets.set(UNASSIGNED, { name: "Unassigned", picUrl: null, tasks: [] });
+                            buckets.get(UNASSIGNED).tasks.push(t);
+                            return;
+                          }
+                          ids.forEach(aid => {
+                            const name = employeeMap.get(aid) || t.assigneeNameMap?.[aid] || `Employee ${aid}`;
+                            const picUrl = employeeMapFull?.get(aid)?.profilePicture || null;
+                            if (!buckets.has(aid)) buckets.set(aid, { name, picUrl, tasks: [] });
+                            buckets.get(aid).tasks.push(t);
+                          });
+                        });
+                        // Sort tasks inside each bucket by `order` (drag result) then priority
+                        buckets.forEach(b => {
+                          b.tasks.sort((a, b2) => {
+                            const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
+                            const bo = b2.order !== undefined ? b2.order : 90000 + (b2.priority ?? 5) * 1000;
+                            return ao - bo;
+                          });
+                        });
+                        // Sort buckets alphabetically (Unassigned always last)
+                        const sortedBuckets = [...buckets.entries()].sort((a, b) => {
+                          if (a[0] === UNASSIGNED) return 1;
+                          if (b[0] === UNASSIGNED) return -1;
+                          return a[1].name.localeCompare(b[1].name);
+                        });
+
+                        return sortedBuckets.map(([aid, bucket]) => {
+                          const key = `person_${sectionKey}_${aid}`;
+                          // Collapsed by default: if the key ISN'T in collapsedGroups, treat as collapsed
+                          // We invert the meaning of collapsedGroups for person-mode so defaults are correct.
+                          const expanded = collapsedGroups.has(key);
+                          const toggle = () => setCollapsedGroups(prev => {
+                            const n = new Set(prev);
+                            n.has(key) ? n.delete(key) : n.add(key);
+                            return n;
+                          });
+                          return (
+                            <div key={key} className="gv-tbl-group" style={{ borderBottom: "1px solid var(--border)" }}>
+                              <div
+                                onClick={toggle}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10,
+                                  padding: "10px 14px",
+                                  cursor: "pointer", userSelect: "none",
+                                  background: expanded ? "var(--p-lt)" : "var(--surface)",
+                                  borderLeft: expanded ? "3px solid var(--p)" : "3px solid transparent",
+                                  transition: "background 0.12s, border-left-color 0.12s",
+                                }}
+                              >
+                                <GwAvatar name={bucket.name} size={26} url={bucket.picUrl} />
+                                <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "var(--text-1)" }}>
+                                  {bucket.name}
+                                </span>
+                                <span style={{
+                                  fontSize: 10, fontWeight: 700,
+                                  padding: "2px 8px", borderRadius: 99,
+                                  background: expanded ? "var(--p)" : "var(--bg)",
+                                  color: expanded ? "#fff" : "var(--text-3)",
+                                }}>
+                                  {bucket.tasks.length}
+                                </span>
+                                <span style={{
+                                  width: 22, height: 22, borderRadius: 5,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  color: "var(--text-3)",
+                                  transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                                  transition: "transform 0.15s",
+                                }}>
+                                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                                    <path d="M2.5 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </span>
+                              </div>
+                              {expanded && (
+                                <>
+                                  <div className="gv-tbl-head">
+                                    <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
+                                    <div className="col-name">Task Name</div>
+                                    <div className="col-timer">Timer</div>
+                                    <div className="col-desc">Description</div>
+                                    <div className="col-people">People</div>
+                                    <div className="col-pri">Priority</div>
+                                    <div className="col-date">Timeline</div>
+                                    <div className="col-status">Status</div>
+                                    <div className="col-act" />
+                                  </div>
+                                  {bucket.tasks.map(t => <TblRow key={t.taskId} t={t} />)}
+                                </>
+                              )}
+                            </div>
+                          );
+                        });
+                      }
+
+                      // ── Status-mode (original behavior) ──
+                      return STATUS_GROUPS_TABLE.map(grp => {
                         const grpTasks = tasks.filter(t => t.status === grp.key);
                         if (!grpTasks.length) return null;
                         const collapsed = collapsedGroups.has(`${sectionKey}_${grp.key}`);
@@ -4949,6 +4796,7 @@ export default function TasksPage() {
                           </div>
                         );
                       });
+                    };
 
                     // Section box wrapper with title + minimize/maximize
                     const SectionBox = ({ sectionKey, title, icon, accentColor, accentBg, tasks, count }) => {
@@ -6307,232 +6155,21 @@ export default function TasksPage() {
       )}
 
       {/* ── Work Commit Modal — shown when employee pauses timer ── */}
-      {commitModal && (
-        <div
-          // Prevent the browser from opening a file if the user misses the drop zone
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => e.preventDefault()}
-          style={{
-            position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
-            zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(3px)", padding: 16,
-            fontFamily: "var(--font,'DM Sans',-apple-system,sans-serif)",
-          }}>
-          <div style={{
-            background: "#fff", borderRadius: 16, width: "min(440px,96vw)",
-            boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
-            animation: "ctm-in 0.18s cubic-bezier(0.4,0,0.2,1)",
-          }}>
-            {/* Header */}
-            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #E5E7EB" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 9, background: "#FFF7ED",
-                  border: "1px solid #FED7AA", display: "flex", alignItems: "center",
-                  justifyContent: "center", flexShrink: 0,
-                }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
-                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
-                    <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
-                  </svg>
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>Pause Timer</div>
-                  <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {commitModal.taskTitle}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeCommitModal}
-                  disabled={savingCommit || commitUploading}
-                  title="Close (Esc)"
-                  aria-label="Close"
-                  style={{
-                    width: 30, height: 30, borderRadius: 8,
-                    border: "1px solid #E5E7EB", background: "#F9FAFB",
-                    color: "#6B7280", cursor: (savingCommit || commitUploading) ? "not-allowed" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    flexShrink: 0, padding: 0,
-                    opacity: (savingCommit || commitUploading) ? 0.5 : 1,
-                    transition: "background 0.12s, color 0.12s",
-                  }}
-                  onMouseEnter={e => { if (!(savingCommit || commitUploading)) { e.currentTarget.style.background = "#F3F4F6"; e.currentTarget.style.color = "#111827"; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.color = "#6B7280"; }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div style={{ padding: "16px 20px" }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
-                What did you work on? <span style={{ color: "#EF4444", fontWeight: 600, textTransform: "none" }}>*</span>
-              </label>
-              <textarea
-                autoFocus
-                value={commitMessage}
-                onChange={e => setCommitMessage(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
-                placeholder="e.g. Fixed the login bug, updated UI layout…"
-                style={{
-                  width: "100%", padding: "10px 12px",
-                  border: `1.5px solid ${commitMessage.trim() ? "#E5E7EB" : "#FCA5A5"}`,
-                  borderRadius: 9, fontSize: 13, fontFamily: "inherit",
-                  outline: "none", resize: "vertical", minHeight: 90,
-                  color: "#0F172A", background: "#FAFAFA", boxSizing: "border-box",
-                  transition: "border-color 0.12s",
-                }}
-                onFocus={e => e.target.style.borderColor = "#4F46E5"}
-                onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-              />
-              <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ color: "#EF4444" }}>*</span> Required — describe what you worked on
-                <span style={{ marginLeft: "auto" }}>💡 Ctrl+Enter to save</span>
-              </div>
-
-              {/* ── Attachments ── all types go to Google Drive via /cowork/upload/pdf ── */}
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
-                  Attachments <span style={{ color: "#9CA3AF", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>(optional)</span>
-                </div>
-
-                {/* Existing chips */}
-                {commitAttachments.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-                    {commitAttachments.map((a, i) => (
-                      <div key={a.fileId || i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8 }}>
-                        <span style={{ fontSize: 14 }}>
-                          {(a.mimeType || "").startsWith("image/") ? "🖼" :
-                            (a.mimeType || "").includes("pdf") ? "📕" :
-                              (a.mimeType || "").includes("spreadsheet") || (a.mimeType || "").includes("excel") || /\.(xls|xlsx|csv)$/i.test(a.name || "") ? "📊" :
-                                (a.mimeType || "").includes("word") || /\.(doc|docx)$/i.test(a.name || "") ? "📄" :
-                                  "📎"}
-                        </span>
-                        <span style={{ fontSize: 12, color: "#0F172A", fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.name}>
-                          {a.name}
-                        </span>
-                        {a.size > 0 && (
-                          <span style={{ fontSize: 10, color: "#94A3B8", flexShrink: 0 }}>
-                            {a.size < 1024 * 1024 ? `${Math.round(a.size / 1024)}KB` : `${(a.size / 1024 / 1024).toFixed(1)}MB`}
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setCommitAttachments(prev => prev.filter((_, j) => j !== i))}
-                          disabled={savingCommit}
-                          style={{ width: 20, height: 20, borderRadius: 4, border: "none", background: "transparent", color: "#EF4444", cursor: savingCommit ? "not-allowed" : "pointer", fontSize: 14, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                          title="Remove"
-                        >✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add-file button (drop zone) */}
-                <input
-                  ref={commitFileInputRef}
-                  type="file"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    e.target.value = ""; // so user can re-pick the same file after removing it
-                    uploadCommitFiles(files);
-                  }}
-                />
-                <div
-                  // Drag-and-drop target. Accepts any number of files and funnels them through the same helper.
-                  onDragEnter={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!savingCommit && !commitUploading) setCommitDragging(true);
-                  }}
-                  onDragOver={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!savingCommit && !commitUploading) setCommitDragging(true);
-                  }}
-                  onDragLeave={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    // Only clear if we're truly leaving the container, not just crossing into a child
-                    if (e.currentTarget.contains(e.relatedTarget)) return;
-                    setCommitDragging(false);
-                  }}
-                  onDrop={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCommitDragging(false);
-                    if (savingCommit || commitUploading) return;
-                    const files = Array.from(e.dataTransfer?.files || []);
-                    if (files.length) uploadCommitFiles(files);
-                  }}
-                  style={{
-                    padding: "14px 12px", borderRadius: 10,
-                    border: `1.5px dashed ${commitDragging ? "#4F46E5" : "#C7D2FE"}`,
-                    background: commitDragging ? "#EEF2FF" : (commitUploading ? "#F1F5F9" : "#FAFAFA"),
-                    transition: "border-color 0.12s, background 0.12s",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => commitFileInputRef.current?.click()}
-                    disabled={commitUploading || savingCommit}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "7px 14px", borderRadius: 8,
-                      border: "1.5px solid #C7D2FE",
-                      background: "#fff",
-                      color: "#4F46E5", fontSize: 12, fontWeight: 600,
-                      cursor: (commitUploading || savingCommit) ? "wait" : "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    {commitUploading ? (
-                      <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Uploading…</>
-                    ) : (
-                      <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg> Attach file</>
-                    )}
-                  </button>
-                  <div style={{ fontSize: 10, color: commitDragging ? "#4F46E5" : "#94A3B8", fontWeight: commitDragging ? 600 : 400, textAlign: "center" }}>
-                    {commitDragging
-                      ? "Drop to attach"
-                      : "or drag & drop files here — any type, up to 50MB, stored on Google Drive"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{
-              padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end",
-              borderTop: "1px solid #F1F5F9",
-            }}>
-
-              <button onClick={() => handleCommitSubmit(false)}
-                disabled={savingCommit || commitUploading || !commitMessage.trim()}
-                style={{
-                  padding: "8px 20px", borderRadius: 8, border: "none",
-                  background: (savingCommit || commitUploading || !commitMessage.trim()) ? "#E5E7EB" : "#4F46E5",
-                  color: (savingCommit || commitUploading || !commitMessage.trim()) ? "#94A3B8" : "#fff",
-                  fontSize: 13, fontWeight: 700, cursor: (savingCommit || commitUploading || !commitMessage.trim()) ? "not-allowed" : "pointer",
-                  fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
-                }}>
-                {savingCommit ? (
-                  <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Saving…</>
-                ) : (
-                  <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Pause & Save</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <WorkCommitModal
+        commitModal={commitModal}
+        commitMessage={commitMessage}
+        commitAttachments={commitAttachments}
+        commitUploading={commitUploading}
+        commitDragging={commitDragging}
+        savingCommit={savingCommit}
+        setCommitMessage={setCommitMessage}
+        setCommitAttachments={setCommitAttachments}
+        setCommitDragging={setCommitDragging}
+        commitFileInputRef={commitFileInputRef}
+        closeCommitModal={closeCommitModal}
+        uploadCommitFiles={uploadCommitFiles}
+        handleCommitSubmit={handleCommitSubmit}
+      />
 
       {/* Delete task confirmation modal */}
       <GwConfirm

@@ -130,6 +130,10 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   // Section collapse state — pending open by default, responded closed
   const [pendingOpen, setPendingOpen] = useState(true);
   const [respondedOpen, setRespondedOpen] = useState(false);
+  // Per-person expand state inside each sub-section — collapsed by default.
+  // Keys are sender IDs (fromId). Presence in the Set = expanded.
+  const [openPendingSenders, setOpenPendingSenders] = useState(new Set());
+  const [openRespondedSenders, setOpenRespondedSenders] = useState(new Set());
 
   // Scroll to highlighted request when panel opens
   useEffect(() => {
@@ -746,6 +750,75 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               const pendingReqs = received.filter(r => r.status === "pending");
               const respondedReqs = received.filter(r => r.status !== "pending");
 
+              // ── Group requests by sender (fromId) so the Received tab mirrors
+              //    the person-grouped task view. All groups start collapsed.
+              //    Returns [[senderId, { name, items }], ...] sorted alphabetically.
+              const groupBySender = (list) => {
+                const map = new Map();
+                for (const r of list) {
+                  const sid = r.fromId || "__unknown__";
+                  if (!map.has(sid)) {
+                    map.set(sid, { name: r.fromName || "Unknown", items: [] });
+                  }
+                  map.get(sid).items.push(r);
+                }
+                return [...map.entries()].sort((a, b) =>
+                  (a[1].name || "").localeCompare(b[1].name || "")
+                );
+              };
+
+              // Renders a person row: avatar + name + count + chevron.
+              // Clicking toggles the request list below it.
+              const renderPersonGroup = (senderId, bucket, openSet, setOpenSet) => {
+                const expanded = openSet.has(senderId);
+                const toggle = () => setOpenSet(prev => {
+                  const n = new Set(prev);
+                  n.has(senderId) ? n.delete(senderId) : n.add(senderId);
+                  return n;
+                });
+                return (
+                  <div key={senderId} style={{ borderBottom: "1px solid #F1F5F9" }}>
+                    <button
+                      onClick={toggle}
+                      style={{
+                        width: "100%", display: "flex", alignItems: "center", gap: 10,
+                        padding: "9px 16px 9px 28px",
+                        background: expanded ? "#F5F3FF" : "#fff",
+                        border: "none", cursor: "pointer",
+                        fontFamily: "inherit", textAlign: "left",
+                        borderLeft: expanded ? "3px solid #5B5EF4" : "3px solid transparent",
+                        transition: "background 0.12s, border-left-color 0.12s",
+                      }}
+                    >
+                      <ReqAvatar name={bucket.name} />
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "#1A1D21" }}>
+                        {bucket.name}
+                      </span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700,
+                        color: expanded ? "#fff" : "#5B5EF4",
+                        background: expanded ? "#5B5EF4" : "#EEF2FF",
+                        border: `1px solid ${expanded ? "#5B5EF4" : "#C7D2FE"}`,
+                        borderRadius: 99, padding: "1px 8px", minWidth: 22, textAlign: "center",
+                      }}>
+                        {bucket.items.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {expanded && (
+                      <div style={{ background: "#FAFBFF" }}>
+                        {bucket.items.map(req => renderCard(req))}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              const pendingGroups = groupBySender(pendingReqs);
+              const respondedGroups = groupBySender(respondedReqs);
+
               const renderCard = (req) => {
                 const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
                 const isExpanded = respondingId === req.id;
@@ -877,7 +950,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                       <div>
                         {pendingReqs.length === 0 ? (
                           <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No pending requests</div>
-                        ) : pendingReqs.map(req => renderCard(req))}
+                        ) : pendingGroups.map(([sid, bucket]) =>
+                          renderPersonGroup(sid, bucket, openPendingSenders, setOpenPendingSenders)
+                        )}
                       </div>
                     )}
                   </div>
@@ -903,7 +978,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                       <div>
                         {respondedReqs.length === 0 ? (
                           <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No responded requests</div>
-                        ) : respondedReqs.map(req => renderCard(req))}
+                        ) : respondedGroups.map(([sid, bucket]) =>
+                          renderPersonGroup(sid, bucket, openRespondedSenders, setOpenRespondedSenders)
+                        )}
                       </div>
                     )}
                   </div>
