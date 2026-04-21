@@ -34,45 +34,41 @@ function fmtSecs(s) {
 
 // ── Deadline intelligence ──────────────────────────────────────────────────────
 // Given dueDate (ISO string) and workedSeconds, return deadline status info
-function getDeadlineInfo(dueDate, workedSeconds = 0) {
+function getDeadlineInfo(dueDate, workedSeconds = 0, deadlineWindowSecs = 0) {
+    // ── Worked-time mode: deadline = worked time vs window ──
+    if (deadlineWindowSecs > 0) {
+        const remaining = deadlineWindowSecs - workedSeconds;
+        const isOverdue = remaining < 0;
+        const overSecs = isOverdue ? Math.abs(remaining) : 0;
+        const fmt = (s) => {
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+            if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        };
+        const status = isOverdue ? "overdue" : remaining < 3600 ? "critical" : remaining < 7200 ? "near" : "safe";
+        const timeLeftStr = isOverdue ? `${fmt(overSecs)} over` : `${fmt(remaining)} left`;
+        const color = isOverdue ? "#B91C1C" : status === "critical" ? "#D97706" : status === "near" ? "#D97706" : "#16A34A";
+        const bg = isOverdue ? "#FEF2F2" : status === "critical" ? "#FFFBEB" : status === "near" ? "#FFFBEB" : "#F0FDF4";
+        return { status, isOverdue, secsLeft: remaining, timeLeftStr, color, bg, dueDate };
+    }
+
+    // ── Fallback: wall-clock (legacy tasks without deadlineWindowSecs) ──
     if (!dueDate) return null;
     const now = Date.now();
-    const due = new Date(dueDate).getTime();
-    const msLeft = due - now;
+    const msLeft = new Date(dueDate).getTime() - now;
     const secsLeft = Math.floor(msLeft / 1000);
-
-    // Total "budget" = time from when timer first started to deadline
-    // We infer this is just the deadline itself; we track workedSeconds from timer
     const isOverdue = msLeft < 0;
-    const overdueSecs = isOverdue ? Math.abs(secsLeft) : 0;
-
-    // Progress: how much of deadline has been used by working
-    // We compare workedSeconds vs total deadline window
-    // If overdue, show worked vs deadline diff
-    const status = isOverdue
-        ? (workedSeconds >= Math.abs(secsLeft) + workedSeconds ? "complete" : "overdue")
-        : msLeft < 2 * 3600 * 1000 ? "critical"    // < 2h left
-            : msLeft < 12 * 3600 * 1000 ? "near"        // < 12h left
-                : "safe";
-
-    const timeLeftStr = (() => {
-        if (isOverdue) {
-            const s = overdueSecs;
-            const h = Math.floor(s / 3600);
-            const m = Math.floor((s % 3600) / 60);
-            if (h > 0) return `${h}h ${m}m overdue`;
-            return `${m}m overdue`;
-        }
-        const h = Math.floor(secsLeft / 3600);
-        const m = Math.floor((secsLeft % 3600) / 60);
-        if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h left`;
-        if (h > 0) return `${h}h ${m}m left`;
-        return `${m}m left`;
-    })();
-
+    const fmt = (s) => {
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+        if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+        if (h > 0) return `${h}h ${m}m`;
+        return `${m}m`;
+    };
+    const status = isOverdue ? "overdue" : msLeft < 2 * 3600000 ? "critical" : msLeft < 12 * 3600000 ? "near" : "safe";
+    const timeLeftStr = isOverdue ? `${fmt(Math.abs(secsLeft))} overdue` : `${fmt(secsLeft)} left`;
     const color = isOverdue ? "#B91C1C" : status === "critical" ? "#D97706" : status === "near" ? "#D97706" : "#16A34A";
     const bg = isOverdue ? "#FEF2F2" : status === "critical" ? "#FFFBEB" : status === "near" ? "#FFFBEB" : "#F0FDF4";
-
     return { status, isOverdue, secsLeft, timeLeftStr, color, bg, dueDate };
 }
 
@@ -144,17 +140,20 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
     }, [activeTab, emp.employeeId]);
 
     const sessions = rawSessions || new Map();
-    const sessArr = [...sessions.entries()].map(([taskId, s]) => ({ taskId, ...s }));
-    sessArr.sort((a, b) => {
-        if (a.isActive && !b.isActive) return -1;
-        if (!a.isActive && b.isActive) return 1;
-        return (b.totalSeconds || 0) - (a.totalSeconds || 0);
-    });
-    const totalAll = sessArr.reduce((sum, s) => {
+
+    // allSessArr = every session ever tracked (used ONLY for the header "Total" metric)
+    const allSessArr = [...sessions.entries()].map(([taskId, s]) => ({ taskId, ...s }));
+    const totalAll = allSessArr.reduce((sum, s) => {
         const extra = s.isActive && s.lastStartTime
             ? Math.floor((Date.now() - s.lastStartTime) / 1000) : 0;
         return sum + (s.totalSeconds || 0) + extra;
     }, 0);
+
+    // sessArr = ONLY tasks whose timer is running RIGHT NOW.
+    // Paused / stopped / completed / historical sessions are intentionally excluded
+    // so the Time Breakdown tab shows live work only.
+    const sessArr = allSessArr.filter(s => s.isActive);
+    sessArr.sort((a, b) => (b.totalSeconds || 0) - (a.totalSeconds || 0));
     const [c1, c2] = avatarColors(emp.name);
 
     const fmtTs = (ts) => {
@@ -243,7 +242,9 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                     {/* TIME BREAKDOWN TAB */}
                     {activeTab === "time" && (
                         sessArr.length === 0 ? (
-                            <div style={{ padding: "32px 20px", textAlign: "center", color: "#94A3B8", fontSize: 13 }}>No tracked time yet</div>
+                            <div style={{ padding: "32px 20px", textAlign: "center", color: "#94A3B8", fontSize: 13 }}>
+                                Not working on anything right now
+                            </div>
                         ) : sessArr.map(sess => {
                             const extra = sess.isActive && sess.lastStartTime ? Math.floor((Date.now() - sess.lastStartTime) / 1000) : 0;
                             const workedSecs = (sess.totalSeconds || 0) + extra;
@@ -258,11 +259,11 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                             const storedAsked = tData?.deadlineWindowSecs || null;
                             const askedForSecs = storedAsked || null; // strictly constant, no fallback
 
-                            // Deadline clock state
-                            const isOverdue = taskDue && new Date(taskDue).getTime() < Date.now();
-                            const clockSecsLeft = taskDue && !isOverdue
-                                ? Math.max(0, Math.floor((new Date(taskDue).getTime() - Date.now()) / 1000))
-                                : null;
+                            // Deadline clock state — based on WORKED TIME, not wall clock
+                            const isOverdue = askedForSecs ? workedSecs >= askedForSecs : (taskDue && new Date(taskDue).getTime() < Date.now());
+                            const clockSecsLeft = askedForSecs
+                                ? Math.max(0, askedForSecs - workedSecs)
+                                : (taskDue && !isOverdue ? Math.max(0, Math.floor((new Date(taskDue).getTime() - Date.now()) / 1000)) : null);
 
                             // Third column logic:
                             // on_track   → TIME LEFT  = askedFor - worked  (e.g. 3h asked, 1h worked = 2h left)
@@ -339,6 +340,59 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                                     </span>
                                                 )}
                                             </div>
+
+                                            {/* ── Live wall-clock deadline ── "Due 10:30 AM today" ──
+                                                Same formula as the tasks-page side so employee & manager see the SAME time:
+                                                  • Running (isActive + lastStartTime) → lastStartTime + (asked − totalSeconds)
+                                                  • Paused (with worked > 0)           → updatedAt   + (asked − totalSeconds)   (frozen)
+                                                  • Fallback                            → the static task dueDate from Firestore
+                                                Needs askedForSecs present to be meaningful. */}
+                                            {askedForSecs && (() => {
+                                                const _W = (sess.totalSeconds || 0);
+                                                const _remMs = (askedForSecs - _W) * 1000;
+                                                let _ms;
+                                                if (sess.isActive && sess.lastStartTime) _ms = sess.lastStartTime + _remMs;
+                                                else if (sess.updatedAt && _W > 0) _ms = sess.updatedAt + _remMs;
+                                                else if (taskDue) _ms = new Date(taskDue).getTime();
+                                                else _ms = Date.now() + _remMs;
+                                                const _d = new Date(_ms);
+                                                const _now = new Date();
+                                                const _sameDay = _d.toDateString() === _now.toDateString();
+                                                const _dayLabel = _sameDay ? "Today"
+                                                    : (_d.toDateString() === new Date(_now.getTime() + 86400000).toDateString()) ? "Tomorrow"
+                                                        : _d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                                                const _timeLabel = _d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+                                                const _isOver = _ms < Date.now();
+                                                const _theme = _isOver
+                                                    ? { bg: "#FEF2F2", border: "#FECDD3", chipBg: "#FEE2E2", chipColor: "#991B1B", timeColor: "#B91C1C", dayColor: "#B91C1C", iconColor: "#B91C1C" }
+                                                    : { bg: "#fff", border: "#E2E8F0", chipBg: "#EEF2FF", chipColor: "#4F46E5", timeColor: "#0F172A", dayColor: "#64748B", iconColor: "#64748B" };
+                                                return (
+                                                    <div style={{
+                                                        display: "inline-flex", alignItems: "center", gap: 8,
+                                                        padding: "5px 10px 5px 8px", borderRadius: 8,
+                                                        background: _theme.bg, border: `1px solid ${_theme.border}`,
+                                                        marginBottom: 8, width: "fit-content",
+                                                    }}>
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={_theme.iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                                            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                                                        </svg>
+                                                        <span style={{
+                                                            fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+                                                            padding: "2px 7px", borderRadius: 99,
+                                                            background: _theme.chipBg, color: _theme.chipColor,
+                                                            lineHeight: 1.4, flexShrink: 0,
+                                                        }}>
+                                                            {_isOver ? "Overdue" : "Due"}
+                                                        </span>
+                                                        <span style={{ fontSize: 13, fontWeight: 700, color: _theme.timeColor, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                                                            {_timeLabel}
+                                                        </span>
+                                                        <span style={{ fontSize: 11, color: _theme.dayColor, lineHeight: 1 }}>
+                                                            · {_dayLabel}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
 
                                             {/* ASKED FOR (constant) | WORKED | TIME LEFT → OVERTIME → STILL NEEDED */}
                                             <div style={{ display: "flex", gap: 0, marginBottom: 8, background: "#fff", borderRadius: 7, border: "1px solid #F1F5F9", overflow: "hidden" }}>
@@ -468,6 +522,46 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                                 ) : (
                                                     <div style={{ fontSize: 12, color: "#9CA3AF", fontStyle: "italic", marginBottom: 5 }}>No message</div>
                                                 )}
+                                                {/* Attachments — opens in Google Drive in a new tab. Older logs have no `attachments` field; falls back to empty array. */}
+                                                {Array.isArray(commit.attachments) && commit.attachments.length > 0 && (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                                                        {commit.attachments.map((att, ai) => {
+                                                            const mt = att.mimeType || "";
+                                                            const nm = att.name || "attachment";
+                                                            const icon = mt.startsWith("image/") ? "🖼"
+                                                                : mt.includes("pdf") ? "📕"
+                                                                    : (mt.includes("spreadsheet") || mt.includes("excel") || /\.(xls|xlsx|csv)$/i.test(nm)) ? "📊"
+                                                                        : (mt.includes("word") || /\.(doc|docx)$/i.test(nm)) ? "📄"
+                                                                            : "📎";
+                                                            const href = att.url || att.downloadUrl || "";
+                                                            return (
+                                                                <a
+                                                                    key={att.fileId || ai}
+                                                                    href={href || "#"}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    onClick={e => { if (!href) e.preventDefault(); }}
+                                                                    style={{
+                                                                        display: "flex", alignItems: "center", gap: 8,
+                                                                        padding: "6px 10px", background: "#F8FAFC",
+                                                                        border: "1px solid #E2E8F0", borderRadius: 8,
+                                                                        textDecoration: "none", color: "inherit",
+                                                                        cursor: href ? "pointer" : "default",
+                                                                    }}
+                                                                    title={nm}
+                                                                >
+                                                                    <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
+                                                                    <span style={{ fontSize: 12, fontWeight: 500, color: "#4F46E5", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nm}</span>
+                                                                    {att.size > 0 && (
+                                                                        <span style={{ fontSize: 10, color: "#94A3B8", flexShrink: 0 }}>
+                                                                            {att.size < 1024 * 1024 ? `${Math.round(att.size / 1024)}KB` : `${(att.size / 1024 / 1024).toFixed(1)}MB`}
+                                                                        </span>
+                                                                    )}
+                                                                </a>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                                 {/* Meta */}
                                                 <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                                                     <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "#ECFDF5", padding: "2px 8px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 3 }}>
@@ -488,7 +582,11 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                 {/* Footer */}
                 <div style={{ padding: "12px 20px", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "#64748B" }}>
-                        {activeTab === "time" ? `${sessArr.length} task${sessArr.length !== 1 ? "s" : ""} tracked` : `${commits.length} log entr${commits.length !== 1 ? "ies" : "y"}`}
+                        {activeTab === "time"
+                            ? (sessArr.length === 0
+                                ? "Not active"
+                                : `${sessArr.length} live task${sessArr.length !== 1 ? "s" : ""}`)
+                            : `${commits.length} log entr${commits.length !== 1 ? "ies" : "y"}`}
                     </span>
                     <button onClick={onClose} style={{ padding: "7px 18px", borderRadius: 8, border: "none", background: "#4F46E5", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
                         Close
@@ -637,12 +735,29 @@ function EmployeeRow({ emp, onClick }) {
                     </div>
                 </div>
 
-                {/* Task name */}
+                {/* Task name + inline progress */}
                 {emp.isWorking ? (
-                    <div style={{ fontSize: 11, color: "#059669", display: "flex", alignItems: "center", gap: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
-                        {emp.activeTaskTitle}
-                    </div>
+                    <>
+                        <div style={{ fontSize: 11, color: "#059669", display: "flex", alignItems: "center", gap: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
+                            <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
+                            {emp.activeTaskTitle}
+                        </div>
+                        {/* Inline mini progress: asked / worked */}
+                        {emp.deadlineInfo?.askedForSecs > 0 && (() => {
+                            const asked = emp.activeTaskWorkedSecs ? Math.max(0, (emp.deadlineInfo?.secsLeft || 0)) : null;
+                            const worked = emp.activeTaskWorkedSecs || 0;
+                            const window = emp.deadlineInfo?.deadlineWindowSecs || 0;
+                            const pct = window > 0 ? Math.min(100, Math.round((worked / window) * 100)) : 0;
+                            return (
+                                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+                                    <div style={{ flex: 1, height: 3, background: "#E5E7EB", borderRadius: 99 }}>
+                                        <div style={{ height: "100%", width: `${pct}%`, background: pct >= 100 ? "#EF4444" : "#22C55E", borderRadius: 99, transition: "width 1s linear" }} />
+                                    </div>
+                                    <span style={{ fontSize: 9, color: "#94A3B8", fontWeight: 600, whiteSpace: "nowrap" }}>{pct}%</span>
+                                </div>
+                            );
+                        })()}
+                    </>
                 ) : (
                     <div style={{ fontSize: 11, color: "#9CA3AF" }}>
                         {emp.lastTaskTitle ? `Last: ${emp.lastTaskTitle}${emp.lastActiveAt ? ` · ${timeAgo(emp.lastActiveAt)}` : ""}` : "No activity yet"}
@@ -716,7 +831,7 @@ export default function StatusTrackingPage() {
     const [rejectReason, setRejectReason] = useState("");
     const [dataLoading, setDataLoading] = useState(true);
     const [search, setSearch] = useState("");
-    const [filter, setFilter] = useState("all"); // "all" | "working" | "not_working"
+    const [filter, setFilter] = useState("working"); // "working" is default — only show live tasks
     const [selectedEmp, setSelectedEmp] = useState(null); // for modal
     const [lastUpdated, setLastUpdated] = useState(Date.now());
 
@@ -883,6 +998,7 @@ export default function StatusTrackingPage() {
             ? (taskDataMap.get(activeTaskId) || taskDataMap.get(activeTaskTitle))
             : null;
         const activeTaskDueDate = activeTaskData?.dueDate || null;
+        const activeTaskDeadlineWindow = activeTaskData?.deadlineWindowSecs || 0;
 
         // Total seconds worked on the active task specifically (not all tasks)
         const activeTaskWorkedSecs = (() => {
@@ -894,7 +1010,7 @@ export default function StatusTrackingPage() {
             return (sess.totalSeconds || 0) + extra;
         })();
 
-        const deadlineInfo = getDeadlineInfo(activeTaskDueDate, activeTaskWorkedSecs);
+        const deadlineInfo = getDeadlineInfo(activeTaskDueDate, activeTaskWorkedSecs, activeTaskDeadlineWindow);
 
         return {
             employeeId: empId, name: info.name, department: info.department,
@@ -1046,10 +1162,10 @@ export default function StatusTrackingPage() {
 
                             {/* Filter pills */}
                             <div style={{ display: "flex", gap: 6 }}>
+                                {/* Only show Live / All toggle */}
                                 {[
+                                    { key: "working", label: `🟢 Live Now (${working.length})` },
                                     { key: "all", label: `All (${employees.length})` },
-                                    { key: "working", label: `🟢 Working (${employees.filter(e => e.isWorking).length})` },
-                                    { key: "not_working", label: `⚪ Not Working (${employees.filter(e => !e.isWorking).length})` },
                                 ].map(f => (
                                     <button key={f.key} className={`st-filter-btn${filter === f.key ? " active" : ""}`}
                                         onClick={() => setFilter(f.key)}>
@@ -1136,7 +1252,7 @@ export default function StatusTrackingPage() {
                                 )}
 
                                 {/* ── NOT WORKING section ── */}
-                                {(filter === "all" || filter === "not_working") && (
+                                {filter === "all" && (
                                     <div>
                                         <div className="st-section">
                                             {/* Section header */}

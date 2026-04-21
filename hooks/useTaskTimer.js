@@ -327,6 +327,7 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
                     isActive: true,
                     totalSeconds: sess.totalSeconds || 0,
                     lastStartTime: sess.lastStartTime || null,
+                    updatedAt: sess.updatedAt || null,
                     displaySeconds,
                 };
                 activeTimers.set(taskId, entry);
@@ -339,6 +340,7 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
                     isActive: false,
                     totalSeconds: sess.totalSeconds,
                     lastStartTime: null,
+                    updatedAt: sess.updatedAt || null,
                     displaySeconds: sess.totalSeconds,
                 });
             }

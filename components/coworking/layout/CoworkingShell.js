@@ -1267,7 +1267,6 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
   // ── Own profile picture — live Firestore listener ────────────────────────
-  const [ownProfilePicUrl, setOwnProfilePicUrl] = useState("");
   useEffect(() => {
     if (!employeeId) return;
     const unsub = onSnapshot(doc(firebaseDb, "cowork_employees", employeeId), (snap) => {
@@ -1301,7 +1300,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [activeChatReq, setActiveChatReq] = useState(null); // full request object for header
   const [chatThreads, setChatThreads] = useState({});
 
-  // ── Chat input state ──
+  // ── Own profile picture — live listener so it updates instantly after upload ──
+  const [ownProfilePicUrl, setOwnProfilePicUrl] = useState("");
   const [chatInput, setChatInput] = useState({});
   const [chatUploading, setChatUploading] = useState({});
   const chatEndRefs = useRef({});
@@ -1618,6 +1618,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         .cw-shell {
           display: flex;
           height: 100vh;
+          min-width: 320px;
           overflow: hidden;
           font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           background: #F0F2F5;

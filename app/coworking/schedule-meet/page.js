@@ -590,7 +590,7 @@ export default function MeetingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!loading && !user) router.push("/coworking-login");
+    if (!loading && !user) router.push("/");
   }, [user, loading, router]);
 
   useEffect(() => {

@@ -109,6 +109,42 @@ function getAvatarColors(name = "") {
   return AVATAR_COLORS[idx];
 }
 
+// ── Live (dynamic) deadline ───────────────────────────────────────────────────
+// Computes the wall-clock timestamp when this task will actually finish based
+// on the employee's real work/pause behavior, NOT the static dueDate from the
+// original proposal. Behavior:
+//   • Running   → lastStartTime + (estimate − totalSecondsAtResume)   (fixed during this run)
+//   • Paused    → pauseTime (=updatedAt when !isActive) + (estimate − totalSeconds)   (frozen)
+//   • Never started → now + estimate   (slides forward until they hit Play — "if started now")
+//   • No estimate → fall back to the static task.dueDate (legacy)
+// Both employee and CEO/TL see the same value because both sides read the same
+// timer session doc from Firestore (via useTaskTimer / useWatchEmployeeTimers).
+function computeLiveDeadline(task, sess) {
+  const E = Number(task?.deadlineWindowSecs) || 0;
+  if (!E) return task?.dueDate ? new Date(task.dueDate).getTime() : null;
+  const W = Number(sess?.totalSeconds) || 0;
+  const remainingMs = (E - W) * 1000;
+  if (sess?.isActive && sess?.lastStartTime) {
+    return sess.lastStartTime + remainingMs;
+  }
+  if (sess?.updatedAt && W > 0) {
+    return sess.updatedAt + remainingMs;
+  }
+  return Date.now() + remainingMs;
+}
+
+function fmtLiveDeadlineDate(task, sess) {
+  const ms = computeLiveDeadline(task, sess);
+  if (!ms) return null;
+  return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtLiveDeadlineDateTime(task, sess) {
+  const ms = computeLiveDeadline(task, sess);
+  if (!ms) return null;
+  return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 // Helper Functions
 function groupByDate(messages) {
   const groups = [];
@@ -558,7 +594,31 @@ function ReportCard({ report }) {
 
 
 
-/* ─── Detail Panel Body — Task.Co Card Style (shared desktop + mobile) ─── */
+/* ─── ReportDateGroup — collapsible date group for daily reports ─── */
+function ReportDateGroup({ dateLabel, reports }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{ marginBottom: 2 }}>
+      {/* Date header */}
+      <button onClick={() => setOpen(v => !v)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "#F8FAFC", border: "none", borderTop: "1px solid #E5E7EB", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}>
+          <path d="M2.5 1.5l5 3.5-5 3.5" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", letterSpacing: "0.04em" }}>📅 {dateLabel}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#94A3B8", fontWeight: 600 }}>{reports.length} report{reports.length !== 1 ? "s" : ""}</span>
+      </button>
+      {open && (
+        <div style={{ padding: "4px 0" }}>
+          {reports.map((r, i) => <ReportCard key={r.id || i} report={r} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
 
 /* ─── TaskRequestsPanel ─── */
 function TaskRequestsPanel({ task, employeeId, employeeName, isCEO, isTL, onNewRequest }) {
@@ -786,9 +846,53 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                   <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)" }}>
                     {[
                       task.startDate ? new Date(task.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null,
-                      task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null
+                      fmtLiveDeadlineDate(task, getTimerSession ? getTimerSession(task.taskId) : null)
                     ].filter(Boolean).join(" – ")}
                   </span>
+                  {/* Live clock-time deadline — visible at every task state so employee & manager
+                      both see the same "Due at 10:30 AM" that shifts with pause/resume. */}
+                  {task.dueDate && (() => {
+                    const _ms = computeLiveDeadline(task, getTimerSession ? getTimerSession(task.taskId) : null);
+                    if (!_ms) return null;
+                    const _d = new Date(_ms);
+                    const _now = new Date();
+                    const sameDay = _d.toDateString() === _now.toDateString();
+                    const dayLabel = sameDay ? "Today"
+                      : (_d.toDateString() === new Date(_now.getTime() + 86400000).toDateString()) ? "Tomorrow"
+                        : _d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                    const timeLabel = _d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+                    const isOver = _ms < Date.now();
+                    // Theme shifts subtly when overdue — red tint instead of neutral
+                    const theme = isOver
+                      ? { bg: "#FEF2F2", border: "#FECDD3", chipBg: "#FEE2E2", chipColor: "#991B1B", timeColor: "#B91C1C", dayColor: "#B91C1C", iconColor: "#B91C1C" }
+                      : { bg: "#F8FAFC", border: "#E2E8F0", chipBg: "#EEF2FF", chipColor: "#4F46E5", timeColor: "#0F172A", dayColor: "#64748B", iconColor: "#64748B" };
+                    return (
+                      <div style={{
+                        display: "inline-flex", alignItems: "center", gap: 8,
+                        padding: "5px 10px 5px 8px", borderRadius: 8,
+                        background: theme.bg, border: `1px solid ${theme.border}`,
+                        width: "fit-content",
+                      }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
+                          padding: "2px 7px", borderRadius: 99,
+                          background: theme.chipBg, color: theme.chipColor,
+                          lineHeight: 1.4, flexShrink: 0,
+                        }}>
+                          {isOver ? "Overdue" : "Due"}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: theme.timeColor, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                          {timeLabel}
+                        </span>
+                        <span style={{ fontSize: 11, color: theme.dayColor, lineHeight: 1 }}>
+                          · {dayLabel}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {(task.dueDate || task.deadlineWindowSecs) && <DeadlineBadge dueDate={task.dueDate} deadlineWindowSecs={task.deadlineWindowSecs || 0} workedSecs={getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0} />}
                 </div>
               </Field>
@@ -824,7 +928,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                         </span>
                       )}
                       {!timerStarted && (
-                        <span style={{ fontSize: 11, color: "#94A3B8" }}></span>
+                        <span style={{ fontSize: 11, color: "#94A3B8" }}>— starts when timer runs</span>
                       )}
                     </div>
                     {timerStarted && w > 0 && (
@@ -927,8 +1031,9 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                   const secs = getDisplaySeconds(task.taskId);
                   const sess = getTimerSession(task.taskId);
                   const hasTime = (sess?.totalSeconds || 0) > 0 || isRunningThis || secs > 0;
-                  // Block timer when awaiting deadline approval
-                  const timerBlocked = task.status === "pending_deadline_approval";
+                  // Block timer until deadline is fully approved
+                  // Timer ONLY allowed when deadline is approved or task already in progress
+                  const timerBlocked = !["deadline_approved", "confirmed", "in_progress", "done"].includes(task.status);
 
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -939,7 +1044,12 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                           {timerBlocked && (
                             <div style={{ fontSize: 10, fontWeight: 600, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5 }}>
                               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                              Timer locked — waiting for deadline approval
+                              {task.status === "open"
+                                ? "Timer locked — propose a deadline first"
+                                : task.status === "pending_employee_deadline_confirmation"
+                                  ? "Timer locked — respond to TL's deadline suggestion"
+                                  : "Timer locked — waiting for deadline approval"
+                              }
                             </div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -986,6 +1096,21 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                             <span style={{ fontSize: 11, fontWeight: 600, color: "#0F172A" }}>{watchedInfo.employeeName}</span>
                             <span style={{ fontSize: 11, color: isWorking ? "#16A34A" : "#94A3B8" }}>{isWorking ? "working now" : "paused"}</span>
                             <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: isWorking ? "#16A34A" : "#64748B", marginLeft: "auto" }}>{formatTimeHMS(watchedInfo.displaySeconds)}</span>
+                            {/* Clear timer button — only for paused sessions */}
+                            {!isWorking && (
+                              <button
+                                title="Clear this timer record"
+                                onClick={async () => {
+                                  if (!confirm(`Clear ${watchedInfo.employeeName}'s timer for this task? This removes the recorded time.`)) return;
+                                  try {
+                                    const { doc: _doc, deleteDoc } = await import("firebase/firestore");
+                                    await deleteDoc(_doc(firebaseDb, "cowork_task_timers", watchedInfo.employeeId, "sessions", task.taskId));
+                                  } catch (e) { console.error("clear timer:", e.message); }
+                                }}
+                                style={{ width: 20, height: 20, borderRadius: 4, border: "1px solid #FECDD3", background: "#FEF2F2", color: "#EF4444", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                                ✕
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
@@ -1001,9 +1126,11 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 const df = deadlineFlow || {};
                 const status = task.status;
 
-                // PRIORITY 1: If dueDate/deadline is set → show Confirm (unless pending approval)
-                const hasDueDate = !!(task.dueDate || task.deadlineWindowSecs);
-                const isPendingApproval = status === "pending_deadline_approval";
+                // PRIORITY 1: Show Confirm ONLY when deadline is fully approved by TL/CEO
+                // hasDueDate = deadline was approved (not just proposed/pending)
+                const deadlineApprovedStatuses = ["deadline_approved", "confirmed", "in_progress", "done"];
+                const hasDueDate = deadlineApprovedStatuses.includes(status);
+                const isPendingApproval = ["pending_deadline_approval", "pending_employee_deadline_confirmation"].includes(status);
 
                 // ── Deadline passed = ONLY when timer has run AND worked >= window ──
                 // If timer never started (workedSecs === 0), deadline NEVER triggers
@@ -1110,7 +1237,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
-                      ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
+                      ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
                     </div>}
                     <div style={{ fontSize: 10, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
                   </div>
@@ -1121,7 +1248,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#DCFCE7", border: "2px solid #16A34A", color: "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>3</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ Deadline Approved</span>
                     </div>
-                    {task.dueDate && <div style={{ fontSize: 11, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8 }}>
+                    {task.dueDate && <div style={{ fontSize: 11, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 4 }}>
                       {(() => {
                         const _wk = task.deadlineWindowSecs || 0;
                         const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
@@ -1131,6 +1258,14 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                         return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
                       })()}
                     </div>}
+                    {task.dueDate && (() => {
+                      const _live = fmtLiveDeadlineDateTime(task, getTimerSession ? getTimerSession(task.taskId) : null);
+                      return _live ? (
+                        <div style={{ fontSize: 10, color: "#64748B", marginBottom: 8 }}>
+                          Due at <strong style={{ color: "#166534" }}>{_live}</strong>
+                        </div>
+                      ) : null;
+                    })()}
                     <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
                       <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                       Confirm & Accept Task
@@ -1148,7 +1283,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 8 }}>📋 Deadline Proposal — Needs Your Approval</div>
                     {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
                       <span style={{ fontWeight: 500 }}>Proposed by {task.proposedDeadlineByName}:</span><br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now</span>
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} needed</span>
                     </div>}
                     {!df.showRejectInput ? (
                       <div style={{ display: "flex", gap: 7 }}>
@@ -1208,36 +1343,33 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 // Only show overdue/near AFTER timer has been started at least once
                 const _timerStarted = _workedSecs > 0;
                 const isOverdue = _timerStarted && _remaining !== null && _remaining < 0;
-                const isNear = _timerStarted && _remaining !== null && !isOverdue && _remaining < 7200; // within 2h
+                // isNear = timer started AND less than 20% of the window remains (or <30min if window is small)
+                const _nearThreshold = _window > 0 ? Math.max(1800, _window * 0.2) : 7200;
+                const isNear = _timerStarted && _remaining !== null && !isOverdue && _remaining < _nearThreshold;
                 return (
                   <div style={{ marginBottom: 8 }}>
                     {/* Near-deadline warning only (no button yet) */}
                     {isNear && (
                       <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
-                        ⏰ Deadline in less than 24h
-                        {task.dueDate && <span style={{ fontWeight: 700 }}> · {(() => {
-                          const _wk = task.deadlineWindowSecs || 0;
-                          const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                          const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
+                        ⏰ Almost out of time
+                        <span style={{ fontWeight: 700 }}> · ⏱ {(() => {
+                          const _rem = (_window > 0 ? _window - _workedSecs : 0);
                           const _abs = Math.round(Math.abs(_rem));
-                          const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
-                          return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
-                        })()}</span>}
+                          if (_abs < 3600) return `${Math.round(_abs / 60)}m left`;
+                          return `${Math.round(_abs / 3600)}h left`;
+                        })()}</span>
                       </div>
                     )}
                     {/* Overdue warning + Request Extension button — ONLY after deadline passed */}
                     {isOverdue && (
                       <>
                         <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#991B1B", display: "flex", alignItems: "center", gap: 5 }}>
-                          ⚠️ Deadline passed!
-                          {task.dueDate && <span style={{ fontWeight: 700 }}> · {(() => {
-                            const _wk = task.deadlineWindowSecs || 0;
-                            const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                            const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
-                            const _abs = Math.round(Math.abs(_rem));
-                            const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
-                            return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
-                          })()}</span>}
+                          ⚠️ Time exceeded!
+                          <span style={{ fontWeight: 700 }}> · ⏱ {(() => {
+                            const _over = _workedSecs - _window;
+                            if (_over < 3600) return `${Math.round(_over / 60)}m over`;
+                            return `${Math.round(_over / 3600)}h over`;
+                          })()}</span>
                         </div>
                         <button onClick={() => df.setShowExtend?.(true)}
                           style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
@@ -1293,7 +1425,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
                       <strong>{task.proposedDeadlineByName}</strong> proposed:<br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now</span>
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} needed</span>
                     </div>}
 
                     {!df.showRejectInput && !df.showCounterForm ? (
@@ -1369,16 +1501,22 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 return (
                   <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                      📅 {task.tlCounterDeadlineByName || "TL"} Suggested a Date
+                      📅 {task.tlCounterDeadlineByName || "TL"} Suggested a Duration
                     </div>
-                    {task.tlCounterDeadline && (
+                    {(task.tlCounterWindowSecs || task.tlCounterDeadline) && (
                       <div style={{ fontWeight: 700, fontSize: 13, color: "#4C1D95", marginBottom: 4 }}>
                         {(() => {
-                          const _ms = new Date(task.tlCounterDeadline).getTime() - Date.now();
-                          const _s = Math.round(Math.abs(_ms) / 1000);
-                          const _fmt = _s < 3600 ? `${Math.round(_s / 60)}m` : _s < 86400 ? `${Math.round(_s / 3600)}h` : `${Math.round(_s / 86400)}d`;
-                          return _ms < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                          // Show the window duration — not wall-clock countdown
+                          const w = task.tlCounterWindowSecs
+                            || (task.tlCounterDeadline ? Math.round((new Date(task.tlCounterDeadline).getTime() - (task.tlCounterDeadlineAt?.seconds ? task.tlCounterDeadlineAt.seconds * 1000 : Date.now())) / 1000) : 0);
+                          if (w <= 0) return "⏱ Duration set";
+                          if (w < 3600) return `⏱ ${Math.round(w / 60)}m to complete`;
+                          if (w < 86400) return `⏱ ${Math.round(w / 3600)}h to complete`;
+                          return `⏱ ${Math.round(w / 86400)}d to complete`;
                         })()}
+                        <div style={{ fontSize: 10, color: "#7C3AED", fontWeight: 500, marginTop: 2 }}>
+                          ⏸ Countdown starts when you press Play
+                        </div>
                       </div>
                     )}
                     {task.tlCounterDeadlineMessage && (
@@ -1529,7 +1667,21 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
             ? <div style={{ display: "flex", justifyContent: "center", padding: 28 }}><GwSpinner /></div>
             : dailyReports.length === 0
               ? <div className="gv-empty"><div className="gv-empty-icon">📊</div><p className="gv-empty-t">No reports</p><p className="gv-empty-s">Daily reports will appear here.</p></div>
-              : dailyReports.map((r, i) => <ReportCard key={r.id || i} report={r} />)
+              : (() => {
+                // Group reports by date (newest first)
+                const grouped = {};
+                [...dailyReports]
+                  .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0))
+                  .forEach(r => {
+                    const ts = r.createdAt?.seconds ? r.createdAt.seconds * 1000 : (r.createdAt ? new Date(r.createdAt).getTime() : Date.now());
+                    const key = new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(r);
+                  });
+                return Object.entries(grouped).map(([dateKey, reports]) => (
+                  <ReportDateGroup key={dateKey} dateLabel={dateKey} reports={reports} />
+                ));
+              })()
           }
         </div>
       )}
@@ -1635,6 +1787,10 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
+
+  // ── Drag & drop state ────────────────────────────────────────────────────
+  const dragTaskIdRef = useRef(null);
+  const dragOverIdRef = useRef(null);
   const [dailyReports, setDailyReports] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState("info");
@@ -1648,6 +1804,11 @@ export default function TasksPage() {
   const [commitModal, setCommitModal] = useState(null); // { taskId, taskTitle }
   const [commitMessage, setCommitMessage] = useState("");
   const [savingCommit, setSavingCommit] = useState(false);
+  // Attachments added in the pause-timer modal — each: { name, url, downloadUrl, mimeType, size, fileId }
+  const [commitAttachments, setCommitAttachments] = useState([]);
+  const [commitUploading, setCommitUploading] = useState(false);
+  const [commitDragging, setCommitDragging] = useState(false);
+  const commitFileInputRef = useRef(null);
 
   // ── Draft chat + deadline flow state ─────────────────────────────────────────
   const [draftMessages, setDraftMessages] = useState([]);
@@ -1805,6 +1966,11 @@ export default function TasksPage() {
   const isCEO = role === "ceo";
   const isTL = role === "tl";
   const isEmployee = role === "employee";
+  const canDrag = isCEO || isTL; // employees see order but cannot drag
+
+  // Drag cross-level warning modal
+  const [dragWarnModal, setDragWarnModal] = useState(null);
+  // { dragId, dropOnTaskId, dragTitle, dropTitle, newParentId, isRootMove }
 
   // ── Task Timer (start/pause per task, one active at a time) ─────────────────
   const {
@@ -1824,6 +1990,7 @@ export default function TasksPage() {
       // Another task is running — show commit modal, then start new task after
       setCommitModal({ taskId: timerActiveTaskId, taskTitle: allTaskMapRef.current?.get(timerActiveTaskId)?.title || timerActiveTaskId, nextTaskId: newTaskId, nextTaskTitle: newTaskTitle });
       setCommitMessage("");
+      setCommitAttachments([]);
     } else {
       timerStart(newTaskId, newTaskTitle);
     }
@@ -1832,9 +1999,159 @@ export default function TasksPage() {
   const handleTimerPause = useCallback((taskId, taskTitle) => {
     setCommitModal({ taskId, taskTitle });
     setCommitMessage("");
+    setCommitAttachments([]);
   }, []);
 
+  // Upload commit-modal files to Google Drive via /cowork/upload/pdf (accepts any non-executable).
+  // Shared by the <input type="file"> onChange AND the drop-zone onDrop so logic stays DRY.
+  const uploadCommitFiles = useCallback(async (files) => {
+    const list = Array.from(files || []).filter(f => f && (f.size > 0 || f.type));
+    if (!list.length) return;
+    setCommitUploading(true);
+    try {
+      const u = firebaseAuth.currentUser;
+      if (!u) throw new Error("Not authenticated");
+      const token = await u.getIdToken();
+      for (const file of list) {
+        if (file.size > 50 * 1024 * 1024) {
+          console.warn("[commit upload] skipping — 50MB limit:", file.name);
+          continue;
+        }
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${BASE}/cowork/upload/pdf`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+        setCommitAttachments(prev => [...prev, {
+          name: data.fileName || file.name,
+          url: data.viewUrl || data.url || "",
+          downloadUrl: data.downloadUrl || "",
+          mimeType: data.mimeType || file.type || "",
+          size: Number(data.size) || file.size || 0,
+          fileId: data.fileId || "",
+        }]);
+      }
+    } catch (err) {
+      console.error("[commit upload] error:", err.message);
+      alert("Upload failed: " + err.message);
+    } finally {
+      setCommitUploading(false);
+    }
+  }, []);
+
+  // Close the commit modal without saving. Disabled while a save or upload is in flight
+  // so the user can't orphan a half-written commit.
+  const closeCommitModal = useCallback(() => {
+    if (savingCommit || commitUploading) return;
+    setCommitModal(null);
+    setCommitMessage("");
+    setCommitAttachments([]);
+    setCommitDragging(false);
+  }, [savingCommit, commitUploading]);
+
+  // Esc dismisses the commit modal (same guard as the × button).
+  useEffect(() => {
+    if (!commitModal) return;
+    const h = (e) => { if (e.key === "Escape") closeCommitModal(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [commitModal, closeCommitModal]);
+
   // ── Update priority inline from detail panel ──────────────────────────────
+  // ── Drag & Drop — reorder tasks by updating `order` field in Firestore ────
+  const handleDragStart = useCallback((taskId) => {
+    dragTaskIdRef.current = taskId;
+  }, []);
+
+  const handleDrop = useCallback(async (dropOnTaskId) => {
+    const dragId = dragTaskIdRef.current;
+    dragTaskIdRef.current = null;
+    dragOverIdRef.current = null;
+    if (!dragId || dragId === dropOnTaskId) return;
+
+    const dragTask = allTaskMapRef.current.get(dragId);
+    const dropTask = allTaskMapRef.current.get(dropOnTaskId);
+    if (!dragTask || !dropTask) return;
+
+    // ── SAME LEVEL vs CROSS-LEVEL ──
+    const dragParent = dragTask.parentTaskId || null;
+    const dropParent = dropTask.parentTaskId || null;
+    const isCrossLevel = dragParent !== dropParent;
+
+    if (isCrossLevel) {
+      // Show warning modal — let user confirm before changing hierarchy
+      const isRootMove = !dropParent; // dropping onto a root-level task
+      setDragWarnModal({
+        dragId,
+        dropOnTaskId,
+        dragTitle: dragTask.title || dragId,
+        dropTitle: dropTask.title || dropOnTaskId,
+        newParentId: dropParent,
+        isRootMove,
+      });
+      return; // wait for user confirmation
+    }
+
+    // Same level — proceed directly
+    await executeDrop(dragId, dropOnTaskId, dropParent);
+  }, []);
+
+  // ── Execute the actual reorder (called after same-level drop OR warning confirmation) ──
+  const executeDrop = useCallback(async (dragId, dropOnTaskId, parentId) => {
+    const dragTask = allTaskMapRef.current.get(dragId);
+    const dropTask = allTaskMapRef.current.get(dropOnTaskId);
+    if (!dragTask || !dropTask) return;
+    const rawSiblings = [...allTaskMapRef.current.values()]
+      .filter(t => (t.parentTaskId || null) === parentId);
+    const hasOrder = rawSiblings.some(t => t.order !== undefined);
+    const siblings = rawSiblings.sort((a, b) => {
+      if (hasOrder) {
+        const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
+        const bo = b.order !== undefined ? b.order : 90000 + (b.priority ?? 5) * 1000;
+        return ao - bo;
+      }
+      const pa = a.priority ?? 5, pb = b.priority ?? 5;
+      if (pa !== pb) return pa - pb;
+      return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+    });
+
+    // Find positions
+    const dropIdx = siblings.findIndex(t => t.taskId === dropOnTaskId);
+    if (dropIdx < 0) return;
+
+    // Build new order: insert dragTask before dropTask
+    const others = siblings.filter(t => t.taskId !== dragId);
+    others.splice(dropIdx, 0, { ...dragTask, parentTaskId: parentId });
+
+    // Optimistic update + block live listener for 8s so it doesn't overwrite
+    const updates = others.map((t, i) => ({ taskId: t.taskId, order: i * 10, parentTaskId: parentId }));
+    const now8 = Date.now() + 8000;
+    updates.forEach(u => { ignoreLiveUntilRef.current[u.taskId] = now8; });
+
+    setAllTasks(prev => {
+      const map = new Map(prev.map(t => [t.taskId, t]));
+      updates.forEach(u => { const t = map.get(u.taskId); if (t) map.set(u.taskId, { ...t, order: u.order, parentTaskId: u.parentTaskId }); });
+      return [...map.values()];
+    });
+    // Also update allTaskMapRef immediately
+    updates.forEach(u => {
+      const existing = allTaskMapRef.current.get(u.taskId);
+      if (existing) allTaskMapRef.current.set(u.taskId, { ...existing, order: u.order, parentTaskId: u.parentTaskId });
+    });
+
+    // Persist to Firestore
+    try {
+      const { writeBatch: _wb, doc: _doc } = await import("firebase/firestore");
+      const batch = _wb(firebaseDb);
+      updates.forEach(u => batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), { order: u.order, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }));
+      await batch.commit();
+    } catch (e) { console.error("[drag] batch update:", e.message); }
+  }, []);
+
   const handleUpdatePriority = useCallback(async (taskId, newPriority) => {
     const p = Math.max(1, Math.min(10, Number(newPriority)));
     if (!taskId || isNaN(p)) return;
@@ -1883,6 +2200,16 @@ export default function TasksPage() {
       const elapsed = Math.floor((Date.now() - start) / 1000);
       const secondsWorked = base + elapsed;
       const msg = commitMessage.trim();
+      // Attachments are uploaded (Google Drive) before this handler runs via the
+      // file-input handler; here we just persist the array with the commit doc.
+      const attachments = (commitAttachments || []).map(a => ({
+        name: a.name || "attachment",
+        url: a.url || "",
+        downloadUrl: a.downloadUrl || "",
+        mimeType: a.mimeType || "",
+        size: a.size || 0,
+        fileId: a.fileId || "",
+      }));
 
       // Write commit log to Firestore
       const { addDoc: _addDoc, collection: _col, serverTimestamp: _st } = await import("firebase/firestore");
@@ -1894,6 +2221,8 @@ export default function TasksPage() {
         empId: employeeId,
         empName: employeeName,
         hasMessage: !!msg,
+        attachments,
+        hasAttachments: attachments.length > 0,
       });
     } catch (e) {
       console.error("[commit] write error:", e.message);
@@ -1905,12 +2234,13 @@ export default function TasksPage() {
       const nextTitle = commitModal?.nextTaskTitle;
       setCommitModal(null);
       setCommitMessage("");
+      setCommitAttachments([]);
       setSavingCommit(false);
       if (next) {
         setTimeout(() => timerStart(next, nextTitle), 200);
       }
     }
-  }, [commitModal, commitMessage, employeeId, employeeName, timerPause, timerSessionMap]);
+  }, [commitModal, commitMessage, commitAttachments, employeeId, employeeName, timerPause, timerSessionMap]);
 
   // ── TL counter-propose deadline ──────────────────────────────────────────────
   const handleTlCounterPropose = useCallback(async () => {
@@ -1918,15 +2248,16 @@ export default function TasksPage() {
     setCounterBusy(true);
     const n = parseFloat(counterDurationVal);
     const ms = counterDurationUnit === "minutes" ? n * 60000 : counterDurationUnit === "days" ? n * 86400000 : n * 3600000;
+    const windowSecs = Math.round(ms / 1000);
     const dt = new Date(Date.now() + ms).toISOString();
     // Optimistic: immediately show pending_employee_deadline_confirmation
-    const optimistic = { status: "pending_employee_deadline_confirmation", tlCounterDeadline: dt, tlCounterDeadlineMessage: counterMessage.trim(), tlCounterDeadlineByName: employeeName };
+    const optimistic = { status: "pending_employee_deadline_confirmation", tlCounterDeadline: dt, tlCounterWindowSecs: windowSecs, tlCounterDeadlineMessage: counterMessage.trim(), tlCounterDeadlineByName: employeeName };
     setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
     setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
     ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
     setShowCounterForm(false); setCounterDurationVal(""); setCounterDurationUnit("hours"); setCounterMessage("");
     try {
-      await taskForwardApi.tlCounterDeadline(selectedTask.taskId, dt, counterMessage.trim());
+      await taskForwardApi.tlCounterDeadline(selectedTask.taskId, dt, counterMessage.trim(), windowSecs);
     } catch (e) {
       console.error(e);
       // Revert on failure
@@ -1962,7 +2293,10 @@ export default function TasksPage() {
       const n = parseFloat(empCounterDurationVal) || 1;
       const ms = empCounterDurationUnit === "minutes" ? n * 60000 : empCounterDurationUnit === "days" ? n * 86400000 : n * 3600000;
       const dt = new Date(Date.now() + ms).toISOString();
-      const optimistic = { status: "pending_deadline_approval", proposedDeadline: dt, proposedDeadlineByName: employeeName, tlCounterDeadline: null };
+      // Flip deadlineWindowSecs along with the proposal so the "X min/h requested" badge
+      // shows the NEW number instantly instead of briefly rendering the old value.
+      const newWindowSecs = Math.round(ms / 1000);
+      const optimistic = { status: "pending_deadline_approval", proposedDeadline: dt, proposedDeadlineByName: employeeName, tlCounterDeadline: null, tlCounterWindowSecs: null, deadlineWindowSecs: newWindowSecs };
       ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
       setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
       setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
@@ -1970,7 +2304,7 @@ export default function TasksPage() {
       setEmpCounterDurationVal(""); setEmpCounterDurationUnit("hours"); setEmpCounterMsg("");
       try {
         await taskForwardApi.respondToTlCounter(selectedTask.taskId, false, "Employee wants a different duration");
-        await taskForwardApi.proposeDeadline(selectedTask.taskId, dt, 0);
+        await taskForwardApi.proposeDeadline(selectedTask.taskId, dt, 0, newWindowSecs);
       } catch (e) { console.error("[respond-counter]", e.message); }
     }
     setRespondBusy(false);
@@ -2263,9 +2597,13 @@ export default function TasksPage() {
         }
       }
 
-      setAllTasks(tasks);
+      // Preserve any locally-set `order` values (from drag-drop) not yet synced from backend
+      const existingOrderMap = new Map(allTaskMapRef.current ? [...allTaskMapRef.current.entries()].map(([id, t]) => [id, t.order]) : []);
+      const tasksWithOrder = tasks.map(t => existingOrderMap.has(t.taskId) ? { ...t, order: existingOrderMap.get(t.taskId) } : t);
+
+      setAllTasks(tasksWithOrder);
       // fullMap includes allTasks + intermediate chain nodes so TblRow can expand deep trees
-      const fullMap = new Map(tasks.map(t => [t.taskId, t]));
+      const fullMap = new Map(tasksWithOrder.map(t => [t.taskId, t]));
       allFetchedChain.forEach(t => fullMap.set(t.taskId, t));
       allTaskMapRef.current = fullMap;
       setAllTaskMap(fullMap);
@@ -2320,7 +2658,7 @@ export default function TasksPage() {
       // Load draft messages from task details
       if (task.draftChatMessages?.length) setDraftMessages(task.draftChatMessages);
       // Set default chat tab: draft if pre-confirmed, normal if post-confirmed
-      const preConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(task.status);
+      const preConfirmed = !["confirmed", "in_progress", "done"].includes(task.status); // chat locked until task confirmed
       setChatTabMode(preConfirmed ? "draft" : "normal");
       // Update messages from REST only if cache was empty
       if (!chatCacheRef.current[taskId]?.length && task.chatMessages?.length) {
@@ -2563,20 +2901,27 @@ export default function TasksPage() {
     if (!selectedTask?.taskId || !proposedDurationVal) return;
     const proposedDate = durationToDate(proposedDurationVal, proposedDurationUnit);
     if (!proposedDate) return;
+    // Compute the window in seconds from the same inputs so the optimistic UI shows the
+    // NEW duration immediately (otherwise the "X min/h requested" badge keeps rendering
+    // the stale deadlineWindowSecs from the previous proposal until Firestore catches up).
+    const _n = parseFloat(proposedDurationVal) || 0;
+    const _windowSecs = proposedDurationUnit === "minutes" ? Math.round(_n * 60)
+      : proposedDurationUnit === "days" ? Math.round(_n * 86400)
+        : Math.round(_n * 3600);
     setProposingDeadline(true);
     // Optimistic: show pending_deadline_approval immediately
-    const optimistic = { status: "pending_deadline_approval", proposedDeadline: proposedDate, proposedDeadlineByName: employeeName };
+    const optimistic = { status: "pending_deadline_approval", proposedDeadline: proposedDate, proposedDeadlineByName: employeeName, deadlineWindowSecs: _windowSecs };
     ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
     setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
     setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
     try {
       const workedSecs = getDisplaySeconds(selectedTask.taskId) || 0;
-      await taskForwardApi.proposeDeadline(selectedTask.taskId, proposedDate, workedSecs);
+      await taskForwardApi.proposeDeadline(selectedTask.taskId, proposedDate, workedSecs, _windowSecs);
     } catch (e) {
       alert(e.message);
       // Revert on failure
-      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: selectedTask.status } : t));
-      setSelectedTask(prev => prev ? { ...prev, status: selectedTask.status } : prev);
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: selectedTask.status, deadlineWindowSecs: selectedTask.deadlineWindowSecs } : t));
+      setSelectedTask(prev => prev ? { ...prev, status: selectedTask.status, deadlineWindowSecs: selectedTask.deadlineWindowSecs } : prev);
     }
     finally { setProposingDeadline(false); }
   };
@@ -2843,7 +3188,7 @@ export default function TasksPage() {
   // Auto-switch chat tab based on task status
   useEffect(() => {
     if (!selectedTask) return;
-    const preConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(selectedTask.status);
+    const preConfirmed = !["confirmed", "in_progress", "done"].includes(selectedTask.status);
     setChatTabMode(preConfirmed ? "draft" : "normal");
   }, [selectedTask?.taskId, selectedTask?.status]);
   useEffect(() => {
@@ -3323,8 +3668,14 @@ export default function TasksPage() {
     .gv-tbl-row.selected { background:var(--p-lt); }
     .gv-tbl-row.subtask-row { background:#FAFBFF; }
     .gv-tbl-row.subtask-row:hover { background:#F0F2FA; }
-    .gv-tbl-drag { width:16px; display:flex; align-items:center; justify-content:center; color:var(--border2); flex-shrink:0; opacity:0; transition:opacity 0.1s; }
-    .gv-tbl-row:hover .gv-tbl-drag { opacity:1; }
+    .gv-tbl-drag { width:18px; display:flex; align-items:center; justify-content:center; color:#94A3B8; flex-shrink:0; opacity:0.4; transition:opacity 0.15s, color 0.15s; cursor:grab; border-radius:4px; }
+    .gv-tbl-row .gv-tbl-drag { opacity: 0.3; } .gv-tbl-row:hover .gv-tbl-drag { opacity:1; color:#4F46E5; background:rgba(79,70,229,0.08); }
+    .gv-dragging { opacity:0.3 !important; }
+    .gv-drag-over { box-shadow:inset 0 2px 0 0 #4F46E5 !important; background:rgba(79,70,229,0.05) !important; }
+    .gv-tbl-row.gv-dragging { opacity:0.4 !important; background:#EEF2FF !important; }
+    .gv-tbl-row.gv-drag-over { background:#EEF2FF !important; border-top:2px solid #4F46E5 !important; position:relative; }
+    .gv-tbl-row.gv-drag-over::before { content:""; position:absolute; left:8px; right:8px; top:-1px; height:2px; background:#4F46E5; border-radius:99px; pointer-events:none; }
+    .gv-tbl-row.gv-drag-over .gv-tbl-drag { opacity:1; color:#4F46E5; }
     .gv-tbl-check { width:22px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .gv-tbl-expand { width:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .gv-tbl-row .col-name  { flex:2; min-width:0; padding:4px 10px; display:flex; align-items:flex-start; gap:4px; border-right:1px solid var(--border); min-height:28px; }
@@ -3666,6 +4017,59 @@ export default function TasksPage() {
       <style>{STYLES}</style>
 
       {/* ── Priority changed toast — top-right ── */}
+      {/* ── Drag cross-level warning modal ── */}
+      {dragWarnModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)",
+          zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(3px)", padding: 16, fontFamily: "var(--font)",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 16, width: "min(420px,96vw)",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.22)", overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #FEF3C7", background: "#FFFBEB" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 9, background: "#FEF3C7", border: "1px solid #FDE68A", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>⚠️</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#92400E" }}>Move task to different location?</div>
+                  <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>This will change the task hierarchy</div>
+                </div>
+              </div>
+            </div>
+            {/* Body */}
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 12 }}>
+                <strong>"{dragWarnModal.dragTitle}"</strong> will be moved{" "}
+                {dragWarnModal.isRootMove
+                  ? <span>to the <strong>root level</strong> (becomes a parent task)</span>
+                  : <span>under <strong>"{dragWarnModal.dropTitle}"</strong>'s parent</span>
+                }.
+              </div>
+              <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 9, padding: "10px 14px", fontSize: 12, color: "#166534" }}>
+                ✅ <strong>No data will be lost</strong> — all messages, reports, timer history, and attachments stay intact. Only the position changes.
+              </div>
+            </div>
+            {/* Footer */}
+            <div style={{ padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end", borderTop: "1px solid #F1F5F9" }}>
+              <button onClick={() => setDragWarnModal(null)}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#F9FAFB", color: "#64748B", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel — keep position
+              </button>
+              <button onClick={() => {
+                const { dragId, dropOnTaskId, newParentId } = dragWarnModal;
+                setDragWarnModal(null);
+                executeDrop(dragId, dropOnTaskId, newParentId);
+              }}
+                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#D97706", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Yes, move it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {priorityToast && (
         <div style={{
           position: "fixed", top: 20, right: 24, zIndex: 9999,
@@ -3792,8 +4196,16 @@ export default function TasksPage() {
             return matchQ && matchSt && matchDept && matchEmp && matchDate;
           });
 
-          // Sort by priority (1=highest first, 10=lowest last), then newer first
+          // Sort: if ANY task has order set, sort all by order (use priority*1000+created as fallback)
+          // This ensures drag order is always respected even for mixed old/new tasks
+          const hasOrderSet = filteredRoots.some(t => t.order !== undefined);
           filteredRoots.sort((a, b) => {
+            if (hasOrderSet) {
+              // tasks with order set sort by order; tasks without order go to end sorted by priority
+              const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
+              const bo = b.order !== undefined ? b.order : 90000 + (b.priority ?? 5) * 1000;
+              if (ao !== bo) return ao - bo;
+            }
             const pa = a.priority ?? 5, pb = b.priority ?? 5;
             if (pa !== pb) return pa - pb;
             return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
@@ -3875,13 +4287,66 @@ export default function TasksPage() {
               <>
                 <div className={`gv-tbl-row${isSel ? " selected" : ""}${isSubtask ? " subtask-row" : ""}`}
                   style={{ paddingLeft: 8 + depth * 18 }}
+                  draggable={canDrag}
+                  onDragStart={e => {
+                    if (!canDrag) { e.preventDefault(); return; }
+                    dragTaskIdRef.current = t.taskId;
+                    dragOverIdRef.current = null;
+                    e.dataTransfer.effectAllowed = "move";
+                    // Use task title as ghost — NO setState to avoid re-render killing drag
+                    const ghost = document.createElement("div");
+                    ghost.textContent = "↕ " + (t.title || "Task");
+                    ghost.style.cssText = "position:fixed;top:-999px;left:-999px;background:#4F46E5;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;font-family:inherit;white-space:nowrap;box-shadow:0 4px 16px rgba(79,70,229,0.4);pointer-events:none;";
+                    document.body.appendChild(ghost);
+                    e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 16);
+                    setTimeout(() => ghost.remove(), 100);
+                    // Mark dragging via DOM class only — no setState
+                    e.currentTarget.classList.add("gv-dragging");
+                    e.currentTarget.dataset.dragSrc = t.taskId;
+                  }}
+                  onDragOver={e => {
+                    e.preventDefault();
+                    if (!canDrag || dragTaskIdRef.current === t.taskId) {
+                      e.dataTransfer.dropEffect = "none";
+                      return;
+                    }
+                    e.dataTransfer.dropEffect = "move";
+                    // Only update if target changed — via DOM class manipulation, no setState
+                    if (dragOverIdRef.current !== t.taskId) {
+                      if (dragOverIdRef.current) {
+                        document.querySelectorAll(".gv-drag-over").forEach(el => el.classList.remove("gv-drag-over"));
+                      }
+                      dragOverIdRef.current = t.taskId;
+                      e.currentTarget.classList.add("gv-drag-over");
+                    }
+                  }}
+                  onDragLeave={e => {
+                    if (!e.currentTarget.contains(e.relatedTarget)) {
+                      e.currentTarget.classList.remove("gv-drag-over");
+                      if (dragOverIdRef.current === t.taskId) dragOverIdRef.current = null;
+                    }
+                  }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove("gv-drag-over");
+                    document.querySelectorAll(".gv-dragging").forEach(el => el.classList.remove("gv-dragging"));
+                    const dropTarget = t.taskId;
+                    dragOverIdRef.current = null;
+                    handleDrop(dropTarget);
+                  }}
+                  onDragEnd={e => {
+                    e.currentTarget.classList.remove("gv-dragging");
+                    document.querySelectorAll(".gv-drag-over").forEach(el => el.classList.remove("gv-drag-over"));
+                    dragTaskIdRef.current = null;
+                    dragOverIdRef.current = null;
+                  }}
                   onClick={e => {
                     // Don't select task if expand button was clicked
                     if (e.target.closest(".gv-tbl-expand") || e.target.closest(".gv-tbl-check") || e.target.closest(".gv-tbl-drag") || e.target.closest(".col-act") || e.target.closest(".col-timer")) return;
                     handleSelectNode(t);
                   }}
                   onMouseEnter={() => handleHoverPrefetch(t.taskId)}>
-                  <div className="gv-tbl-drag"><svg width="9" height="12" viewBox="0 0 9 12" fill="currentColor"><circle cx="3" cy="2" r="1.1" /><circle cx="6" cy="2" r="1.1" /><circle cx="3" cy="6" r="1.1" /><circle cx="6" cy="6" r="1.1" /><circle cx="3" cy="10" r="1.1" /><circle cx="6" cy="10" r="1.1" /></svg></div>
+                  {canDrag && <div className="gv-tbl-drag" title="Drag to reorder" style={{ cursor: "grab" }}><svg width="9" height="12" viewBox="0 0 9 12" fill="currentColor"><circle cx="3" cy="2" r="1.1" /><circle cx="6" cy="2" r="1.1" /><circle cx="3" cy="6" r="1.1" /><circle cx="6" cy="6" r="1.1" /><circle cx="3" cy="10" r="1.1" /><circle cx="6" cy="10" r="1.1" /></svg></div>}
                   <div className="gv-tbl-check" onClick={e => e.stopPropagation()}>
                     {t.isFolder
                       ? <svg width="16" height="14" viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3935,7 +4400,7 @@ export default function TasksPage() {
                       const sess = getTimerSession(t.taskId);
                       const hasTime = (sess?.totalSeconds || 0) > 0 || isRunning;
                       // Block timer when awaiting deadline approval (can still pause if running)
-                      const timerBlocked = t.status === "pending_deadline_approval" && !isRunning;
+                      const timerBlocked = !["deadline_approved", "confirmed", "in_progress", "done"].includes(t.status) && !isRunning;
                       return (
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
                           {/* Button only for assignees */}
@@ -3945,8 +4410,8 @@ export default function TasksPage() {
                               onClick={e => {
                                 e.stopPropagation();
                                 if (timerBlocked) return;
-                                if (isRunning) timerPause(t.taskId, t.title);
-                                else timerStart(t.taskId, t.title);
+                                if (isRunning) handleTimerPause(t.taskId, t.title);
+                                else handleTimerStart(t.taskId, t.title);
                               }}
                               style={{
                                 width: 28, height: 28, borderRadius: 7, border: "1.5px solid",
@@ -4005,7 +4470,10 @@ export default function TasksPage() {
                           {/* Remaining deadline time */}
                           {t.dueDate && canControl && (() => {
                             const _tw = t.deadlineWindowSecs || 0;
-                            const msLeft = _tw > 0 ? (_tw - 0) * 1000 : (t.dueDate ? new Date(t.dueDate).getTime() - Date.now() : 0);
+                            // Bug fix: must subtract actual time worked (secs) — previously `_tw - 0`
+                            // which meant the pill always showed the full window, so paused tasks
+                            // appeared to "never decrease" and looked like they were still running.
+                            const msLeft = _tw > 0 ? (_tw - (secs || 0)) * 1000 : (t.dueDate ? new Date(t.dueDate).getTime() - Date.now() : 0);
                             const isOver = msLeft < 0;
                             const absSecs = Math.abs(Math.floor(msLeft / 1000));
                             const h = Math.floor(absSecs / 3600);
@@ -4050,7 +4518,7 @@ export default function TasksPage() {
                     {(t.startDate || t.dueDate) ? (
                       <span style={{ fontSize: 10, color: dl.status === "overdue" ? "var(--danger)" : dl.status === "near" ? "var(--warn)" : "var(--text-3)", fontWeight: dl.status !== "safe" ? 600 : 400, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 2 }}>
                         {t.startDate && <>{new Date(t.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}<span style={{ color: "var(--text-4)", margin: "0 1px" }}>→</span></>}
-                        {t.dueDate && new Date(t.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        {t.dueDate && fmtLiveDeadlineDate(t, getTimerSession(t.taskId) || assigneeAllTimers?.get(t.taskId))}
                       </span>
                     ) : <span style={{ fontSize: 11, color: "var(--border2)" }}>—</span>}
                   </div>
@@ -4089,6 +4557,11 @@ export default function TasksPage() {
                   .map(sid => allTasks.find(t => t.taskId === sid) || allTaskMap.get(sid))
                   .filter(Boolean)
                   .sort((a, b) => {
+                    if (a.order !== undefined || b.order !== undefined) {
+                      const ao = a.order !== undefined ? a.order : 90000 + (Number(a.priority ?? 5)) * 1000;
+                      const bo = b.order !== undefined ? b.order : 90000 + (Number(b.priority ?? 5)) * 1000;
+                      return ao - bo;
+                    }
                     const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
                     if (pa !== pb) return pa - pb;
                     return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
@@ -4134,6 +4607,15 @@ export default function TasksPage() {
 
           return (
             <div className={`gv-list-panel ${isCompact ? "is-compact" : ""} ${mobileView === "chat" ? "mob-hidden" : ""}`} style={isCompact ? { width: '30%', minWidth: 220, maxWidth: '40%', flexShrink: 0, transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)' } : { width: '100%', minWidth: '100%', transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)' }}>
+
+              {/* ── Drag mode banner ── */}
+              {false && (  // drag banner removed — CSS handles feedback
+                <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 10, background: "linear-gradient(90deg,#4F46E5,#7C3AED)", color: "#fff", fontSize: 11, fontWeight: 700, padding: "5px 14px", display: "flex", alignItems: "center", gap: 7, letterSpacing: "0.03em", pointerEvents: "none" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 9 2 12 5 15" /><polyline points="19 9 22 12 19 15" /><line x1="2" y1="12" x2="22" y2="12" /></svg>
+                  Dragging — drop on any task to reorder
+                  <span style={{ marginLeft: "auto", fontSize: 10, opacity: 0.8 }}>Release to place</span>
+                </div>
+              )}
               <div className="gv-lp-topbar">
                 {isCompact ? (
                   <>
@@ -4779,17 +5261,20 @@ export default function TasksPage() {
                 onApprove: handleApproveDeadline,
               };
               const status = task.status;
-              const hasDueDate = !!task.dueDate;
-              const isPendingApproval = status === "pending_deadline_approval";
-              const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
-              const deadlinePassed = deadlineMs && deadlineMs < Date.now();
-              const passedStr = (() => {
-                if (!deadlinePassed || !deadlineMs) return "";
-                const diff = Math.abs(Math.floor((Date.now() - deadlineMs) / 60000));
-                if (diff < 60) return `${diff}m ago`;
-                const h = Math.floor(diff / 60);
-                return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
-              })();
+              const deadlineApprovedStatuses = ["deadline_approved", "confirmed", "in_progress", "done"];
+              const hasDueDate = deadlineApprovedStatuses.includes(status);
+              const isPendingApproval = ["pending_deadline_approval", "pending_employee_deadline_confirmation"].includes(status);
+              // Timer-based deadlinePassed: only when worked seconds >= window AND timer has run
+              const _fWorked = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+              const _fWindow = task.deadlineWindowSecs || 0;
+              const _fTimerStarted = _fWorked > 0;
+              const deadlinePassed = _fTimerStarted && _fWindow > 0 && _fWorked >= _fWindow;
+              const passedStr = deadlinePassed ? (() => {
+                const over = _fWorked - _fWindow;
+                if (over < 3600) return `${Math.round(over / 60)}m over`;
+                if (over < 86400) return `${Math.round(over / 3600)}h over`;
+                return `${Math.round(over / 86400)}d over`;
+              })() : "";
 
               // Don't show if task is in_progress/done (already working)
               if (["in_progress", "done"].includes(status)) return null;
@@ -4805,7 +5290,7 @@ export default function TasksPage() {
                       </div>
                       {task.dueDate && (
                         <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8 }}>
-                          Deadline: <strong>{new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</strong>
+                          Deadline: <strong>{fmtLiveDeadlineDateTime(task, getTimerSession ? getTimerSession(task.taskId) : null) || ""}</strong>
                         </div>
                       )}
                       <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}
@@ -4825,17 +5310,21 @@ export default function TasksPage() {
                           {deadlinePassed ? "Deadline Passed — Confirm Task" : "Deadline Approved"}
                         </span>
                       </div>
-                      {task.dueDate && (
-                        <div style={{ fontSize: 11, fontWeight: 600, color: deadlinePassed ? "#B91C1C" : "#166534", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-                          {(() => {
-                            const _wk = task.deadlineWindowSecs || 0;
-                            const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                            const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
-                            const _abs = Math.round(Math.abs(_rem));
-                            const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
-                            return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
-                          })()}
-                          {deadlinePassed && <span style={{ opacity: 0.75 }}>· passed {passedStr}</span>}
+                      {(_fWindow > 0) && (
+                        <div style={{
+                          fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8,
+                          background: deadlinePassed ? "#FEE2E2" : _fTimerStarted ? "#DCFCE7" : "#F1F5F9",
+                          color: deadlinePassed ? "#B91C1C" : _fTimerStarted ? "#166534" : "#64748B"
+                        }}>
+                          {!_fTimerStarted
+                            ? `⏱ ${_fWindow < 3600 ? Math.round(_fWindow / 60) + "m" : _fWindow < 86400 ? Math.round(_fWindow / 3600) + "h" : Math.round(_fWindow / 86400) + "d"} asked — starts when timer runs`
+                            : deadlinePassed
+                              ? `⚠ ${passedStr}`
+                              : (() => {
+                                const rem = _fWindow - _fWorked;
+                                return rem < 3600 ? `⏱ ${Math.round(rem / 60)}m left` : rem < 86400 ? `⏱ ${Math.round(rem / 3600)}h left` : `⏱ ${Math.round(rem / 86400)}d left`;
+                              })()
+                          }
                         </div>
                       )}
                       <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
@@ -4885,7 +5374,7 @@ export default function TasksPage() {
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                       </div>
                       {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "3px 8px", borderRadius: 6, display: "inline-block" }}>
-                        ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
+                        ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
                       </div>}
                     </div>
                   )}
@@ -4894,19 +5383,26 @@ export default function TasksPage() {
                   {status === "pending_employee_deadline_confirmation" && (
                     <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EDE9FE", border: "2px solid #7C3AED", color: "#7C3AED", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📅</span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>TL Suggested a Date</span>
+                        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EDE9FE", border: "2px solid #7C3AED", color: "#7C3AED", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⏱</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>TL Suggested a Duration</span>
                       </div>
-                      {task.tlCounterDeadline && (
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#4C1D95", marginBottom: 4 }}>
+                      {(task.tlCounterWindowSecs || task.tlCounterDeadline) && (
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#4C1D95", marginBottom: 2 }}>
                           {(() => {
-                            const _ms = new Date(task.tlCounterDeadline).getTime() - Date.now();
-                            const _s = Math.round(Math.abs(_ms) / 1000);
-                            const _fmt = _s < 3600 ? `${Math.round(_s / 60)}m` : _s < 86400 ? `${Math.round(_s / 3600)}h` : `${Math.round(_s / 86400)}d`;
-                            return _ms < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
+                            const w = task.tlCounterWindowSecs ||
+                              (task.tlCounterDeadlineAt?.seconds
+                                ? Math.max(0, Math.round((new Date(task.tlCounterDeadline).getTime() - task.tlCounterDeadlineAt.seconds * 1000) / 1000))
+                                : 0);
+                            if (w <= 0) return "⏱ Duration set";
+                            if (w < 3600) return `⏱ ${Math.round(w / 60)}m to complete`;
+                            if (w < 86400) return `⏱ ${Math.round(w / 3600)}h to complete`;
+                            return `⏱ ${Math.round(w / 86400)}d to complete`;
                           })()}
                         </div>
                       )}
+                      <div style={{ fontSize: 10, color: "#7C3AED", marginBottom: 8 }}>
+                        ⏸ Countdown starts when you press Play — not now
+                      </div>
                       {task.tlCounterDeadlineMessage && (
                         <div style={{ fontSize: 11, color: "#6D28D9", background: "#EDE9FE", borderRadius: 6, padding: "4px 7px", marginBottom: 8, fontStyle: "italic" }}>
                           "{task.tlCounterDeadlineMessage}"
@@ -4964,9 +5460,9 @@ export default function TasksPage() {
                     </div>
                     {task.proposedDeadline && (
                       <div style={{ fontSize: 12, color: "#78350F" }}>
-                        <strong>{task.proposedDeadlineByName}</strong> proposes:{" "}
+                        <strong>{task.proposedDeadlineByName}</strong> requests:{" "}
                         <span style={{ fontWeight: 700 }}>
-                          ⏱ {(() => { const ms = new Date(task.proposedDeadline).getTime() - Date.now(); const h = Math.round(ms / 3600000); const d = Math.round(ms / 86400000); return ms < 0 ? "Overdue" : h < 24 ? `${h} hr${h !== 1 ? "s" : ""}` : `${d} day${d !== 1 ? "s" : ""}`; })()} from now
+                          ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
                         </span>
                       </div>
                     )}
@@ -5035,7 +5531,7 @@ export default function TasksPage() {
 
             {/* ── DRAFT / NORMAL CHAT TAB BAR ──────────────────────────────────── */}
             {task && !task.isFolder && (() => {
-              const isPreConfirmed = ["open", "pending_deadline_approval", "deadline_approved"].includes(task.status);
+              const isPreConfirmed = !["confirmed", "in_progress", "done"].includes(task.status);
               const isPostConfirmed = ["confirmed", "in_progress", "done"].includes(task.status);
               return (
                 <div style={{ display: "flex", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
@@ -5812,12 +6308,16 @@ export default function TasksPage() {
 
       {/* ── Work Commit Modal — shown when employee pauses timer ── */}
       {commitModal && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
-          zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
-          backdropFilter: "blur(3px)", padding: 16,
-          fontFamily: "var(--font,'DM Sans',-apple-system,sans-serif)",
-        }}>
+        <div
+          // Prevent the browser from opening a file if the user misses the drop zone
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => e.preventDefault()}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
+            zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(3px)", padding: 16,
+            fontFamily: "var(--font,'DM Sans',-apple-system,sans-serif)",
+          }}>
           <div style={{
             background: "#fff", borderRadius: 16, width: "min(440px,96vw)",
             boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
@@ -5837,12 +6337,32 @@ export default function TasksPage() {
                     <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
                   </svg>
                 </div>
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>Pause Timer</div>
-                  <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>
+                  <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {commitModal.taskTitle}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={closeCommitModal}
+                  disabled={savingCommit || commitUploading}
+                  title="Close (Esc)"
+                  aria-label="Close"
+                  style={{
+                    width: 30, height: 30, borderRadius: 8,
+                    border: "1px solid #E5E7EB", background: "#F9FAFB",
+                    color: "#6B7280", cursor: (savingCommit || commitUploading) ? "not-allowed" : "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0, padding: 0,
+                    opacity: (savingCommit || commitUploading) ? 0.5 : 1,
+                    transition: "background 0.12s, color 0.12s",
+                  }}
+                  onMouseEnter={e => { if (!(savingCommit || commitUploading)) { e.currentTarget.style.background = "#F3F4F6"; e.currentTarget.style.color = "#111827"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.color = "#6B7280"; }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                </button>
               </div>
             </div>
 
@@ -5872,6 +6392,120 @@ export default function TasksPage() {
                 <span style={{ color: "#EF4444" }}>*</span> Required — describe what you worked on
                 <span style={{ marginLeft: "auto" }}>💡 Ctrl+Enter to save</span>
               </div>
+
+              {/* ── Attachments ── all types go to Google Drive via /cowork/upload/pdf ── */}
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
+                  Attachments <span style={{ color: "#9CA3AF", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>(optional)</span>
+                </div>
+
+                {/* Existing chips */}
+                {commitAttachments.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    {commitAttachments.map((a, i) => (
+                      <div key={a.fileId || i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8 }}>
+                        <span style={{ fontSize: 14 }}>
+                          {(a.mimeType || "").startsWith("image/") ? "🖼" :
+                            (a.mimeType || "").includes("pdf") ? "📕" :
+                              (a.mimeType || "").includes("spreadsheet") || (a.mimeType || "").includes("excel") || /\.(xls|xlsx|csv)$/i.test(a.name || "") ? "📊" :
+                                (a.mimeType || "").includes("word") || /\.(doc|docx)$/i.test(a.name || "") ? "📄" :
+                                  "📎"}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#0F172A", fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.name}>
+                          {a.name}
+                        </span>
+                        {a.size > 0 && (
+                          <span style={{ fontSize: 10, color: "#94A3B8", flexShrink: 0 }}>
+                            {a.size < 1024 * 1024 ? `${Math.round(a.size / 1024)}KB` : `${(a.size / 1024 / 1024).toFixed(1)}MB`}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setCommitAttachments(prev => prev.filter((_, j) => j !== i))}
+                          disabled={savingCommit}
+                          style={{ width: 20, height: 20, borderRadius: 4, border: "none", background: "transparent", color: "#EF4444", cursor: savingCommit ? "not-allowed" : "pointer", fontSize: 14, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+                          title="Remove"
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add-file button (drop zone) */}
+                <input
+                  ref={commitFileInputRef}
+                  type="file"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    e.target.value = ""; // so user can re-pick the same file after removing it
+                    uploadCommitFiles(files);
+                  }}
+                />
+                <div
+                  // Drag-and-drop target. Accepts any number of files and funnels them through the same helper.
+                  onDragEnter={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!savingCommit && !commitUploading) setCommitDragging(true);
+                  }}
+                  onDragOver={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!savingCommit && !commitUploading) setCommitDragging(true);
+                  }}
+                  onDragLeave={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Only clear if we're truly leaving the container, not just crossing into a child
+                    if (e.currentTarget.contains(e.relatedTarget)) return;
+                    setCommitDragging(false);
+                  }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCommitDragging(false);
+                    if (savingCommit || commitUploading) return;
+                    const files = Array.from(e.dataTransfer?.files || []);
+                    if (files.length) uploadCommitFiles(files);
+                  }}
+                  style={{
+                    padding: "14px 12px", borderRadius: 10,
+                    border: `1.5px dashed ${commitDragging ? "#4F46E5" : "#C7D2FE"}`,
+                    background: commitDragging ? "#EEF2FF" : (commitUploading ? "#F1F5F9" : "#FAFAFA"),
+                    transition: "border-color 0.12s, background 0.12s",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => commitFileInputRef.current?.click()}
+                    disabled={commitUploading || savingCommit}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "7px 14px", borderRadius: 8,
+                      border: "1.5px solid #C7D2FE",
+                      background: "#fff",
+                      color: "#4F46E5", fontSize: 12, fontWeight: 600,
+                      cursor: (commitUploading || savingCommit) ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {commitUploading ? (
+                      <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Uploading…</>
+                    ) : (
+                      <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg> Attach file</>
+                    )}
+                  </button>
+                  <div style={{ fontSize: 10, color: commitDragging ? "#4F46E5" : "#94A3B8", fontWeight: commitDragging ? 600 : 400, textAlign: "center" }}>
+                    {commitDragging
+                      ? "Drop to attach"
+                      : "or drag & drop files here — any type, up to 50MB, stored on Google Drive"}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Footer */}
@@ -5881,12 +6515,12 @@ export default function TasksPage() {
             }}>
 
               <button onClick={() => handleCommitSubmit(false)}
-                disabled={savingCommit || !commitMessage.trim()}
+                disabled={savingCommit || commitUploading || !commitMessage.trim()}
                 style={{
                   padding: "8px 20px", borderRadius: 8, border: "none",
-                  background: savingCommit || !commitMessage.trim() ? "#E5E7EB" : "#4F46E5",
-                  color: savingCommit || !commitMessage.trim() ? "#94A3B8" : "#fff",
-                  fontSize: 13, fontWeight: 700, cursor: savingCommit || !commitMessage.trim() ? "not-allowed" : "pointer",
+                  background: (savingCommit || commitUploading || !commitMessage.trim()) ? "#E5E7EB" : "#4F46E5",
+                  color: (savingCommit || commitUploading || !commitMessage.trim()) ? "#94A3B8" : "#fff",
+                  fontSize: 13, fontWeight: 700, cursor: (savingCommit || commitUploading || !commitMessage.trim()) ? "not-allowed" : "pointer",
                   fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
                 }}>
                 {savingCommit ? (
