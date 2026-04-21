@@ -14,6 +14,9 @@ import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
 import { cancelMeet, updateMeet } from "../../../lib/coworkApi";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
+
+import LinkedText from "../../../components/coworking/messaging/LinkedText";
+
 import { GwSpinner } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
 import {
@@ -417,8 +420,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
           fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .6 : 1, wordBreak: "break-word",
         }}>
           {/* Text */}
-          {msg.text && <div>{msg.text}</div>}
-
+          {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
           {/* Attachments */}
           {msg.attachments?.map((a, i) => (
             <div key={i} style={{ marginTop: msg.text ? 6 : 0 }}>

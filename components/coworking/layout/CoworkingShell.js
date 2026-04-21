@@ -8,6 +8,7 @@ import { timeAgo } from "../../../lib/coworkUtils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import NotesSidebarPanel from "../notes/NotesSidebarPanel";
 import IncomingCallToast from "../messaging/IncomingCallToast";
+import LinkedText from "../messaging/LinkedText";
 import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMeetingStore";
 import dynamic from "next/dynamic";
 import { useFCMToken } from "../../../hooks/useFCMToken";
@@ -75,14 +76,29 @@ function fmtTime(ts) {
   return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-function ReqAvatar({ name = "?" }) {
+function ReqAvatar({ name = "?", url = null, size = 30 }) {
   const colors = ["#1A73E8", "#0F9D58", "#F29900", "#7B1FA2", "#D93025", "#00ACC1"];
   const bg = colors[name.charCodeAt(0) % colors.length];
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  // If a real profile picture URL is available, render it instead of the initials tile.
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        style={{
+          width: size, height: size, borderRadius: 8, objectFit: "cover",
+          flexShrink: 0, background: bg, // bg shows if the image is loading/broken
+        }}
+        onError={(e) => { e.currentTarget.style.display = "none"; }}
+      />
+    );
+  }
   return (
     <div style={{
-      width: 30, height: 30, borderRadius: 8, background: bg, color: "#fff",
-      fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+      width: size, height: size, borderRadius: 8, background: bg, color: "#fff",
+      fontSize: Math.max(9, Math.round(size * 0.33)), fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
     }}>
       {initials}
     </div>
@@ -752,13 +768,21 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
 
               // ── Group requests by sender (fromId) so the Received tab mirrors
               //    the person-grouped task view. All groups start collapsed.
-              //    Returns [[senderId, { name, items }], ...] sorted alphabetically.
+              //    Returns [[senderId, { name, picUrl, items }], ...] sorted alphabetically.
               const groupBySender = (list) => {
                 const map = new Map();
                 for (const r of list) {
                   const sid = r.fromId || "__unknown__";
                   if (!map.has(sid)) {
-                    map.set(sid, { name: r.fromName || "Unknown", items: [] });
+                    // Look up the sender's real profile picture from the employees list
+                    // (loaded once on mount via fetchEmployees). Falls back to initials
+                    // when the employee record is missing or has no picture.
+                    const emp = employees.find(e => e.employeeId === sid);
+                    map.set(sid, {
+                      name: emp?.name || r.fromName || "Unknown",
+                      picUrl: emp?.profilePicUrl || null,
+                      items: [],
+                    });
                   }
                   map.get(sid).items.push(r);
                 }
@@ -790,7 +814,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         transition: "background 0.12s, border-left-color 0.12s",
                       }}
                     >
-                      <ReqAvatar name={bucket.name} />
+                      <ReqAvatar name={bucket.name} url={bucket.picUrl} />
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "#1A1D21" }}>
                         {bucket.name}
                       </span>
@@ -809,7 +833,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     </button>
                     {expanded && (
                       <div style={{ background: "#FAFBFF" }}>
-                        {bucket.items.map(req => renderCard(req))}
+                        {bucket.items.map(req => renderCard(req, { hideSender: true }))}
                       </div>
                     )}
                   </div>
@@ -819,26 +843,41 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               const pendingGroups = groupBySender(pendingReqs);
               const respondedGroups = groupBySender(respondedReqs);
 
-              const renderCard = (req) => {
+              const renderCard = (req, { hideSender = false } = {}) => {
                 const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
                 const isExpanded = respondingId === req.id;
                 return (
                   <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
-                    <div className="cw-req-card-head">
-                      <ReqAvatar name={req.fromName || "?"} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span className="cw-req-sender">{req.fromName || "Unknown"}</span>
-                          <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, color: sc.color, background: sc.bg }}>{req.status}</span>
-                        </div>
-                        <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
+                    {hideSender ? (
+                      // When rendered inside a person-grouped bucket, the sender name
+                      // is already shown by the group header — skip the avatar+name row
+                      // here and keep just the status pill + priority + timestamp.
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, color: sc.color, background: sc.bg }}>{req.status}</span>
+                        <span style={{ fontSize: 10, color: "#9AA0A6" }}>{fmtTime(req.createdAt)}</span>
+                        {req.priority && (
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5, color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB", border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33`, marginLeft: "auto" }}>
+                            {req.priority}
+                          </span>
+                        )}
                       </div>
-                      {req.priority && (
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5, color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB", border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33` }}>
-                          {req.priority}
-                        </span>
-                      )}
-                    </div>
+                    ) : (
+                      <div className="cw-req-card-head">
+                        <ReqAvatar name={req.fromName || "?"} url={employees.find(e => e.employeeId === req.fromId)?.profilePicUrl || null} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span className="cw-req-sender">{req.fromName || "Unknown"}</span>
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99, color: sc.color, background: sc.bg }}>{req.status}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
+                        </div>
+                        {req.priority && (
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5, color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB", border: `1px solid ${priColor[req.priority] || "#E4E7EC"}33` }}>
+                            {req.priority}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
                     {req.taskId && (
                       <div className="cw-req-task-chip">
@@ -846,7 +885,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         {req.taskId} {req.taskTitle ? `· ${req.taskTitle}` : ""}
                       </div>
                     )}
-                    <div className="cw-req-msg">{req.message}</div>
+                    <div className="cw-req-msg"><LinkedText text={req.message} isMe={false} /></div>
                     {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
                     {req.type && <div style={{ marginTop: 5 }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "#F3F4F6", color: "#374151", fontWeight: 600, border: "1px solid #E5E7EB" }}>{req.type}</span></div>}
                     {req.attachments?.length > 0 && (
@@ -863,7 +902,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     )}
                     {req.responseMessage && (
                       <div style={{ marginTop: 8, padding: "6px 10px", background: "#F9FAFB", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "3px solid #E4E7EC" }}>
-                        <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span>{req.responseMessage}
+                        <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span><LinkedText text={req.responseMessage} isMe={false} />
                       </div>
                     )}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
@@ -907,7 +946,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                             return (
                               <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
                                 {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
-                                <div style={{ maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px", background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5 }}>{msg.text}</div>
+                                <div style={{ maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px", background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5 }}><LinkedText text={msg.text} isMe={isMe} /></div>
                                 <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}</div>
                               </div>
                             );
@@ -1007,7 +1046,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               return (
                 <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
                   <div className="cw-req-card-head">
-                    <ReqAvatar name={req.toName || "?"} />
+                    <ReqAvatar name={req.toName || "?"} url={employees.find(e => e.employeeId === req.toId)?.profilePicUrl || null} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span className="cw-req-sender">To: {req.toName || req.toId}</span>
@@ -1029,14 +1068,14 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                   </div>
                   {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
                   {req.taskId && <div className="cw-req-task-chip">{req.taskId}{req.taskTitle ? ` · ${req.taskTitle}` : ""}</div>}
-                  <div className="cw-req-msg">{req.message}</div>
+                  <div className="cw-req-msg"><LinkedText text={req.message} isMe={true} /></div>
                   {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
                   {req.responseMessage && (
                     <div style={{
                       marginTop: 8, padding: "6px 10px", background: "#F0FDF4", borderRadius: 6,
                       fontSize: 11, color: "#374151", borderLeft: `3px solid ${sc.color}`
                     }}>
-                      <span style={{ fontWeight: 700, color: sc.color }}>Response: </span>{req.responseMessage}
+                      <span style={{ fontWeight: 700, color: sc.color }}>Response: </span><LinkedText text={req.responseMessage} isMe={false} />
                     </div>
                   )}
                   <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
@@ -1072,7 +1111,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                                 maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
                                 background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5
                               }}>
-                                {msg.text}
+                                <LinkedText text={msg.text} isMe={isMe} />
                               </div>
                               <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
                                 {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
@@ -2607,7 +2646,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                       {msg.text && (
                         <div style={{ position: "relative", maxWidth: "80%" }} className="req-chat-msg-wrap">
                           <div style={{ padding: "8px 12px", borderRadius: isMe ? "12px 12px 2px 12px" : "12px 12px 12px 2px", background: isMe ? "#1A73E8" : "#fff", color: isMe ? "#fff" : "#1A1D21", fontSize: 13, lineHeight: 1.5, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", border: isMe ? "none" : "1px solid #E4E7EC" }}>
-                            {msg.text}
+                            <LinkedText text={msg.text} isMe={isMe} />
                           </div>
                           {isMe && (
                             <button

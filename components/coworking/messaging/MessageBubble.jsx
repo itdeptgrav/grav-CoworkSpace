@@ -12,6 +12,7 @@
 "use client";
 import { useState } from "react";
 import { GwAvatar } from "../shared/CoworkShared";
+import LinkedText from "./LinkedText";
 
 /* ── inject spin keyframe once ─────────────────────────── */
 if (typeof document !== "undefined" && !document.getElementById("mb-styles")) {
@@ -156,7 +157,7 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
                     textAlign: "center", whiteSpace: "pre-line", maxWidth: "80%",
                     border: "1px solid #E8EAED",
                 }}>
-                    {msg.text}
+                    <LinkedText text={msg.text} isMe={false} />
                 </span>
             </div>
         );
@@ -247,7 +248,9 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
 
                     {/* Text */}
                     {msg.text ? (
-                        <div style={{ whiteSpace: "pre-wrap" }}>{msg.text}</div>
+                        <div style={{ whiteSpace: "pre-wrap" }}>
+                            <LinkedText text={msg.text} isMe={isMe} />
+                        </div>
                     ) : null}
                 </div>
 

@@ -33,6 +33,7 @@ import {
 } from "../../../lib/tasksPageHelpers";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
+import LinkedText from "../../../components/coworking/messaging/LinkedText";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
 import { listTasks, getFullTask, getDailyReports, deleteTask } from "../../../lib/mediaUploadApi";
 import { taskForwardApi } from "../../../lib/taskForwardApi";
@@ -4636,7 +4637,7 @@ export default function TasksPage() {
                           }
                           ids.forEach(aid => {
                             const name = employeeMap.get(aid) || t.assigneeNameMap?.[aid] || `Employee ${aid}`;
-                            const picUrl = employeeMapFull?.get(aid)?.profilePicture || null;
+                            const picUrl = employeeMapFull?.get(aid)?.profilePicUrl || null;
                             if (!buckets.has(aid)) buckets.set(aid, { name, picUrl, tasks: [] });
                             buckets.get(aid).tasks.push(t);
                           });
@@ -5420,7 +5421,7 @@ export default function TasksPage() {
                         {showAvatar && <div className="gv-msg-meta">{!isMe && <span>{msg.senderName}</span>}{msg.createdAt && <span style={{ marginLeft: isMe ? 0 : 6 }}>{new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>}</div>}
                         <div className="gv-bubble-wrapper">
                           <div className={`gv-bubble${msg.temp ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}`}>
-                            {msg.text && <div>{msg.text}</div>}
+                            {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
                             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                               <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.65)" : "var(--text-4)" }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
                             </div>
@@ -5535,7 +5536,7 @@ export default function TasksPage() {
                                 </div>
                               );
                             })()}
-                            {msg.text && <div>{msg.text}</div>}
+                            {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
                             {msg.attachments?.map((att, ai) => {
                               if (att.type === "image") {
                                 return (

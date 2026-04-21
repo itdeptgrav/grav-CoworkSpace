@@ -21,6 +21,7 @@ import DeadlineBadge, { getDeadlineInfo } from "../../../../components/coworking
 import { GwAvatar, GwStatusBadge } from "../../../../components/coworking/shared/CoworkShared";
 import MediaMessageInput from "../../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../../components/coworking/messaging/MessageBubble";
+import LinkedText from "../../../../components/coworking/messaging/LinkedText";
 import CreateTaskModal from "../../../../components/coworking/tasks/CreateTaskModal";
 import EditDeadlineModal from "../../../../components/coworking/tasks/EditDeadlineModal";
 import DailyReportModal from "../../../../components/coworking/tasks/DailyReportModal";
@@ -782,7 +783,7 @@ export default function TaskDetailPage() {
                                                 draftMsgs.map((msg, i) => {
                                                     const isMe = msg.senderId === employeeId;
                                                     const isSystem = msg.messageType === "system";
-                                                    if (isSystem) return <div key={msg.messageId || i} style={{ textAlign: "center", padding: "4px 12px", fontSize: 11, color: "#9aa0a6", fontStyle: "italic" }}>{msg.text}</div>;
+                                                    if (isSystem) return <div key={msg.messageId || i} style={{ textAlign: "center", padding: "4px 12px", fontSize: 11, color: "#9aa0a6", fontStyle: "italic" }}><LinkedText text={msg.text} isMe={false} /></div>;
                                                     const prevMsg = i > 0 ? draftMsgs[i - 1] : null;
                                                     const showSender = !prevMsg || prevMsg.senderId !== msg.senderId;
                                                     return <MessageBubble key={msg.messageId || i} msg={msg} isMe={isMe} showSender={showSender} showAvatar={showSender} />;
@@ -876,7 +877,7 @@ export default function TaskDetailPage() {
                                                     {r.progressPercent}%
                                                 </div>
                                             </div>
-                                            <p style={{ margin: "10px 0 0", fontSize: 14, color: "#202124", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{r.message}</p>
+                                            <p style={{ margin: "10px 0 0", fontSize: 14, color: "#202124", lineHeight: 1.6, whiteSpace: "pre-wrap" }}><LinkedText text={r.message} isMe={false} /></p>
                                             {r.imageUrls?.length > 0 && (
                                                 <div style={{ marginTop: 12 }}>
                                                     <div style={s.proofLabel}>📷 Proof ({r.imageUrls.length})</div>
