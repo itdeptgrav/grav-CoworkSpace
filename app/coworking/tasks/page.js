@@ -1045,47 +1045,6 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
               })()}
 
               {/* ── CREATOR APPROVAL PANEL ─────────────────────────────────────────── */}
-              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder && (() => {
-                const df = deadlineFlow || {};
-                return (
-                  <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 8 }}>📋 Deadline Proposal — Needs Your Approval</div>
-                    {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
-                      <span style={{ fontWeight: 500 }}>Proposed by {task.proposedDeadlineByName}:</span><br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} needed</span>
-                    </div>}
-                    {!df.showRejectInput ? (
-                      <div style={{ display: "flex", gap: 7 }}>
-                        <button onClick={() => df.onApprove?.(true)} disabled={df.approving}
-                          style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: df.approving ? 0.5 : 1 }}>
-                          {df.approving ? "…" : "✓ Approve"}
-                        </button>
-                        <button onClick={() => df.setShowRejectInput?.(true)} disabled={df.approving}
-                          style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                          ✕ Reject
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
-                        <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
-                          placeholder="Reason for rejection (required)…"
-                          style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "vertical", minHeight: 56, outline: "none", boxSizing: "border-box" }} />
-                        <div style={{ display: "flex", gap: 7, marginTop: 6 }}>
-                          <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
-                            {df.approving ? "…" : "Send Rejection"}
-                          </button>
-                          <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
-                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
               {/* ── POST-CONFIRM ACTIONS ────────────────────────────────────────────── */}
               {isAssignee && isConfirmed && !isStarted && task.status !== "pending_deadline_approval" && (
                 <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}>
