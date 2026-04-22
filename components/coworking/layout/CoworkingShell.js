@@ -666,6 +666,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     <label className="cw-rf-lbl">🕐 Proposed Time</label>
                     <input className="cw-rf-input" type="time" value={proposedTime} onChange={e => setProposedTime(e.target.value)} />
                   </div>
+
                 </div>
 
                 {/* Linked Task row */}
