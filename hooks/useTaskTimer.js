@@ -106,10 +106,15 @@ export function useTaskTimer(employeeId, opts = {}) {
         clearInterval(tickRef.current);
         const startedAt = Date.now();
         setLiveTick(baseSecs);
-        // Reset auto-pause gate — this is a fresh start/resume, so if the
-        // deadline was already hit and extension was approved, we want the
-        // new window to govern a brand-new gate cycle.
-        autoPausedRef.current = false;
+        // Reset auto-pause gate ONLY if we haven't already exceeded the window.
+        // If baseSecs >= window the deadline was already hit this session —
+        // don't reset or it fires again on every Resume click, trapping the
+        // employee in an infinite pause loop.
+        const currentWin = deadlineWindowsRef?.current?.[taskId] || 0;
+        const alreadyOver = currentWin > 0 && baseSecs >= currentWin;
+        if (!alreadyOver) {
+            autoPausedRef.current = false;
+        }
         tickRef.current = setInterval(() => {
             const elapsed = Math.floor((Date.now() - startedAt) / 1000);
             const display = baseSecs + elapsed;

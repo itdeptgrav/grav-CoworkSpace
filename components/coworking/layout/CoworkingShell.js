@@ -110,6 +110,8 @@ const TYPE_OPTIONS = ["Information", "Approval", "Resource", "Review", "Clarific
 const STATUS_COLORS = {
   pending: { color: "#D97706", bg: "#FEF3C7" },
   approved: { color: "#16A34A", bg: "#F0FDF4" },
+  accepted: { color: "#16A34A", bg: "#F0FDF4" },
+  date_suggested: { color: "#7C3AED", bg: "#F5F3FF" },
   rejected: { color: "#DC2626", bg: "#FEF2F2" },
 };
 
@@ -133,6 +135,15 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  // Proposed date/time (sender side)
+  const [proposedDate, setProposedDate] = useState("");
+  const [proposedTime, setProposedTime] = useState("");
+  // Suggest new date (receiver side)
+  const [suggestId, setSuggestId] = useState(null);
+  const [suggestDate, setSuggestDate] = useState("");
+  const [suggestTime, setSuggestTime] = useState("");
+  const [suggestMsg, setSuggestMsg] = useState("");
+  const [suggestBusy, setSuggestBusy] = useState(false);
   const fileRef = useRef(null);
   // received / sent lists
   const [received, setReceived] = useState([]);
@@ -267,7 +278,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const resetForm = () => {
     setToIds([]); setSubject(""); setMsg(""); setPriority("medium");
     setType("Information"); setDueDate(""); setTaskRef(""); setTaskQuery(""); setSelectedTaskObj(null); setFiles([]);
-    setError(""); setSent(false);
+    setError(""); setSent(false); setProposedDate(""); setProposedTime("");
   };
 
   const handleSend = async () => {
@@ -311,6 +322,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           priority,
           dueDate: dueDate || null,
           attachments: uploaded,
+          proposedDate: proposedDate || null,
+          proposedTime: proposedTime || null,
+          proposedDateTime: (proposedDate && proposedTime) ? `${proposedDate}T${proposedTime}` : (proposedDate || null),
           status: "pending",
           responseMessage: "",
           threadType: "group",
@@ -354,6 +368,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             priority,
             dueDate: dueDate || null,
             attachments: uploaded,
+            proposedDate: proposedDate || null,
+            proposedTime: proposedTime || null,
+            proposedDateTime: (proposedDate && proposedTime) ? `${proposedDate}T${proposedTime}` : (proposedDate || null),
             status: "pending",
             responseMessage: "",
             threadType: threadContext?.type || null,
@@ -408,63 +425,80 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   };
 
 
-
-  const handleRespond = async (reqId, status) => {
+  // Accept with employee's original proposed date/time
+  const handleAcceptAsIs = async (reqId) => {
     setRespondingId(reqId);
     try {
+      const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+      if (!reqDoc.exists()) return;
+      const req = reqDoc.data();
       await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
-        status,
-        responseMessage: respondMsg.trim(),
+        status: "accepted",
+        finalDate: req.proposedDate || null,
+        finalTime: req.proposedTime || null,
+        finalDateTime: req.proposedDateTime || null,
+        finalBy: "sender_proposal",
+        responseMessage: "",
         updatedAt: serverTimestamp(),
       });
-
-      // Notify the request sender via Firestore notification + backend FCM push
+      // Notify sender
       try {
-        const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
-        if (reqDoc.exists()) {
-          const req = reqDoc.data();
-          const notifType = status === "approved" ? "request_approved" : "request_rejected";
-          const notifTitle = status === "approved"
-            ? `Request approved: ${req.subject || ""}`
-            : `Request rejected: ${req.subject || ""}`;
-          const notifBody = respondMsg.trim() || (status === "approved" ? "Your request was approved." : "Your request was rejected.");
-
-          // In-app notification
-          const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
-          await setDoc(notifRef, {
-            recipientEmployeeId: req.fromId,
-            type: notifType,
-            title: notifTitle,
-            body: notifBody,
-            fromId: employeeId,
-            fromName: employeeName,
-            requestId: reqId,
-            read: false,
-            createdAt: serverTimestamp(),
-          });
-
-          // Backend FCM push (works on closed iPhone)
-          await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              recipientId: req.fromId,
-              title: notifTitle,
-              body: notifBody,
-              type: notifType,
-              subject: req.subject,
-              responseMessage: respondMsg.trim(),
-            }),
-          }).catch(() => { }); // non-blocking
-        }
-      } catch (e) { console.error("[respond notify]", e); }
-
-      setRespondMsg(""); setRespondingId(null);
-    } catch (e) {
-      console.error(e);
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: req.fromId,
+          type: "request_accepted",
+          title: `Request accepted: ${req.subject || ""}`,
+          body: req.proposedDateTime
+            ? `Accepted for ${new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+            : "Your request was accepted.",
+          fromId: employeeId, fromName: employeeName,
+          requestId: reqId, read: false, createdAt: serverTimestamp(),
+        });
+      } catch (_) { }
       setRespondingId(null);
-    }
+    } catch (e) { console.error(e); setRespondingId(null); }
   };
+
+  // Receiver suggests a different date/time
+  const handleSuggestDate = async (reqId) => {
+    if (!suggestDate) return;
+    setSuggestBusy(true);
+    try {
+      const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+      if (!reqDoc.exists()) return;
+      const req = reqDoc.data();
+      const finalDT = suggestTime ? `${suggestDate}T${suggestTime}` : suggestDate;
+      await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
+        status: "date_suggested",
+        suggestedDate: suggestDate,
+        suggestedTime: suggestTime || null,
+        suggestedDateTime: finalDT,
+        suggestedBy: employeeName,
+        suggestedById: employeeId,
+        finalDate: suggestDate,
+        finalTime: suggestTime || null,
+        finalDateTime: finalDT,
+        finalBy: "receiver_suggestion",
+        responseMessage: suggestMsg.trim(),
+        updatedAt: serverTimestamp(),
+      });
+      // Notify sender
+      try {
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: req.fromId,
+          type: "request_date_suggested",
+          title: `New date suggested: ${req.subject || ""}`,
+          body: `${employeeName} suggested ${new Date(finalDT).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${suggestMsg.trim() ? ` — ${suggestMsg.trim()}` : ""}`,
+          fromId: employeeId, fromName: employeeName,
+          requestId: reqId, read: false, createdAt: serverTimestamp(),
+        });
+      } catch (_) { }
+      setSuggestId(null); setSuggestDate(""); setSuggestTime(""); setSuggestMsg("");
+    } catch (e) { console.error(e); }
+    finally { setSuggestBusy(false); }
+  };
+
 
   const empLabel = (e) => {
     if (e.role === "ceo") return `${e.name} (CEO)`;
@@ -622,11 +656,20 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                 </div>
 
                 {/* Due date + Task ref row */}
+                {/* Proposed Date + Time row */}
                 <div className="cw-rf-row" style={{ marginTop: 14 }}>
                   <div className="cw-rf-field" style={{ marginBottom: 0 }}>
-                    <label className="cw-rf-lbl">Due By</label>
-                    <input className="cw-rf-input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                    <label className="cw-rf-lbl">📅 Proposed Date</label>
+                    <input className="cw-rf-input" type="date" value={proposedDate} onChange={e => setProposedDate(e.target.value)} />
                   </div>
+                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
+                    <label className="cw-rf-lbl">🕐 Proposed Time</label>
+                    <input className="cw-rf-input" type="time" value={proposedTime} onChange={e => setProposedTime(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Linked Task row */}
+                <div className="cw-rf-row" style={{ marginTop: 14 }}>
                   <div className="cw-rf-field" style={{ marginBottom: 0, position: "relative" }}>
                     <label className="cw-rf-lbl">Linked Task (optional)</label>
                     {selectedTaskObj ? (
@@ -919,20 +962,77 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
                       </button>
                     </div>
+                    {/* Proposed date/time display on the card */}
+                    {req.proposedDateTime && (
+                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#EFF6FF", borderRadius: 6, fontSize: 11, color: "#1A73E8", fontWeight: 600, width: "fit-content" }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                        Proposed: {new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    )}
+                    {/* Final agreed date (after accept or suggest) */}
+                    {req.finalDateTime && req.status !== "pending" && (
+                      <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#F0FDF4", borderRadius: 6, fontSize: 11, color: "#16A34A", fontWeight: 700, width: "fit-content" }}>
+                        ✅ Agreed: {new Date(req.finalDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {req.finalBy === "receiver_suggestion" && <span style={{ fontSize: 9, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 99, marginLeft: 4 }}>revised</span>}
+                      </div>
+                    )}
+                    {req.status === "date_suggested" && req.responseMessage && (
+                      <div style={{ marginTop: 6, padding: "5px 9px", background: "#F5F3FF", borderRadius: 6, fontSize: 11, color: "#5B21B6", borderLeft: "3px solid #7C3AED" }}>
+                        <span style={{ fontWeight: 700 }}>{req.suggestedBy}: </span>{req.responseMessage}
+                      </div>
+                    )}
+
                     {req.status === "pending" && isExpanded && (
-                      <div style={{ marginTop: 8 }}>
-                        <textarea placeholder="Optional response message…" value={respondMsg} onChange={e => setRespondMsg(e.target.value)}
-                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E4E7EC", borderRadius: 7, fontSize: 12, fontFamily: "inherit", resize: "vertical", outline: "none", boxSizing: "border-box", minHeight: 60, background: "#F9FAFB", color: "#1A1D21" }} />
-                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                          <button className="cw-req-btn cw-req-btn-resolve" onClick={() => handleRespond(req.id, "approved")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Approve
+                      <div style={{ marginTop: 8, background: "#F8FAFC", border: "1.5px solid #E4E7EC", borderRadius: 9, padding: "10px 12px" }}>
+                        {/* Accept as-is */}
+                        <button
+                          onClick={() => { handleAcceptAsIs(req.id); setRespondingId(null); }}
+                          disabled={respondingId === req.id}
+                          style={{ width: "100%", padding: "8px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                          Accept As Is{req.proposedDateTime ? ` · ${new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                        </button>
+
+                        {/* Suggest new date toggle */}
+                        {suggestId !== req.id ? (
+                          <button
+                            onClick={() => { setSuggestId(req.id); setSuggestDate(""); setSuggestTime(""); setSuggestMsg(""); }}
+                            style={{ width: "100%", padding: "7px", borderRadius: 7, border: "1.5px solid #DDD6FE", background: "#F5F3FF", color: "#7C3AED", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                            Suggest New Date
                           </button>
-                          <button className="cw-req-btn cw-req-btn-reject" onClick={() => handleRespond(req.id, "rejected")}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg> Reject
-                          </button>
-                          <button onClick={() => { setRespondingId(null); setRespondMsg(""); }}
-                            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: "1px solid #E4E7EC", background: "#F9FAFB", color: "#667085" }}>Cancel</button>
-                        </div>
+                        ) : (
+                          <div>
+                            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Date *</label>
+                                <input type="date" value={suggestDate} onChange={e => setSuggestDate(e.target.value)}
+                                  style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Time</label>
+                                <input type="time" value={suggestTime} onChange={e => setSuggestTime(e.target.value)}
+                                  style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                              </div>
+                            </div>
+                            <textarea placeholder="Message to sender (optional)…" value={suggestMsg} onChange={e => setSuggestMsg(e.target.value)}
+                              style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => handleSuggestDate(req.id)} disabled={!suggestDate || suggestBusy}
+                                style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !suggestDate || suggestBusy ? "#E5E7EB" : "#7C3AED", color: !suggestDate || suggestBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !suggestDate || suggestBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                {suggestBusy ? "Saving…" : "Send Suggestion"}
+                              </button>
+                              <button onClick={() => setSuggestId(null)}
+                                style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E4E7EC", background: "#F9FAFB", color: "#667085", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <button onClick={() => { setRespondingId(null); setSuggestId(null); }}
+                          style={{ marginTop: 8, width: "100%", padding: "5px", borderRadius: 6, border: "1px solid #E4E7EC", background: "transparent", color: "#9AA0A6", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                          Close
+                        </button>
                       </div>
                     )}
                     {!onOpenChat && chatOpenId === req.id && (
@@ -1070,6 +1170,18 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                   {req.taskId && <div className="cw-req-task-chip">{req.taskId}{req.taskTitle ? ` · ${req.taskTitle}` : ""}</div>}
                   <div className="cw-req-msg"><LinkedText text={req.message} isMe={true} /></div>
                   {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+                  {req.proposedDateTime && (
+                    <div style={{ fontSize: 10, color: "#1A73E8", marginTop: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                      Proposed: {new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  )}
+                  {req.finalDateTime && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", marginTop: 5, display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "#F0FDF4", borderRadius: 6, width: "fit-content" }}>
+                      ✅ Agreed: {new Date(req.finalDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      {req.finalBy === "receiver_suggestion" && <span style={{ fontSize: 9, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 99 }}>revised by {req.suggestedBy}</span>}
+                    </div>
+                  )}
                   {req.responseMessage && (
                     <div style={{
                       marginTop: 8, padding: "6px 10px", background: "#F0FDF4", borderRadius: 6,
@@ -1147,7 +1259,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             })}
           </div>
         )}
-      </div>
+      </div >
     </>
   );
 }
