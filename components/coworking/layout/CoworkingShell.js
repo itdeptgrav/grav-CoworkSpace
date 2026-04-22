@@ -109,6 +109,10 @@ const PRIORITY_OPTIONS = ["low", "medium", "high", "urgent"];
 const TYPE_OPTIONS = ["Information", "Approval", "Resource", "Review", "Clarification", "Support", "Other"];
 const STATUS_COLORS = {
   pending: { color: "#D97706", bg: "#FEF3C7" },
+  in_progress: { color: "#1A73E8", bg: "#EFF6FF" },
+  completion_requested: { color: "#7C3AED", bg: "#F5F3FF" },
+  completed: { color: "#16A34A", bg: "#F0FDF4" },
+  // Legacy values — kept so old data still renders
   approved: { color: "#16A34A", bg: "#F0FDF4" },
   accepted: { color: "#16A34A", bg: "#F0FDF4" },
   date_suggested: { color: "#7C3AED", bg: "#F5F3FF" },
@@ -138,12 +142,31 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   // Proposed date/time (sender side)
   const [proposedDate, setProposedDate] = useState("");
   const [proposedTime, setProposedTime] = useState("");
+  // Sender's completion requirements (what receiver must do)
+  const [completionRequirements, setCompletionRequirements] = useState("");
   // Suggest new date (receiver side)
   const [suggestId, setSuggestId] = useState(null);
   const [suggestDate, setSuggestDate] = useState("");
   const [suggestTime, setSuggestTime] = useState("");
   const [suggestMsg, setSuggestMsg] = useState("");
   const [suggestBusy, setSuggestBusy] = useState(false);
+  // Mark complete (receiver side)
+  const [completeId, setCompleteId] = useState(null);
+  const [completeMsg, setCompleteMsg] = useState("");
+  const [completeBusy, setCompleteBusy] = useState(false);
+  // Reject completion (sender side)
+  const [rejectCompleteId, setRejectCompleteId] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectBusy, setRejectBusy] = useState(false);
+  // Extra section toggles — Responded is now split into In Progress + Completed
+  const [inProgressOpen, setInProgressOpen] = useState(true);
+  const [completedOpen, setCompletedOpen] = useState(false);
+  const [openInProgressSenders, setOpenInProgressSenders] = useState(new Set());
+  const [openCompletedSenders, setOpenCompletedSenders] = useState(new Set());
+  // Sent tab section toggles — mirrors Received tab structure
+  const [sentPendingOpen, setSentPendingOpen] = useState(true);
+  const [sentInProgressOpen, setSentInProgressOpen] = useState(true);
+  const [sentCompletedOpen, setSentCompletedOpen] = useState(false);
   const fileRef = useRef(null);
   // received / sent lists
   const [received, setReceived] = useState([]);
@@ -278,7 +301,8 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   const resetForm = () => {
     setToIds([]); setSubject(""); setMsg(""); setPriority("medium");
     setType("Information"); setDueDate(""); setTaskRef(""); setTaskQuery(""); setSelectedTaskObj(null); setFiles([]);
-    setError(""); setSent(false); setProposedDate(""); setProposedTime("");
+    setError(""); setSent(false);
+    setProposedDate(""); setProposedTime(""); setCompletionRequirements("");
   };
 
   const handleSend = async () => {
@@ -325,6 +349,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           proposedDate: proposedDate || null,
           proposedTime: proposedTime || null,
           proposedDateTime: (proposedDate && proposedTime) ? `${proposedDate}T${proposedTime}` : (proposedDate || null),
+          completionRequirements: completionRequirements.trim() || null,
           status: "pending",
           responseMessage: "",
           threadType: "group",
@@ -371,6 +396,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             proposedDate: proposedDate || null,
             proposedTime: proposedTime || null,
             proposedDateTime: (proposedDate && proposedTime) ? `${proposedDate}T${proposedTime}` : (proposedDate || null),
+            completionRequirements: completionRequirements.trim() || null,
             status: "pending",
             responseMessage: "",
             threadType: threadContext?.type || null,
@@ -425,7 +451,8 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   };
 
 
-  // Accept with employee's original proposed date/time
+
+  // Accept with employee's original proposed date/time — goes to in_progress
   const handleAcceptAsIs = async (reqId) => {
     setRespondingId(reqId);
     try {
@@ -433,12 +460,13 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
       if (!reqDoc.exists()) return;
       const req = reqDoc.data();
       await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
-        status: "accepted",
+        status: "in_progress",
         finalDate: req.proposedDate || null,
         finalTime: req.proposedTime || null,
         finalDateTime: req.proposedDateTime || null,
         finalBy: "sender_proposal",
         responseMessage: "",
+        acceptedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       // Notify sender
@@ -454,12 +482,24 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
+        // Backend FCM push
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientId: req.fromId,
+            title: `Request accepted: ${req.subject || ""}`,
+            body: "Your request was accepted.",
+            type: "request_accepted",
+            subject: req.subject,
+          }),
+        }).catch(() => { });
       } catch (_) { }
       setRespondingId(null);
     } catch (e) { console.error(e); setRespondingId(null); }
   };
 
-  // Receiver suggests a different date/time
+  // Receiver suggests a different date/time — goes to in_progress
   const handleSuggestDate = async (reqId) => {
     if (!suggestDate) return;
     setSuggestBusy(true);
@@ -469,7 +509,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
       const req = reqDoc.data();
       const finalDT = suggestTime ? `${suggestDate}T${suggestTime}` : suggestDate;
       await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
-        status: "date_suggested",
+        status: "in_progress",
         suggestedDate: suggestDate,
         suggestedTime: suggestTime || null,
         suggestedDateTime: finalDT,
@@ -480,6 +520,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         finalDateTime: finalDT,
         finalBy: "receiver_suggestion",
         responseMessage: suggestMsg.trim(),
+        acceptedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       // Notify sender
@@ -493,12 +534,142 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientId: req.fromId,
+            title: `New date suggested: ${req.subject || ""}`,
+            body: suggestMsg.trim() || `${employeeName} suggested a new date.`,
+            type: "request_date_suggested",
+            subject: req.subject,
+          }),
+        }).catch(() => { });
       } catch (_) { }
       setSuggestId(null); setSuggestDate(""); setSuggestTime(""); setSuggestMsg("");
     } catch (e) { console.error(e); }
     finally { setSuggestBusy(false); }
   };
 
+  // Receiver marks request as completed — goes to sender for confirmation
+  const handleMarkCompleted = async (reqId) => {
+    setCompleteBusy(true);
+    try {
+      const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+      if (!reqDoc.exists()) return;
+      const req = reqDoc.data();
+      await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
+        status: "completion_requested",
+        completionMessage: completeMsg.trim() || null,
+        completionRequestedAt: serverTimestamp(),
+        // Clear any previous rejection so the receiver's card no longer shows a stale "rejected" banner
+        completionRejectionReason: null,
+        completionRejectedAt: null,
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: req.fromId,
+          type: "request_completion_requested",
+          title: `Completion submitted: ${req.subject || ""}`,
+          body: completeMsg.trim() || `${employeeName} marked the request as completed. Please confirm.`,
+          fromId: employeeId, fromName: employeeName,
+          requestId: reqId, read: false, createdAt: serverTimestamp(),
+        });
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientId: req.fromId,
+            title: `Completion submitted: ${req.subject || ""}`,
+            body: completeMsg.trim() || "Please confirm the completion.",
+            type: "request_completion_requested",
+            subject: req.subject,
+          }),
+        }).catch(() => { });
+      } catch (_) { }
+      setCompleteId(null); setCompleteMsg("");
+    } catch (e) { console.error(e); }
+    finally { setCompleteBusy(false); }
+  };
+
+  // Sender confirms the completion — final state
+  const handleConfirmCompletion = async (reqId) => {
+    try {
+      const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+      if (!reqDoc.exists()) return;
+      const req = reqDoc.data();
+      await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
+        status: "completed",
+        completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: req.toId,
+          type: "request_completed",
+          title: `Request marked complete: ${req.subject || ""}`,
+          body: `${employeeName} confirmed the completion.`,
+          fromId: employeeId, fromName: employeeName,
+          requestId: reqId, read: false, createdAt: serverTimestamp(),
+        });
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientId: req.toId,
+            title: `Request marked complete: ${req.subject || ""}`,
+            body: `${employeeName} confirmed the completion.`,
+            type: "request_completed",
+            subject: req.subject,
+          }),
+        }).catch(() => { });
+      } catch (_) { }
+    } catch (e) { console.error(e); }
+  };
+
+  // Sender rejects the completion — requires a reason; request goes back to in_progress
+  const handleRejectCompletion = async (reqId) => {
+    if (!rejectReason.trim()) return;
+    setRejectBusy(true);
+    try {
+      const reqDoc = await getDoc(doc(firebaseDb, "cowork_requests", reqId));
+      if (!reqDoc.exists()) return;
+      const req = reqDoc.data();
+      await updateDoc(doc(firebaseDb, "cowork_requests", reqId), {
+        status: "in_progress", // Send back to in-progress so receiver can retry
+        completionRejectionReason: rejectReason.trim(),
+        completionRejectedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        const notifRef = doc(collection(firebaseDb, "cowork_notifications"));
+        await setDoc(notifRef, {
+          recipientEmployeeId: req.toId,
+          type: "request_completion_rejected",
+          title: `Completion rejected: ${req.subject || ""}`,
+          body: rejectReason.trim(),
+          fromId: employeeId, fromName: employeeName,
+          requestId: reqId, read: false, createdAt: serverTimestamp(),
+        });
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientId: req.toId,
+            title: `Completion rejected: ${req.subject || ""}`,
+            body: rejectReason.trim(),
+            type: "request_completion_rejected",
+            subject: req.subject,
+          }),
+        }).catch(() => { });
+      } catch (_) { }
+      setRejectCompleteId(null); setRejectReason("");
+    } catch (e) { console.error(e); }
+    finally { setRejectBusy(false); }
+  };
 
   const empLabel = (e) => {
     if (e.role === "ceo") return `${e.name} (CEO)`;
@@ -655,7 +826,6 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                   </div>
                 </div>
 
-                {/* Due date + Task ref row */}
                 {/* Proposed Date + Time row */}
                 <div className="cw-rf-row" style={{ marginTop: 14 }}>
                   <div className="cw-rf-field" style={{ marginBottom: 0 }}>
@@ -666,7 +836,6 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     <label className="cw-rf-lbl">🕐 Proposed Time</label>
                     <input className="cw-rf-input" type="time" value={proposedTime} onChange={e => setProposedTime(e.target.value)} />
                   </div>
-
                 </div>
 
                 {/* Linked Task row */}
@@ -734,6 +903,18 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) handleSend(); }}
                   />
                   <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 2 }}>Ctrl + Enter to send</div>
+                </div>
+
+                {/* Completion Requirements */}
+                <div className="cw-rf-field">
+                  <label className="cw-rf-lbl">✓ Completion Requirements</label>
+                  <textarea className="cw-rf-input" rows={2}
+                    style={{ resize: "vertical", lineHeight: 1.5 }}
+                    placeholder="What needs to be done for this request to be considered complete?"
+                    value={completionRequirements}
+                    onChange={e => setCompletionRequirements(e.target.value)}
+                  />
+                  <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 2 }}>Optional — helps the receiver know what's expected</div>
                 </div>
 
                 {/* Attachments */}
@@ -808,7 +989,17 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               </div>
             ) : (() => {
               const pendingReqs = received.filter(r => r.status === "pending");
-              const respondedReqs = received.filter(r => r.status !== "pending");
+              const inProgressReqs = received.filter(r =>
+                r.status === "in_progress" ||
+                r.status === "completion_requested" ||
+                r.status === "accepted" ||         // legacy
+                r.status === "date_suggested"      // legacy
+              );
+              const completedReqs = received.filter(r =>
+                r.status === "completed" ||
+                r.status === "approved"            // legacy
+              );
+              const respondedReqs = received.filter(r => r.status !== "pending"); // kept for backward compat
 
               // ── Group requests by sender (fromId) so the Received tab mirrors
               //    the person-grouped task view. All groups start collapsed.
@@ -885,6 +1076,8 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
               };
 
               const pendingGroups = groupBySender(pendingReqs);
+              const inProgressGroups = groupBySender(inProgressReqs);
+              const completedGroups = groupBySender(completedReqs);
               const respondedGroups = groupBySender(respondedReqs);
 
               const renderCard = (req, { hideSender = false } = {}) => {
@@ -944,25 +1137,18 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         ))}
                       </div>
                     )}
-                    {req.responseMessage && (
-                      <div style={{ marginTop: 8, padding: "6px 10px", background: "#F9FAFB", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "3px solid #E4E7EC" }}>
-                        <span style={{ fontWeight: 700, color: "#667085" }}>Response: </span><LinkedText text={req.responseMessage} isMe={false} />
+                    {/* Completion Requirements — visible to receiver throughout the lifecycle */}
+                    {req.completionRequirements && (
+                      <div style={{ marginTop: 6, padding: "6px 10px", background: "#FFFBEB", borderLeft: "3px solid #F59E0B", borderRadius: 6, fontSize: 11, color: "#78350F" }}>
+                        <span style={{ fontWeight: 700, color: "#B45309" }}>✓ Required: </span>{req.completionRequirements}
                       </div>
                     )}
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        {req.status === "pending" && !isExpanded && (
-                          <button className="cw-req-btn cw-req-btn-resolve" onClick={() => { setRespondingId(req.id); setRespondMsg(""); }}>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Respond
-                          </button>
-                        )}
+                    {/* Completion rejection reason (from sender) — shows until receiver re-submits */}
+                    {req.completionRejectionReason && req.status === "in_progress" && (
+                      <div style={{ marginTop: 6, padding: "6px 10px", background: "#FEF2F2", borderLeft: "3px solid #DC2626", borderRadius: 6, fontSize: 11, color: "#991B1B" }}>
+                        <span style={{ fontWeight: 700 }}>✗ Previous submission rejected: </span>{req.completionRejectionReason}
                       </div>
-                      <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
-                        style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 9px", border: "1px solid #E4E7EC", borderRadius: 6, background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB", color: activeChatReqId === req.id ? "#1A73E8" : "#667085", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                        Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
-                      </button>
-                    </div>
+                    )}
                     {/* Proposed date/time display on the card */}
                     {req.proposedDateTime && (
                       <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#EFF6FF", borderRadius: 6, fontSize: 11, color: "#1A73E8", fontWeight: 600, width: "fit-content" }}>
@@ -977,18 +1163,44 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                         {req.finalBy === "receiver_suggestion" && <span style={{ fontSize: 9, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 99, marginLeft: 4 }}>revised</span>}
                       </div>
                     )}
-                    {req.status === "date_suggested" && req.responseMessage && (
+                    {/* Message shown with receiver's suggestion (when they suggested a new date) */}
+                    {req.responseMessage && req.finalBy === "receiver_suggestion" && (
                       <div style={{ marginTop: 6, padding: "5px 9px", background: "#F5F3FF", borderRadius: 6, fontSize: 11, color: "#5B21B6", borderLeft: "3px solid #7C3AED" }}>
                         <span style={{ fontWeight: 700 }}>{req.suggestedBy}: </span>{req.responseMessage}
                       </div>
                     )}
-
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {req.status === "pending" && !isExpanded && (
+                          <button className="cw-req-btn cw-req-btn-resolve" onClick={() => { setRespondingId(req.id); setRespondMsg(""); }}>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Respond
+                          </button>
+                        )}
+                        {req.status === "in_progress" && completeId !== req.id && (
+                          <button onClick={() => { setCompleteId(req.id); setCompleteMsg(""); }}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 6, border: "1.5px solid #16A34A", background: "#F0FDF4", color: "#15803D", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                            Mark as Completed
+                          </button>
+                        )}
+                        {req.status === "completion_requested" && (
+                          <div style={{ fontSize: 11, color: "#7C3AED", background: "#F5F3FF", padding: "4px 10px", borderRadius: 6, fontWeight: 600, border: "1px solid #DDD6FE" }}>
+                            ⏳ Waiting for sender to confirm completion…
+                          </div>
+                        )}
+                      </div>
+                      <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 9px", border: "1px solid #E4E7EC", borderRadius: 6, background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB", color: activeChatReqId === req.id ? "#1A73E8" : "#667085", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                        Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                      </button>
+                    </div>
+                    {/* Pending — Accept As Is / Suggest New Date panel (receiver side) */}
                     {req.status === "pending" && isExpanded && (
                       <div style={{ marginTop: 8, background: "#F8FAFC", border: "1.5px solid #E4E7EC", borderRadius: 9, padding: "10px 12px" }}>
                         {/* Accept as-is */}
                         <button
-                          onClick={() => { handleAcceptAsIs(req.id); setRespondingId(null); }}
-                          disabled={respondingId === req.id}
+                          onClick={() => handleAcceptAsIs(req.id)}
                           style={{ width: "100%", padding: "8px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                           Accept As Is{req.proposedDateTime ? ` · ${new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
@@ -1034,6 +1246,24 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                           style={{ marginTop: 8, width: "100%", padding: "5px", borderRadius: 6, border: "1px solid #E4E7EC", background: "transparent", color: "#9AA0A6", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                           Close
                         </button>
+                      </div>
+                    )}
+                    {/* Mark-as-completed inline panel (receiver side) */}
+                    {completeId === req.id && req.status === "in_progress" && (
+                      <div style={{ marginTop: 8, background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 9, padding: "10px 12px" }}>
+                        <label style={{ fontSize: 10, fontWeight: 700, color: "#166534", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Completion note (optional)</label>
+                        <textarea placeholder="Describe what was done…" value={completeMsg} onChange={e => setCompleteMsg(e.target.value)}
+                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #BBF7D0", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6, background: "#fff" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => handleMarkCompleted(req.id)} disabled={completeBusy}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: completeBusy ? "#E5E7EB" : "#16A34A", color: completeBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: completeBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {completeBusy ? "Submitting…" : "Submit for Confirmation"}
+                          </button>
+                          <button onClick={() => { setCompleteId(null); setCompleteMsg(""); }}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E4E7EC", background: "#fff", color: "#667085", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     )}
                     {!onOpenChat && chatOpenId === req.id && (
@@ -1097,29 +1327,57 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     )}
                   </div>
 
-                  {/* ── RESPONDED section ── */}
-                  <div>
+                  {/* ── IN PROGRESS section ── */}
+                  <div style={{ borderBottom: "1px solid #F1F5F9" }}>
                     <button
-                      onClick={() => setRespondedOpen(p => !p)}
-                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: respondedOpen ? "#F0FDF4" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: respondedOpen ? "1px solid #BBF7D0" : "none" }}
+                      onClick={() => setInProgressOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: inProgressOpen ? "#EFF6FF" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: inProgressOpen ? "1px solid #BFDBFE" : "none" }}
                     >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
-                        Responded
+                        In Progress
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
-                        {respondedReqs.length}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#1A73E8", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {inProgressReqs.length}
                       </span>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: respondedOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: inProgressOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
                     </button>
-                    {respondedOpen && (
+                    {inProgressOpen && (
                       <div>
-                        {respondedReqs.length === 0 ? (
-                          <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No responded requests</div>
-                        ) : respondedGroups.map(([sid, bucket]) =>
-                          renderPersonGroup(sid, bucket, openRespondedSenders, setOpenRespondedSenders)
+                        {inProgressReqs.length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No in-progress requests</div>
+                        ) : inProgressGroups.map(([sid, bucket]) =>
+                          renderPersonGroup(sid, bucket, openInProgressSenders, setOpenInProgressSenders)
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── COMPLETED section ── */}
+                  <div>
+                    <button
+                      onClick={() => setCompletedOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: completedOpen ? "#F0FDF4" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: completedOpen ? "1px solid #BBF7D0" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        Completed
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {completedReqs.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: completedOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {completedOpen && (
+                      <div>
+                        {completedReqs.length === 0 ? (
+                          <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No completed requests yet</div>
+                        ) : completedGroups.map(([sid, bucket]) =>
+                          renderPersonGroup(sid, bucket, openCompletedSenders, setOpenCompletedSenders)
                         )}
                       </div>
                     )}
@@ -1142,125 +1400,275 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Nothing sent yet</div>
                 <div style={{ fontSize: 12 }}>Requests you send appear here</div>
               </div>
-            ) : sent2.map(req => {
-              const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
-              return (
-                <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
-                  <div className="cw-req-card-head">
-                    <ReqAvatar name={req.toName || "?"} url={employees.find(e => e.employeeId === req.toId)?.profilePicUrl || null} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span className="cw-req-sender">To: {req.toName || req.toId}</span>
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
-                          color: sc.color, background: sc.bg
-                        }}>{req.status}</span>
+            ) : (() => {
+              const sentPending = sent2.filter(r => r.status === "pending");
+              const sentInProgress = sent2.filter(r =>
+                r.status === "in_progress" ||
+                r.status === "completion_requested" ||
+                r.status === "accepted" ||        // legacy
+                r.status === "date_suggested"     // legacy
+              );
+              const sentCompleted = sent2.filter(r =>
+                r.status === "completed" ||
+                r.status === "approved"           // legacy
+              );
+
+              const renderSentCard = (req) => {
+                const sc = STATUS_COLORS[req.status] || STATUS_COLORS.pending;
+                return (
+                  <div key={req.id} className="cw-req-card" ref={el => reqItemRefs.current[req.id] = el} style={activeChatReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8", boxShadow: "0 0 0 1px #1A73E820" } : highlightReqId === req.id ? { background: "#EBF3FE", borderLeft: "3px solid #1A73E8" } : {}}>
+                    <div className="cw-req-card-head">
+                      <ReqAvatar name={req.toName || "?"} url={employees.find(e => e.employeeId === req.toId)?.profilePicUrl || null} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span className="cw-req-sender">To: {req.toName || req.toId}</span>
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
+                            color: sc.color, background: sc.bg
+                          }}>{req.status}</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
                       </div>
-                      <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 1 }}>{fmtTime(req.createdAt)}</div>
+                      {req.priority && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+                          color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB"
+                        }}>
+                          {req.priority}
+                        </span>
+                      )}
                     </div>
-                    {req.priority && (
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
-                        color: priColor[req.priority] || "#667085", background: priBg[req.priority] || "#F9FAFB"
+                    {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
+                    {req.taskId && <div className="cw-req-task-chip">{req.taskId}{req.taskTitle ? ` · ${req.taskTitle}` : ""}</div>}
+                    <div className="cw-req-msg"><LinkedText text={req.message} isMe={true} /></div>
+                    {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+                    {req.completionRequirements && (
+                      <div style={{ marginTop: 6, padding: "6px 10px", background: "#FFFBEB", borderLeft: "3px solid #F59E0B", borderRadius: 6, fontSize: 11, color: "#78350F" }}>
+                        <span style={{ fontWeight: 700, color: "#B45309" }}>✓ Required: </span>{req.completionRequirements}
+                      </div>
+                    )}
+                    {req.proposedDateTime && (
+                      <div style={{ fontSize: 10, color: "#1A73E8", marginTop: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                        Proposed: {new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    )}
+                    {req.finalDateTime && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", marginTop: 5, display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "#F0FDF4", borderRadius: 6, width: "fit-content" }}>
+                        ✅ Agreed: {new Date(req.finalDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {req.finalBy === "receiver_suggestion" && <span style={{ fontSize: 9, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 99 }}>revised by {req.suggestedBy}</span>}
+                      </div>
+                    )}
+                    {req.responseMessage && (
+                      <div style={{
+                        marginTop: 8, padding: "6px 10px", background: "#F0FDF4", borderRadius: 6,
+                        fontSize: 11, color: "#374151", borderLeft: `3px solid ${sc.color}`
                       }}>
-                        {req.priority}
-                      </span>
+                        <span style={{ fontWeight: 700, color: sc.color }}>Response: </span><LinkedText text={req.responseMessage} isMe={false} />
+                      </div>
+                    )}
+                    {/* Receiver submitted a completion note */}
+                    {req.status === "completion_requested" && req.completionMessage && (
+                      <div style={{ marginTop: 8, padding: "6px 10px", background: "#F5F3FF", borderLeft: "3px solid #7C3AED", borderRadius: 6, fontSize: 11, color: "#4C1D95" }}>
+                        <span style={{ fontWeight: 700 }}>Completion note: </span>{req.completionMessage}
+                      </div>
+                    )}
+                    {/* Previous rejection reason (shows after rejecting, as a record) */}
+                    {req.completionRejectionReason && req.status !== "completed" && (
+                      <div style={{ marginTop: 6, padding: "6px 10px", background: "#FEF2F2", borderLeft: "3px solid #DC2626", borderRadius: 6, fontSize: 11, color: "#991B1B" }}>
+                        <span style={{ fontWeight: 700 }}>✗ You rejected: </span>{req.completionRejectionReason}
+                      </div>
+                    )}
+                    {/* Confirm / Reject completion buttons — sender side */}
+                    {req.status === "completion_requested" && rejectCompleteId !== req.id && (
+                      <div style={{ marginTop: 10, background: "#FAFBFF", border: "1.5px solid #DDD6FE", borderRadius: 9, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 11, color: "#4C1D95", fontWeight: 700, marginBottom: 6 }}>
+                          {req.toName} has marked this as completed. Confirm or reject?
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => handleConfirmCompletion(req.id)}
+                            style={{ flex: 1, padding: "8px", borderRadius: 7, border: "none", background: "#16A34A", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                            Confirm Complete
+                          </button>
+                          <button onClick={() => { setRejectCompleteId(req.id); setRejectReason(""); }}
+                            style={{ padding: "8px 12px", borderRadius: 7, border: "1.5px solid #FECACA", background: "#FEF2F2", color: "#DC2626", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {/* Reject completion — reason input (sender side) */}
+                    {req.status === "completion_requested" && rejectCompleteId === req.id && (
+                      <div style={{ marginTop: 10, background: "#FEF2F2", border: "1.5px solid #FECACA", borderRadius: 9, padding: "10px 12px" }}>
+                        <label style={{ fontSize: 10, fontWeight: 700, color: "#991B1B", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Reason for rejection *</label>
+                        <textarea placeholder="Explain why this isn't complete yet…" value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECACA", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 52, outline: "none", boxSizing: "border-box", marginBottom: 6, background: "#fff" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => handleRejectCompletion(req.id)} disabled={!rejectReason.trim() || rejectBusy}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !rejectReason.trim() || rejectBusy ? "#E5E7EB" : "#DC2626", color: !rejectReason.trim() || rejectBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !rejectReason.trim() || rejectBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {rejectBusy ? "Sending…" : "Send Rejection"}
+                          </button>
+                          <button onClick={() => { setRejectCompleteId(null); setRejectReason(""); }}
+                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E4E7EC", background: "#fff", color: "#667085", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                      <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
+                          border: "1px solid #E4E7EC", borderRadius: 6,
+                          background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB",
+                          color: activeChatReqId === req.id ? "#1A73E8" : "#667085",
+                          fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                        }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                        Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                      </button>
+                    </div>
+                    {!onOpenChat && chatOpenId === req.id && (
+                      <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
+                        <div style={{
+                          padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
+                          fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em"
+                        }}>
+                          Chat Thread
+                        </div>
+                        <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                          {(chatThreads[req.id] || []).length === 0 ? (
+                            <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet.</div>
+                          ) : (chatThreads[req.id] || []).map((msg, mi) => {
+                            const isMe = msg.senderId === employeeId;
+                            return (
+                              <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+                                {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
+                                <div style={{
+                                  maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
+                                  background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5
+                                }}>
+                                  <LinkedText text={msg.text} isMe={isMe} />
+                                </div>
+                                <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
+                                  {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <div ref={el => chatEndRefs.current[req.id] = el} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
+                          <input
+                            value={chatInput[req.id] || ""}
+                            onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }}
+                            placeholder="Type a message…"
+                            style={{
+                              flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6,
+                              fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1A1D21"
+                            }}
+                          />
+                          <button onClick={() => sendChatMsg(req.id)}
+                            style={{
+                              padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none",
+                              borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center"
+                            }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  {req.subject && <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", marginBottom: 4 }}>{req.subject}</div>}
-                  {req.taskId && <div className="cw-req-task-chip">{req.taskId}{req.taskTitle ? ` · ${req.taskTitle}` : ""}</div>}
-                  <div className="cw-req-msg"><LinkedText text={req.message} isMe={true} /></div>
-                  {req.dueDate && <div style={{ fontSize: 10, color: "#D97706", marginTop: 5, fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
-                  {req.proposedDateTime && (
-                    <div style={{ fontSize: 10, color: "#1A73E8", marginTop: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                      Proposed: {new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                    </div>
-                  )}
-                  {req.finalDateTime && (
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", marginTop: 5, display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "#F0FDF4", borderRadius: 6, width: "fit-content" }}>
-                      ✅ Agreed: {new Date(req.finalDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                      {req.finalBy === "receiver_suggestion" && <span style={{ fontSize: 9, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 99 }}>revised by {req.suggestedBy}</span>}
-                    </div>
-                  )}
-                  {req.responseMessage && (
-                    <div style={{
-                      marginTop: 8, padding: "6px 10px", background: "#F0FDF4", borderRadius: 6,
-                      fontSize: 11, color: "#374151", borderLeft: `3px solid ${sc.color}`
-                    }}>
-                      <span style={{ fontWeight: 700, color: sc.color }}>Response: </span><LinkedText text={req.responseMessage} isMe={false} />
-                    </div>
-                  )}
-                  <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-                    <button onClick={() => onOpenChat ? onOpenChat(req.id, req) : openChat(req.id)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 4, padding: "3px 9px",
-                        border: "1px solid #E4E7EC", borderRadius: 6,
-                        background: activeChatReqId === req.id ? "#EBF3FE" : "#F9FAFB",
-                        color: activeChatReqId === req.id ? "#1A73E8" : "#667085",
-                        fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
-                      }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                      Chat {chatThreads[req.id]?.length > 0 ? `(${chatThreads[req.id].length})` : ""}
+                );
+              };
+
+              return (
+                <>
+                  {/* ── PENDING section ── */}
+                  <div style={{ borderBottom: "1px solid #F1F5F9" }}>
+                    <button
+                      onClick={() => setSentPendingOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: sentPendingOpen ? "#FEF3C7" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: sentPendingOpen ? "1px solid #FDE68A" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        Pending Requests
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: sentPending.length > 0 ? "#D97706" : "#9AA0A6", background: sentPending.length > 0 ? "#FEF3C7" : "#F1F5F9", border: `1px solid ${sentPending.length > 0 ? "#FDE68A" : "#E2E8F0"}`, borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {sentPending.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: sentPendingOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
                     </button>
+                    {sentPendingOpen && (
+                      <div>
+                        {sentPending.length === 0
+                          ? <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No pending requests</div>
+                          : sentPending.map(renderSentCard)}
+                      </div>
+                    )}
                   </div>
-                  {!onOpenChat && chatOpenId === req.id && (
-                    <div style={{ marginTop: 10, border: "1px solid #E4E7EC", borderRadius: 8, overflow: "hidden" }}>
-                      <div style={{
-                        padding: "6px 10px", background: "#F9FAFB", borderBottom: "1px solid #E4E7EC",
-                        fontSize: 10, fontWeight: 700, color: "#667085", textTransform: "uppercase", letterSpacing: "0.05em"
-                      }}>
-                        Chat Thread
+
+                  {/* ── IN PROGRESS section ── */}
+                  <div style={{ borderBottom: "1px solid #F1F5F9" }}>
+                    <button
+                      onClick={() => setSentInProgressOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: sentInProgressOpen ? "#EFF6FF" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: sentInProgressOpen ? "1px solid #BFDBFE" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        In Progress
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#1A73E8", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {sentInProgress.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: sentInProgressOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {sentInProgressOpen && (
+                      <div>
+                        {sentInProgress.length === 0
+                          ? <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No in-progress requests</div>
+                          : sentInProgress.map(renderSentCard)}
                       </div>
-                      <div style={{ maxHeight: 200, overflowY: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-                        {(chatThreads[req.id] || []).length === 0 ? (
-                          <div style={{ textAlign: "center", padding: "12px 0", fontSize: 11, color: "#9AA0A6" }}>No messages yet.</div>
-                        ) : (chatThreads[req.id] || []).map((msg, mi) => {
-                          const isMe = msg.senderId === employeeId;
-                          return (
-                            <div key={msg.id || mi} style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
-                              {!isMe && <div style={{ fontSize: 9, color: "#9AA0A6", marginBottom: 2, fontWeight: 600 }}>{msg.senderName}</div>}
-                              <div style={{
-                                maxWidth: "85%", padding: "6px 10px", borderRadius: isMe ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
-                                background: isMe ? "#1A73E8" : "#F3F4F6", color: isMe ? "#fff" : "#1A1D21", fontSize: 12, lineHeight: 1.5
-                              }}>
-                                <LinkedText text={msg.text} isMe={isMe} />
-                              </div>
-                              <div style={{ fontSize: 9, color: "#9AA0A6", marginTop: 2 }}>
-                                {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div ref={el => chatEndRefs.current[req.id] = el} />
+                    )}
+                  </div>
+
+                  {/* ── COMPLETED section ── */}
+                  <div>
+                    <button
+                      onClick={() => setSentCompletedOpen(p => !p)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: sentCompletedOpen ? "#F0FDF4" : "#F8FAFC", border: "none", cursor: "pointer", fontFamily: "inherit", borderBottom: sentCompletedOpen ? "1px solid #BBF7D0" : "none" }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21", flex: 1, textAlign: "left" }}>
+                        Completed
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, padding: "1px 8px", marginRight: 4 }}>
+                        {sentCompleted.length}
+                      </span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: sentCompletedOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+                    {sentCompletedOpen && (
+                      <div>
+                        {sentCompleted.length === 0
+                          ? <div style={{ textAlign: "center", padding: "20px", color: "#9AA0A6", fontSize: 12 }}>No completed requests yet</div>
+                          : sentCompleted.map(renderSentCard)}
                       </div>
-                      <div style={{ display: "flex", gap: 6, padding: "7px 10px", borderTop: "1px solid #E4E7EC", background: "#F9FAFB" }}>
-                        <input
-                          value={chatInput[req.id] || ""}
-                          onChange={e => setChatInput(prev => ({ ...prev, [req.id]: e.target.value }))}
-                          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMsg(req.id); } }}
-                          placeholder="Type a message…"
-                          style={{
-                            flex: 1, padding: "6px 10px", border: "1.5px solid #E4E7EC", borderRadius: 6,
-                            fontSize: 12, fontFamily: "inherit", outline: "none", background: "#fff", color: "#1A1D21"
-                          }}
-                        />
-                        <button onClick={() => sendChatMsg(req.id)}
-                          style={{
-                            padding: "6px 12px", background: "#1A73E8", color: "#fff", border: "none",
-                            borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center"
-                          }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                </>
               );
-            })}
+            })()}
           </div>
         )}
-      </div >
+      </div>
     </>
   );
 }
