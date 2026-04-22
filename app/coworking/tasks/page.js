@@ -5488,7 +5488,7 @@ export default function TasksPage() {
                   <div style={{ display: "flex", background: "#fff", borderBottom: "1px solid #E5E7EB" }}>
                     {[
                       { key: "approve", label: "✓ Approve", color: "#166534", activeBg: "#DCFCE7", activeBorder: "#16A34A" },
-                      { key: "suggest", label: "📅 Suggest Date", color: "#6D28D9", activeBg: "#EDE9FE", activeBorder: "#7C3AED" },
+                      { key: "suggest", label: "📅 Suggest Duration", color: "#6D28D9", activeBg: "#EDE9FE", activeBorder: "#7C3AED" },
                       { key: "reject", label: "✕ Reject", color: "#991B1B", activeBg: "#FEE2E2", activeBorder: "#EF4444" },
                     ].map(tab => (
                       <button key={tab.key}
