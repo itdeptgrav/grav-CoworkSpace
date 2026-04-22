@@ -18,6 +18,8 @@ import EditDeadlineModal from "../../../components/coworking/tasks/EditDeadlineM
 import SubmitCompletionModal from "../../../components/coworking/tasks/SubmitCompletionModal";
 import ReviewCompletionModal from "../../../components/coworking/tasks/ReviewCompletionModal";
 import DeadlineBadge, { getDeadlineInfo } from "../../../components/coworking/tasks/DeadlineBadge";
+
+import DeadlineBreakdown from "../../../components/coworking/tasks/DeadlineBreakdown";
 import ImageLightbox from "../../../components/coworking/tasks/ImageLightbox";
 import SwipeableMessage from "../../../components/coworking/tasks/SwipeableMessage";
 import { ReportCard, ReportDateGroup } from "../../../components/coworking/tasks/ReportCard";
@@ -571,7 +573,71 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
             </div>
             {/* Big title */}
             <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", lineHeight: 1.3, margin: 0, letterSpacing: "-0.01em" }}>{task.title}</h2>
+
           </div>
+
+          {/* ── Extension approved, waiting for employee to press Start ────
+              When TL/CEO approves an extension, the backend flips
+              awaitingExtensionStart=true and leaves dueDate stale on purpose.
+              The new deadline is anchored to Timer Start Time (not approval
+              time), so this card shows the prominent CTA. Employee sees the
+              green Start Timer button; anyone else sees a passive waiting
+              note. Both read the same flag, so the two views stay in sync. */}
+          {task.awaitingExtensionStart && Number(task.lastExtensionSecs) > 0 && (() => {
+            const extSecs = Number(task.lastExtensionSecs) || 0;
+            // Short, friendly duration label — kept inline so this block is
+            // fully self-contained.
+            const extLabel = extSecs < 60 ? `${extSecs}s`
+              : extSecs < 3600 ? `${Math.round(extSecs / 60)} min`
+                : `${Math.round(extSecs / 3600)}h`;
+            const isAssignee = Array.isArray(task.assigneeIds) && task.assigneeIds.includes(employeeId);
+
+            if (isAssignee) {
+              return (
+                <div style={{
+                  margin: "10px 14px 0",
+                  padding: "12px 14px",
+                  background: "#ECFDF5",
+                  border: "1.5px solid #A7F3D0",
+                  borderRadius: 10,
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#065F46", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                    ✅ Extension Approved
+                  </div>
+                  <div style={{ fontSize: 11, color: "#047857", lineHeight: 1.55, marginBottom: 10 }}>
+                    You have <b>+{extLabel}</b> extra time.
+                    Your new deadline starts the moment you press <b>Start Timer</b> — not before.
+                    Pause whenever you need; the deadline stays the same.
+                  </div>
+                  <button
+                    onClick={() => timerStart(task.taskId, task.title)}
+                    style={{
+                      width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
+                      background: "#10B981", color: "#fff", fontSize: 12, fontWeight: 700,
+                      cursor: "pointer", fontFamily: "inherit",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    }}
+                  >
+                    ▶ Start Timer · Begin +{extLabel} Extension
+                  </button>
+                </div>
+              );
+            }
+
+            // TL/CEO side — passive waiting note
+            return (
+              <div style={{
+                margin: "10px 14px 0",
+                padding: "10px 12px",
+                background: "#F0FDF4",
+                border: "1px solid #BBF7D0",
+                borderRadius: 8,
+                fontSize: 11, color: "#166534",
+              }}>
+                ⏳ Extension approved — waiting for employee to press <b>Start</b>. New deadline = Start Time + {extLabel}.
+              </div>
+            );
+          })()}
 
           {/* ── Description ── */}
           {task.description && (
@@ -622,8 +688,16 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                   {/* Live clock-time deadline — visible at every task state so employee & manager
                       both see the same "Due at 10:30 AM" that shifts with pause/resume. */}
                   {task.dueDate && (() => {
-                    const _ms = computeLiveDeadline(task, getTimerSession ? getTimerSession(task.taskId) : null);
+                    // CEO/TL view: getTimerSession returns null (the logged-in
+                    // viewer isn't the assignee). Fall back to watchedTimers
+                    // which is assigneeAllTimers from useWatchEmployeeTimers
+                    // and carries the live session of whichever assignee is
+                    // actually running the timer. Same math on both sides now.
+                    const _mySess = getTimerSession ? getTimerSession(task.taskId) : null;
+                    const _watchedSess = watchedTimers?.get(task.taskId) || null;
+                    const _ms = computeLiveDeadline(task, _mySess || _watchedSess);
                     if (!_ms) return null;
+
                     const _d = new Date(_ms);
                     const _now = new Date();
                     const sameDay = _d.toDateString() === _now.toDateString();
@@ -663,15 +737,26 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       </div>
                     );
                   })()}
-                  {(task.dueDate || task.deadlineWindowSecs) && <DeadlineBadge dueDate={task.dueDate} deadlineWindowSecs={task.deadlineWindowSecs || 0} workedSecs={getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0} />}
+                  {(task.dueDate || task.deadlineWindowSecs) && (() => {
+                    // Prefer own session (I'm the assignee) → else watched
+                    // session (I'm CEO/TL viewing someone else's task).
+                    // Without this fallback, CEO/TL always see "0s worked"
+                    // because getDisplaySeconds only knows their own timer.
+                    const _mine = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+                    const _watched = watchedTimers?.get(task.taskId)?.displaySeconds || 0;
+                    return <DeadlineBadge dueDate={task.dueDate} deadlineWindowSecs={task.deadlineWindowSecs || 0} workedSecs={_mine || _watched} />;
+                  })()}
                 </div>
               </Field>
             )}
 
             {/* ── Time Requested — visible to all roles ── */}
+
             {task.deadlineWindowSecs > 0 && (() => {
               const w = task.deadlineWindowSecs;
-              const workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+              const _mine = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
+              const _watched = watchedTimers?.get(task.taskId)?.displaySeconds || 0;
+              const workedSecs = _mine || _watched;
               const fmtSecs = (s) => {
                 const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
                 if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
@@ -685,11 +770,11 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", padding: "2px 8px", borderRadius: 6 }}>
-                        ⏱ {fmtSecs(w)} asked
+
                       </span>
                       {timerStarted && (
                         <span style={{ fontSize: 11, fontWeight: 600, color: workedSecs >= w ? "#B91C1C" : "#16A34A", background: workedSecs >= w ? "#FEF2F2" : "#F0FDF4", padding: "2px 8px", borderRadius: 6 }}>
-                          {workedSecs >= w ? `⚠ ${fmtSecs(workedSecs - w)} over` : `${fmtSecs(remaining)} left`}
+                          {workedSecs >= w ? `` : `${fmtSecs(remaining)} left`}
                         </span>
                       )}
                       {timerStarted && (
@@ -706,6 +791,11 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                         <div style={{ height: "100%", width: `${Math.min(100, (workedSecs / w) * 100)}%`, background: workedSecs >= w ? "#EF4444" : "#22C55E", borderRadius: 99, transition: "width 1s linear" }} />
                       </div>
                     )}
+                    {/* Extension audit breakdown — shows "30m + 20m + 10m = 60m"
+                        with expandable history. Renders nothing for tasks that
+                        have never had an extension (originalWindowSecs absent
+                        and extensions[] empty), so new tasks stay clean. */}
+                    <DeadlineBreakdown task={task} showList={true} />
                   </div>
                 </Field>
               );
@@ -1007,7 +1097,15 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
-                      ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
+                      {(() => {
+                        const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
+                        const delta = Number(task.pendingExtensionSecs) || 0;
+                        const total = Number(task.deadlineWindowSecs) || 0;
+                        // Extension: show the extra ask, not the total, to match
+                        // how the approver sees it on their side.
+                        if (delta > 0) return `⏱ +${fmt(delta)} extra requested`;
+                        return `⏱ ${fmt(total)} requested`;
+                      })()}
                     </div>}
                     <div style={{ fontSize: 10, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
                   </div>
@@ -1154,7 +1252,28 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                     </div>
                     {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
                       <strong>{task.proposedDeadlineByName}</strong> proposed:<br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} needed</span>
+                      <span style={{ fontWeight: 700, color: "#9A3412" }}>
+                        {(() => {
+                          // Helper: seconds → short human label
+                          const fmt = (s) => {
+                            if (!s) return "?";
+                            if (s < 60) return `${s}s`;
+                            if (s < 3600) return `${Math.round(s / 60)} min`;
+                            if (s < 86400) return `${Math.round(s / 3600)}h`;
+                            return `${Math.round(s / 86400)}d`;
+                          };
+                          // Extension context: proposal carries the DELTA in pendingExtensionSecs.
+                          // Show the extra ask prominently; the new total is secondary context.
+                          const delta = Number(task.pendingExtensionSecs) || 0;
+                          const total = Number(task.deadlineWindowSecs) || 0;
+                          if (delta > 0) {
+                            const prev = Math.max(0, total - delta);
+                            return <>⏱ +{fmt(delta)} extra <span style={{ color: "#C2410C", fontWeight: 500, fontSize: 11 }}>(was {fmt(prev)} → new {fmt(total)})</span></>;
+                          }
+                          // First-time proposal: no delta, show the ask as-is.
+                          return <>⏱ {fmt(total)} needed</>;
+                        })()}
+                      </span>
                     </div>}
 
                     {!df.showRejectInput && !df.showCounterForm ? (
@@ -1622,6 +1741,39 @@ export default function TasksPage() {
   // { dragId, dropOnTaskId, dragTitle, dropTitle, newParentId, isRootMove }
 
   // ── Task Timer (start/pause per task, one active at a time) ─────────────────
+  // ── Deadline auto-pause wiring ──────────────────────────────────────────
+  // The hook ticks every second while a task is running. Each tick it peeks
+  // at this ref to see the approved window for the running task. The moment
+  // workedSecs >= windowSecs it auto-pauses and fires onDeadlineReached.
+  // Using a ref (not prop) so updating a window doesn't cause the tick
+  // interval to respawn mid-count.
+  const deadlineWindowsRef = useRef({});
+  // Keep the ref synced whenever the tasks list (re)loads. Only tasks that
+  // have an approved window contribute; everything else is skipped.
+  useEffect(() => {
+    const map = {};
+    allTasks.forEach(t => {
+      const w = Number(t.deadlineWindowSecs) || 0;
+      // Only auto-pause on tasks in an "actively working" state. A pending-
+      // approval or done task shouldn't trigger auto-pause even if somehow
+      // the timer is running.
+      if (w > 0 && ["confirmed", "in_progress", "deadline_approved"].includes(t.status)) {
+        map[t.taskId] = w;
+      }
+    });
+    deadlineWindowsRef.current = map;
+  }, [allTasks]);
+
+  // Auto-pause handler. When the tick loop detects deadline reached, it
+  // calls this (before pausing). We open the work commit modal with a
+  // pre-filled message so the employee can note what they got done before
+  // requesting an extension.
+  const handleDeadlineReached = useCallback((taskId, taskTitle, workedSecs) => {
+    setCommitModal({ taskId, taskTitle, autoReason: "deadline_reached" });
+    setCommitMessage("⚠️ Deadline reached. Please summarize what you accomplished before requesting an extension.");
+    setCommitAttachments([]);
+  }, []);
+
   const {
     activeTaskId: timerActiveTaskId,
     startTask: timerStart,
@@ -1630,19 +1782,61 @@ export default function TasksPage() {
     getSession: getTimerSession,
     toast: timerToast,
     sessionMap: timerSessionMap,
-  } = useTaskTimer(employeeId);
+  } = useTaskTimer(employeeId, {
+    deadlineWindowsRef,
+    onDeadlineReached: handleDeadlineReached,
+  });
 
-  // ── Intercept pause: show commit message modal first ─────────────────────────
-  // Intercept timerStart — if another task is running, show commit modal first
-  const handleTimerStart = useCallback((newTaskId, newTaskTitle) => {
+  const handleTimerStart = useCallback(async (newTaskId, newTaskTitle) => {
     if (timerActiveTaskId && timerActiveTaskId !== newTaskId) {
       // Another task is running — show commit modal, then start new task after
       setCommitModal({ taskId: timerActiveTaskId, taskTitle: allTaskMapRef.current?.get(timerActiveTaskId)?.title || timerActiveTaskId, nextTaskId: newTaskId, nextTaskTitle: newTaskTitle });
       setCommitMessage("");
-      setCommitAttachments([]);
-    } else {
-      timerStart(newTaskId, newTaskTitle);
+      return;
     }
+
+    // ── Extension-start detection ──────────────────────────────────────
+    // If the task has awaitingExtensionStart=true, this is the FIRST start
+    // after an extension approval. We must:
+    //   (1) re-anchor the session's totalSeconds so remaining = lastExtensionSecs
+    //   (2) rewrite task.dueDate = now + lastExtensionSecs * 1000
+    //   (3) clear awaitingExtensionStart + record extensionTimerStartedAt
+    const task = allTaskMapRef.current?.get(newTaskId);
+    if (task?.awaitingExtensionStart && Number(task.lastExtensionSecs) > 0) {
+      const extSecs = Number(task.lastExtensionSecs);
+      const windowSecs = Number(task.deadlineWindowSecs) || extSecs;
+      // Anchor so that from this moment, exactly extSecs remain.
+      // anchorBaseSecs = windowSecs - extSecs. (For a deadline-reached case
+      // that's the old window value; for a preemptive case we forgive any
+      // unused original budget — matches the product spec.)
+      const anchorBaseSecs = Math.max(0, windowSecs - extSecs);
+      const now = Date.now();
+      const newDueDateISO = new Date(now + extSecs * 1000).toISOString();
+
+      // 1) Start the timer with the re-anchored base.
+      await timerStart(newTaskId, newTaskTitle, { anchorBaseSecs });
+
+      // 2) Update the task doc so every viewer (employee, TL, CEO) sees
+      //    the new deadline immediately via their Firestore listener.
+      //    firebaseDb is already imported at the top of the file (line 43)
+      //    from lib/coworkFirebase, so we just use it directly — no dynamic
+      //    import needed.
+      try {
+        const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+        await updateDoc(doc(firebaseDb, "cowork_tasks", newTaskId), {
+          awaitingExtensionStart: false,
+          extensionTimerStartedAt: new Date(now).toISOString(),
+          dueDate: newDueDateISO,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error("[extension-start] failed to update task:", e.message);
+      }
+      return;
+    }
+
+    // Normal path — plain start/resume, no re-anchoring.
+    timerStart(newTaskId, newTaskTitle);
   }, [timerActiveTaskId, timerStart]);
 
   const handleTimerPause = useCallback((taskId, taskTitle) => {
@@ -5182,7 +5376,13 @@ export default function TasksPage() {
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
                       </div>
                       {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "3px 8px", borderRadius: 6, display: "inline-block" }}>
-                        ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
+                        {(() => {
+                          const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
+                          const delta = Number(task.pendingExtensionSecs) || 0;
+                          const total = Number(task.deadlineWindowSecs) || 0;
+                          if (delta > 0) return `⏱ +${fmt(delta)} extra requested`;
+                          return `⏱ ${fmt(total)} requested`;
+                        })()}
                       </div>}
                     </div>
                   )}
@@ -5270,7 +5470,16 @@ export default function TasksPage() {
                       <div style={{ fontSize: 12, color: "#78350F" }}>
                         <strong>{task.proposedDeadlineByName}</strong> requests:{" "}
                         <span style={{ fontWeight: 700 }}>
-                          ⏱ {(() => { const w = task.deadlineWindowSecs || 0; if (!w) return "?"; if (w < 60) return `${w}s`; if (w < 3600) return `${Math.round(w / 60)} min`; if (w < 86400) return `${Math.round(w / 3600)}h`; return `${Math.round(w / 86400)}d`; })()} requested
+                          {(() => {
+                            const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
+                            const delta = Number(task.pendingExtensionSecs) || 0;
+                            const total = Number(task.deadlineWindowSecs) || 0;
+                            if (delta > 0) {
+                              const prev = Math.max(0, total - delta);
+                              return <>⏱ +{fmt(delta)} extra <span style={{ color: "#C2410C", fontWeight: 500, fontSize: 11 }}>(was {fmt(prev)} → new {fmt(total)})</span></>;
+                            }
+                            return <>⏱ {fmt(total)} requested</>;
+                          })()}
                         </span>
                       </div>
                     )}

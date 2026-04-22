@@ -21,7 +21,6 @@ import DeadlineBadge, { getDeadlineInfo } from "../../../../components/coworking
 import { GwAvatar, GwStatusBadge } from "../../../../components/coworking/shared/CoworkShared";
 import MediaMessageInput from "../../../../components/coworking/messaging/MediaMessageInput";
 import MessageBubble from "../../../../components/coworking/messaging/MessageBubble";
-import LinkedText from "../../../../components/coworking/messaging/LinkedText";
 import CreateTaskModal from "../../../../components/coworking/tasks/CreateTaskModal";
 import EditDeadlineModal from "../../../../components/coworking/tasks/EditDeadlineModal";
 import DailyReportModal from "../../../../components/coworking/tasks/DailyReportModal";
@@ -35,6 +34,7 @@ import { firebaseAuth } from "../../../../lib/coworkFirebase";
 
 import { firebaseDb } from "../../../../lib/coworkFirebase";
 import { collection, doc, setDoc, addDoc, updateDoc, onSnapshot, query, orderBy, limit, serverTimestamp, increment } from "firebase/firestore";
+import { computeLiveDeadline, fmtLiveDeadlineDateTime } from "../../../../lib/tasksPageHelpers";
 
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -94,6 +94,13 @@ export default function TaskDetailPage() {
     const [showDelete, setShowDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [actionBusy, setActionBusy] = useState(false);
+    // ── Live timer session for deadline sync ───────────────────────────────
+    // Subscribed to the ASSIGNEE's Firestore timer session for this task so
+    // both the CEO/TL (viewing this page) and the employee compute the same
+    // wall-clock deadline via computeLiveDeadline(). Without this, the CEO side
+    // falls back to stale task.dueDate and shows a time a few minutes off from
+    // the employee's running timer.
+    const [timerSession, setTimerSession] = useState(null);
     // Deadline proposal state
     const [propDate, setPropDate] = useState("");
     const [propTime, setPropTime] = useState("09:00");
@@ -195,6 +202,29 @@ export default function TaskDetailPage() {
 
     useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs]);
     useEffect(() => { draftEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [draftMsgs]);
+
+    // ── Live timer session subscription ───────────────────────────────────
+    // Subscribes to cowork_task_timers/{assigneeId}/sessions/{taskId} so the
+    // deadline math reflects the CURRENT running timer state (lastStartTime,
+    // totalSeconds, isActive, updatedAt) instead of falling back to the stale
+    // task.dueDate wall-clock value. When task has multiple assignees we pick
+    // the FIRST one since they're the primary worker in the current model.
+    useEffect(() => {
+        const assigneeId = task?.assigneeIds?.[0];
+        if (!taskId || !assigneeId) { setTimerSession(null); return; }
+        const ref = doc(firebaseDb, "cowork_task_timers", assigneeId, "sessions", taskId);
+        const unsub = onSnapshot(ref, snap => {
+            if (snap.exists()) {
+                setTimerSession(snap.data());
+            } else {
+                setTimerSession(null);
+            }
+        }, err => {
+            console.warn("timer session listener:", err.message);
+            setTimerSession(null);
+        });
+        return () => unsub();
+    }, [taskId, task?.assigneeIds]);
 
     // ── Propose deadline (employee sets date+time, submits for approval) ─────
     const handleProposeDeadline = async () => {
@@ -466,7 +496,13 @@ export default function TaskDetailPage() {
                                 // PRIORITY: if dueDate set and not pending approval → always show Confirm
                                 const hasDueDate = !!task.dueDate;
                                 const isPending = task.status === "pending_deadline_approval";
-                                const deadlineMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
+                                // Use the LIVE deadline (derived from the running timer session) so
+                                // this full-page detail view stays in sync with the side-panel view.
+                                // Falls back to the static task.dueDate when there's no session yet
+                                // (e.g. task approved but employee hasn't pressed Play).
+                                const deadlineMs = hasDueDate
+                                    ? (computeLiveDeadline(task, timerSession) || new Date(task.dueDate).getTime())
+                                    : null;
                                 const deadlinePassed = deadlineMs && deadlineMs < Date.now();
                                 const passedStr = (() => {
                                     if (!deadlinePassed || !deadlineMs) return "";
@@ -485,7 +521,7 @@ export default function TaskDetailPage() {
                                             </span>
                                         </div>
                                         {task.dueDate && <div style={{ fontSize: 12, fontWeight: 600, padding: "4px 9px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", color: deadlinePassed ? "#B91C1C" : "#166534" }}>
-                                            📅 {new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                            📅 {fmtLiveDeadlineDateTime(task, timerSession) || new Date(task.dueDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                                             {deadlinePassed && <span style={{ opacity: 0.8, marginLeft: 6 }}>· passed {passedStr}</span>}
                                         </div>}
                                         {deadlinePassed && <div style={{ fontSize: 12, color: "#B91C1C", background: "#FEF2F2", borderRadius: 7, padding: "6px 9px", marginBottom: 8, lineHeight: 1.5 }}>
@@ -783,7 +819,7 @@ export default function TaskDetailPage() {
                                                 draftMsgs.map((msg, i) => {
                                                     const isMe = msg.senderId === employeeId;
                                                     const isSystem = msg.messageType === "system";
-                                                    if (isSystem) return <div key={msg.messageId || i} style={{ textAlign: "center", padding: "4px 12px", fontSize: 11, color: "#9aa0a6", fontStyle: "italic" }}><LinkedText text={msg.text} isMe={false} /></div>;
+                                                    if (isSystem) return <div key={msg.messageId || i} style={{ textAlign: "center", padding: "4px 12px", fontSize: 11, color: "#9aa0a6", fontStyle: "italic" }}>{msg.text}</div>;
                                                     const prevMsg = i > 0 ? draftMsgs[i - 1] : null;
                                                     const showSender = !prevMsg || prevMsg.senderId !== msg.senderId;
                                                     return <MessageBubble key={msg.messageId || i} msg={msg} isMe={isMe} showSender={showSender} showAvatar={showSender} />;
@@ -877,7 +913,7 @@ export default function TaskDetailPage() {
                                                     {r.progressPercent}%
                                                 </div>
                                             </div>
-                                            <p style={{ margin: "10px 0 0", fontSize: 14, color: "#202124", lineHeight: 1.6, whiteSpace: "pre-wrap" }}><LinkedText text={r.message} isMe={false} /></p>
+                                            <p style={{ margin: "10px 0 0", fontSize: 14, color: "#202124", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{r.message}</p>
                                             {r.imageUrls?.length > 0 && (
                                                 <div style={{ marginTop: 12 }}>
                                                     <div style={s.proofLabel}>📷 Proof ({r.imageUrls.length})</div>

@@ -1,15 +1,22 @@
 /**
  * components/coworking/tasks/WorkCommitModal.jsx
  *
- * Pause-timer "Pause Timer" modal — shown when an employee pauses their task
- * timer. Captures a commit message and any number of file attachments, writes
- * both to `cowork_work_commits/{employeeId}/logs/{autoId}` via the parent's
+ * Pause-timer modal — shown when an employee pauses their task timer.
+ * Captures a commit message and any number of file attachments, writes both
+ * to `cowork_work_commits/{employeeId}/logs/{autoId}` via the parent's
  * handleCommitSubmit callback.
+ *
+ * Two modes, picked from commitModal.autoReason:
+ *   - undefined / null     → "Pause Timer" (user pressed pause manually)
+ *   - "deadline_reached"   → "Deadline Reached" red-themed header + red
+ *                            banner in body; label + button copy shift to
+ *                            nudge the employee to summarize what they got
+ *                            done and then request an extension.
  *
  * Fully self-contained UI:
  *   - × close button + Esc key (parent handles Esc in useEffect)
  *   - Ctrl/⌘+Enter submits
- *   - Drag-and-drop attachments (all file types → Google Drive via /cowork/upload/pdf)
+ *   - Drag-and-drop attachments (any file type → Google Drive via /cowork/upload/pdf)
  *   - Pause & Save disabled while uploading/saving
  *
  * All state lives in the parent (TasksPage) so the attachments list survives
@@ -20,7 +27,7 @@ import React from "react";
 
 export default function WorkCommitModal({
     // state
-    commitModal,          // { taskId, taskTitle, nextTaskId?, nextTaskTitle? } | null
+    commitModal,          // { taskId, taskTitle, autoReason?, nextTaskId?, nextTaskTitle? } | null
     commitMessage,
     commitAttachments,
     commitUploading,
@@ -40,6 +47,22 @@ export default function WorkCommitModal({
     if (!commitModal) return null;
 
     const submitDisabled = savingCommit || commitUploading || !commitMessage.trim();
+
+    // ── Auto-pause detection ───────────────────────────────────────────────
+    // When the timer hits the approved deadline window, useTaskTimer fires
+    // pauseTask(...) with { autoReason: "deadline_reached" }. The parent
+    // handler (handleDeadlineReached) seeds commitModal with that reason.
+    // All visual shifts below are driven purely by this flag so the
+    // user-pressed-pause path is 100% visually unchanged.
+    const isDeadlineReached = commitModal.autoReason === "deadline_reached";
+
+    // Palette for the header chip — swap to red when the deadline hit.
+    // Kept inline and named so it's obvious what each shade is for.
+    const chipBg = isDeadlineReached ? "#FEE2E2" : "#FFF7ED";
+    const chipBorder = isDeadlineReached ? "#FECACA" : "#FED7AA";
+    const chipIconColor = isDeadlineReached ? "#B91C1C" : "#D97706";
+    const titleText = isDeadlineReached ? "Deadline Reached" : "Pause Timer";
+    const titleColor = isDeadlineReached ? "#991B1B" : "#0F172A";
 
     return (
         <div
@@ -62,18 +85,20 @@ export default function WorkCommitModal({
                 <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #E5E7EB" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{
-                            width: 36, height: 36, borderRadius: 9, background: "#FFF7ED",
-                            border: "1px solid #FED7AA", display: "flex", alignItems: "center",
+                            width: 36, height: 36, borderRadius: 9,
+                            background: chipBg,
+                            border: `1px solid ${chipBorder}`,
+                            display: "flex", alignItems: "center",
                             justifyContent: "center", flexShrink: 0,
                         }}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={chipIconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
                                 <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
                                 <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
                             </svg>
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>Pause Timer</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: titleColor }}>{titleText}</div>
                             <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {commitModal.taskTitle}
                             </div>
@@ -103,15 +128,43 @@ export default function WorkCommitModal({
 
                 {/* Body */}
                 <div style={{ padding: "16px 20px" }}>
+                    {/* ── Deadline-reached banner ────────────────────────────
+                         Only shown when the pause was triggered by the timer
+                         hitting the approved window. Explains what happened
+                         and what to do next (request an extension). Zero
+                         visual change for the manual-pause path. */}
+                    {isDeadlineReached && (
+                        <div style={{
+                            marginBottom: 14,
+                            padding: "10px 12px",
+                            background: "#FEF2F2",
+                            border: "1px solid #FECDD3",
+                            borderRadius: 9,
+                            display: "flex", alignItems: "flex-start", gap: 10,
+                        }}>
+                            <span style={{ fontSize: 18, lineHeight: 1 }}>⏱</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 3 }}>
+                                    Timer auto-paused — approved time is fully used
+                                </div>
+                                <div style={{ fontSize: 11, color: "#B91C1C", lineHeight: 1.55 }}>
+                                    Summarize your progress below, save this commit, then open the task and tap <b>Request Extension</b> to keep working.
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
-                        What did you work on? <span style={{ color: "#EF4444", fontWeight: 600, textTransform: "none" }}>*</span>
+                        {isDeadlineReached ? "What did you get done?" : "What did you work on?"} <span style={{ color: "#EF4444", fontWeight: 600, textTransform: "none" }}>*</span>
                     </label>
                     <textarea
                         autoFocus
                         value={commitMessage}
                         onChange={(e) => setCommitMessage(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
-                        placeholder="e.g. Fixed the login bug, updated UI layout…"
+                        placeholder={isDeadlineReached
+                            ? "e.g. Finished login UI, started on validation rules…"
+                            : "e.g. Fixed the login bug, updated UI layout…"}
                         style={{
                             width: "100%", padding: "10px 12px",
                             border: `1.5px solid ${commitMessage.trim() ? "#E5E7EB" : "#FCA5A5"}`,

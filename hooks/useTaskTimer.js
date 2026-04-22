@@ -63,7 +63,20 @@ async function saveSession(employeeId, taskId, data) {
 }
 
 // ── Main hook (for the assignee themselves) ───────────────────────────────────
-export function useTaskTimer(employeeId) {
+//
+// Optional `opts`:
+//   - deadlineWindowsRef : a ref holding { [taskId]: windowSecs } — the hook
+//     reads it EVERY tick (via ref so it doesn't cause re-renders) and auto-
+//     pauses the running task the moment displaySecs >= windowSecs.
+//   - onDeadlineReached(taskId, taskTitle, totalSecs) : called right BEFORE
+//     pause fires. Caller uses this to open the commit modal with a pre-filled
+//     "⚠ Deadline reached — please request an extension" prompt.
+//
+// Auto-pause fires at most ONCE per running session (gated by autoPausedRef).
+// When the employee gets an extension approved and resumes, the gate resets
+// because resume spins up a fresh tick loop via startTick().
+export function useTaskTimer(employeeId, opts = {}) {
+    const { deadlineWindowsRef, onDeadlineReached } = opts;
     const [activeTaskId, setActiveTaskId] = useState(null);
     const [sessionMap, setSessionMap] = useState(new Map());
     const [liveTick, setLiveTick] = useState(0);
@@ -72,6 +85,14 @@ export function useTaskTimer(employeeId) {
     const tickRef = useRef(null);
     const activeRef = useRef(null);
     const sessionMapRef = useRef(new Map());
+    // Has auto-pause already fired for the CURRENT running task? Reset on each
+    // startTick() so the next resume gets a fresh gate.
+    const autoPausedRef = useRef(false);
+    // Keep latest pauseTask + onDeadlineReached refs so the tick closure uses
+    // up-to-date versions without needing them in its deps.
+    const pauseTaskRef = useRef(null);
+    const onDeadlineRef = useRef(null);
+    onDeadlineRef.current = onDeadlineReached;
 
     activeRef.current = activeTaskId;
     sessionMapRef.current = sessionMap;
@@ -85,11 +106,32 @@ export function useTaskTimer(employeeId) {
         clearInterval(tickRef.current);
         const startedAt = Date.now();
         setLiveTick(baseSecs);
+        // Reset auto-pause gate — this is a fresh start/resume, so if the
+        // deadline was already hit and extension was approved, we want the
+        // new window to govern a brand-new gate cycle.
+        autoPausedRef.current = false;
         tickRef.current = setInterval(() => {
             const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-            setLiveTick(baseSecs + elapsed);
+            const display = baseSecs + elapsed;
+            setLiveTick(display);
+
+            // ── Auto-pause on deadline hit ────────────────────────────────
+            // Only acts on the CURRENTLY running task. Reads the window via
+            // ref (no re-render dependency). Fires ONCE per resume cycle.
+            if (autoPausedRef.current) return;
+            const winSecs = deadlineWindowsRef?.current?.[taskId] || 0;
+            if (winSecs > 0 && display >= winSecs) {
+                autoPausedRef.current = true;
+                const title = sessionMapRef.current.get(taskId)?.taskTitle || taskId;
+                // Let caller open the commit modal with deadline-reached prompt.
+                // We fire onDeadlineReached BEFORE pauseTask so the modal can
+                // seed its message field before state churns.
+                try { onDeadlineRef.current?.(taskId, title, display); } catch (e) { /* swallow */ }
+                // pauseTaskRef is set after pauseTask is defined below.
+                pauseTaskRef.current?.(taskId, title, { autoReason: "deadline_reached" });
+            }
         }, 1000);
-    }, []);
+    }, [deadlineWindowsRef]);
 
     const stopTick = useCallback(() => {
         clearInterval(tickRef.current);
@@ -129,7 +171,7 @@ export function useTaskTimer(employeeId) {
         return () => { unsub?.(); stopTick(); };
     }, [employeeId, startTick, stopTick]);
 
-    const startTask = useCallback(async (taskId, taskTitle) => {
+    const startTask = useCallback(async (taskId, taskTitle, opts = {}) => {
         if (!employeeId) return;
         const currentActive = activeRef.current;
         const now = Date.now();
@@ -162,7 +204,13 @@ export function useTaskTimer(employeeId) {
         }
 
         const existing = sessionMapRef.current.get(taskId);
-        const baseSecs = existing?.totalSeconds || 0;
+        // anchorBaseSecs — when provided by handleTimerStart (extension-start path),
+        // it overrides totalSeconds in Firestore so the auto-pause gate fires at
+        // exactly (anchorBaseSecs + lastExtensionSecs) = newTotalWindowSecs.
+        // Without this, Firestore still holds the old value — causing a mismatch on resume.
+        const baseSecs = (opts?.anchorBaseSecs != null)
+            ? Math.max(0, Number(opts.anchorBaseSecs))
+            : (existing?.totalSeconds || 0);
 
         await saveSession(employeeId, taskId, {
             totalSeconds: baseSecs,
@@ -179,7 +227,7 @@ export function useTaskTimer(employeeId) {
         }
     }, [employeeId, startTick, showToast]);
 
-    const pauseTask = useCallback(async (taskId, taskTitle) => {
+    const pauseTask = useCallback(async (taskId, taskTitle, pauseOpts = {}) => {
         if (!employeeId) return;
         const now = Date.now();
         const sess = sessionMapRef.current.get(taskId);
@@ -187,10 +235,15 @@ export function useTaskTimer(employeeId) {
         const startedAt = sess?.lastStartTime || now;
         const addedSecs = Math.floor((now - startedAt) / 1000);
         const newTotal = base + addedSecs;
+        // Flag the session so the UI can distinguish a user-initiated pause
+        // from the automatic deadline-reached pause. We store it both locally
+        // (for the optimistic map) and in Firestore so CEO/TL see the same
+        // state and can react (e.g. badge on their task card).
+        const autoReason = pauseOpts.autoReason || null;
 
         // ── Optimistic update: update local map immediately so time stays visible
         // before Firestore onSnapshot fires (avoids flash-to-zero on pause)
-        const updatedSess = { ...(sess || {}), totalSeconds: newTotal, isActive: false, lastStartTime: null, taskTitle };
+        const updatedSess = { ...(sess || {}), totalSeconds: newTotal, isActive: false, lastStartTime: null, taskTitle, lastPauseReason: autoReason };
         const nextMap = new Map(sessionMapRef.current);
         nextMap.set(taskId, updatedSess);
         sessionMapRef.current = nextMap;
@@ -201,12 +254,20 @@ export function useTaskTimer(employeeId) {
             isActive: false,
             lastStartTime: null,
             taskTitle,
+            lastPauseReason: autoReason,
         });
 
         setActiveTaskId(null);
         stopTick();
-        showToast(`⏸ "${taskTitle}" paused — ${formatTime(newTotal)} total`, "pause");
+        if (autoReason === "deadline_reached") {
+            showToast(`⏱ "${taskTitle}" — deadline reached, timer paused. Request extension to continue.`, "pause");
+        } else {
+            showToast(`⏸ "${taskTitle}" paused — ${formatTime(newTotal)} total`, "pause");
+        }
     }, [employeeId, stopTick, showToast]);
+    // Register the latest pauseTask in the ref so the tick loop can call it
+    // without stale-closure issues. Done right after declaration.
+    pauseTaskRef.current = pauseTask;
 
     const getDisplaySeconds = useCallback((taskId) => {
         if (taskId === activeRef.current) return liveTick;
@@ -327,7 +388,6 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
                     isActive: true,
                     totalSeconds: sess.totalSeconds || 0,
                     lastStartTime: sess.lastStartTime || null,
-                    updatedAt: sess.updatedAt || null,
                     displaySeconds,
                 };
                 activeTimers.set(taskId, entry);
@@ -340,7 +400,6 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
                     isActive: false,
                     totalSeconds: sess.totalSeconds,
                     lastStartTime: null,
-                    updatedAt: sess.updatedAt || null,
                     displaySeconds: sess.totalSeconds,
                 });
             }
