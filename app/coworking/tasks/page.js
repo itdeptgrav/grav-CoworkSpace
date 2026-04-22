@@ -1295,7 +1295,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                       </div>
                     ) : df.showCounterForm ? (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Suggest a duration:</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Suggest a deadline:</div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                           <input type="number" min="1" max="999" placeholder="e.g. 4"
                             value={df.counterDurationVal || ""}
