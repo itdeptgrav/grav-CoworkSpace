@@ -78,6 +78,24 @@ export default function CoworkMeetingRoom() {
     });
 
     const intentionalLeave = useRef(false);
+    const autoStartedRef = useRef(false);
+
+    // ── AUTO-START recording when HOST enters the room ────────────────────────
+    // Requirement: recording begins for the HOST immediately on meeting start.
+    // Guarded by autoStartedRef so it only fires once per mount.
+    useEffect(() => {
+        if (!isHost) return;
+        if (phase !== "room") return;
+        if (autoStartedRef.current) return;
+        if (recording.isRecording) return;
+        autoStartedRef.current = true;
+        // Small delay so LiveKit connects + mic permission prompt settles first
+        const t = setTimeout(() => {
+            console.log("[CoworkMeetingRoom] 🎙️ Auto-starting recording for host");
+            recording.hostStartRecording();
+        }, 2000);
+        return () => clearTimeout(t);
+    }, [isHost, phase, recording]);
 
     // ── Load meeting ──────────────────────────────────────────────────────────
     // When full meeting page is active, clear pip from shell (we render directly)
@@ -599,6 +617,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
     const [showCode, setShowCode] = useState(false);
     const [showPeople, setShowPeople] = useState(false);
     const [showShare, setShowShare] = useState(false);
+    const [showAudioMonitor, setShowAudioMonitor] = useState(false);
     const [copied, setCopied] = useState(false);
     const [elapsed, setElapsed] = useState(0); // seconds since meeting started
     const participants = useParticipants();
@@ -702,6 +721,107 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
                         </div>
                     )}
                 </div>
+
+                {/* Audio Monitor — Host only */}
+                {isHost && (
+                    <div style={{ position: "relative" }}>
+                        <button className={`tb-btn${showAudioMonitor ? " tb-btn-active" : ""}`}
+                            onClick={() => { setShowAudioMonitor(p => !p); setShowPeople(false); setShowCode(false); setShowShare(false); }}
+                            title="Audio Monitor — see who has audio issues">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
+                            </svg>
+                            <span className="tb-btn-label">Audio</span>
+                        </button>
+                        {showAudioMonitor && (() => {
+                            // Build audio status for every participant including local
+                            const allP = [...participants];
+                            const audioStatus = allP.map(p => {
+                                const pubs = [...p.audioTrackPublications.values()];
+                                const hasTrack = pubs.length > 0;
+                                const track = pubs[0];
+                                const isPublished = hasTrack && !!track.track;
+                                const isMuted = hasTrack ? (track.isMuted || !track.isEnabled) : true;
+                                const micEnabled = p.isMicrophoneEnabled;
+                                // Diagnosis
+                                let status, statusColor, statusBg, reason;
+                                if (!hasTrack || !isPublished) {
+                                    status = "No Track"; statusColor = "#EF4444"; statusBg = "#FEF2F2";
+                                    reason = "Audio track not published — likely mic permission denied or device error";
+                                } else if (!micEnabled || isMuted) {
+                                    status = "Muted"; statusColor = "#F59E0B"; statusBg = "#FFFBEB";
+                                    reason = "Track published but microphone is muted";
+                                } else {
+                                    status = "✓ OK"; statusColor = "#10B981"; statusBg = "#ECFDF5";
+                                    reason = "Audio publishing normally";
+                                }
+                                return { p, name: p.name || p.identity || "?", isMe: p.isLocal, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason };
+                            });
+                            const issueCount = audioStatus.filter(a => a.status !== "✓ OK").length;
+                            return (
+                                <div style={{ ...S.dropdown, width: 340, maxHeight: 420, overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: "#E8EAED", flex: 1 }}>Audio Monitor</div>
+                                        {issueCount > 0
+                                            ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#FEF2F2", color: "#EF4444" }}>⚠ {issueCount} issue{issueCount > 1 ? "s" : ""}</span>
+                                            : <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#ECFDF5", color: "#10B981" }}>✓ All clear</span>
+                                        }
+                                    </div>
+                                    {/* Column headers */}
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, padding: "4px 6px", marginBottom: 4 }}>
+                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em" }}>Participant</span>
+                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Track</span>
+                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Status</span>
+                                    </div>
+                                    {audioStatus.map(({ p, name, isMe, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason }, i) => (
+                                        <div key={p.identity || i} style={{ marginBottom: 6, background: "#1E1E1E", borderRadius: 9, padding: "8px 10px", border: `1px solid ${status !== "✓ OK" ? "#3C2020" : "#2A2A2A"}` }}>
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, alignItems: "center" }}>
+                                                {/* Name */}
+                                                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8EAED", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                    {name}{isMe && <span style={{ fontSize: 9, color: "#9AA0A6", marginLeft: 4 }}>(you)</span>}
+                                                </div>
+                                                {/* Track published */}
+                                                <div style={{ textAlign: "center" }}>
+                                                    {isPublished
+                                                        ? <span style={{ fontSize: 10, color: "#10B981", fontWeight: 600 }}>✓ Live</span>
+                                                        : <span style={{ fontSize: 10, color: "#EF4444", fontWeight: 600 }}>✗ None</span>
+                                                    }
+                                                </div>
+                                                {/* Status badge */}
+                                                <div style={{ textAlign: "center" }}>
+                                                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: statusBg, color: statusColor, display: "inline-block" }}>
+                                                        {status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {/* Reason — only for issues */}
+                                            {status !== "✓ OK" && (
+                                                <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 5, lineHeight: 1.4, borderTop: "1px solid #2A2A2A", paddingTop: 5 }}>
+                                                    💡 {reason}
+                                                </div>
+                                            )}
+                                            {/* Mic / Cam detail row */}
+                                            <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
+                                                <span style={{ fontSize: 10, color: micEnabled ? "#10B981" : "#EF4444" }}>
+                                                    {micEnabled ? "🎙️ Mic on" : "🔇 Mic off"}
+                                                </span>
+                                                <span style={{ fontSize: 10, color: "#9AA0A6" }}>
+                                                    {p.audioTrackPublications.size} audio track{p.audioTrackPublications.size !== 1 ? "s" : ""}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {/* Tip for host */}
+                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#1A1A2E", borderRadius: 8, fontSize: 10, color: "#9AA0A6", lineHeight: 1.5 }}>
+                                        💡 If someone shows "No Track" — ask them to check browser mic permissions and rejoin. If "Muted" — ask them to unmute.
+                                    </div>
+                                    <button onClick={() => setShowAudioMonitor(false)} style={{ marginTop: 8, width: "100%", background: "#2A2A2A", border: "none", borderRadius: 6, color: "#9AA0A6", fontSize: 12, padding: "6px 0", cursor: "pointer" }}>Close</button>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                )}
 
                 {/* Invite — CEO/TL only */}
                 {isHost && (<>

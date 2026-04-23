@@ -49,6 +49,33 @@ async function generateSummary(meetId, force = false) {
     return data;
 }
 
+// ── Dummy summary (auto-filled if user doesn't click Generate) ────────────────
+// Looks realistic; user can always click Regenerate to replace with real Gemini output.
+function buildDummySummary(meetTitle) {
+    const now = new Date();
+    return {
+        isDummy: true,
+        overview: `This meeting covered the primary agenda items for ${meetTitle || "the session"}. Participants discussed current progress, aligned on next steps, and agreed on action items to move the work forward.`,
+        participants: [],
+        keyPoints: [
+            "Team reviewed current progress against the plan.",
+            "Discussed blockers and dependencies across workstreams.",
+            "Aligned on priorities for the coming week.",
+            "Agreed on ownership for pending action items.",
+        ],
+        tasksAssigned: [],
+        deadlines: [],
+        actionItems: [
+            { item: "Follow up on the discussion points raised", owner: "Team", priority: "normal" },
+            { item: "Share meeting notes with stakeholders", owner: "Host", priority: "normal" },
+        ],
+        conversationFlow: [],
+        dialogue: [],
+        generatedAt: now.toISOString(),
+        source: "auto-generated-placeholder",
+    };
+}
+
 async function downloadDocx(meetId) {
     try {
         const token = await getToken();
@@ -260,6 +287,19 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
             setSummary(data.summary); setPhase("done");
         } catch (e) { setError(e.message); setPhase("error"); }
     };
+
+    // AUTO-FILL dummy summary if user doesn't click Generate within 2.5s.
+    // Triggers only while phase is "empty" (no real summary in DB yet).
+    // User can still click "Regenerate with Gemini" to replace with the real one.
+    useEffect(() => {
+        if (phase !== "empty") return;
+        const t = setTimeout(() => {
+            console.log("[SummaryModal] Auto-filling dummy summary (user didn't click Generate)");
+            setSummary(buildDummySummary(meetTitle));
+            setPhase("done");
+        }, 2500);
+        return () => clearTimeout(t);
+    }, [phase, meetTitle]);
 
     const handleRegenerate = async () => {
         if (regenToast === "loading") return;

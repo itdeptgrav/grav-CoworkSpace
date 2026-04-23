@@ -7,13 +7,17 @@
  *   - CEO/TL clicks Stop  → everyone stops → each person's audio uploads to Drive
  *   - Format: {employeeId}_{Name}_audio_{meetId}.webm  (e.g. E015_Rakesh_audio_M002.webm)
  *
- * EDGE CASES:
- *   - Late joiner: server notifies them immediately via activeMeetingRecordings map
+ * EDGE CASES (handled):
+ *   - Late joiner: server notifies them immediately via activeMeetingRecordings map.
+ *     v2 FIX — listeners now registered BEFORE the join_meeting_room emit so
+ *     the server's immediate "recording_started" reply can't be missed.
  *   - Net drop: chunks kept in memory, retried on next flush
  *   - Page close during recording: beacon saves last chunk + keepalive finalize
  *   - Rejoin after disconnect: session key detects rejoin, (1) suffix added to filename
- *   - Person muted: audio chunks skipped (isMuted check in ondataavailable)
+ *   - Person muted: audio chunks skipped (isMuted check + MediaRecorder pause)
  *   - Double finalize: isFinalizedRef guard prevents duplicate uploads
+ *   - getUserMedia transient failure: up to 5 retries with backoff (by hook or crook)
+ *   - Speech intervals: every unmute→mute transition logged as {startMs, endMs, durationMs}
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -24,6 +28,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const CHUNK_MS = 30_000;
 const RETRY_LIMIT = 3;
 const RETRY_DELAY_MS = 5_000;
+const START_RETRY_LIMIT = 5;       // getUserMedia retries
+const START_RETRY_DELAY_MS = 3_000;
 
 // ── MIME type ─────────────────────────────────────────────────────────────────
 function getSupportedMimeType() {
@@ -88,7 +94,7 @@ async function uploadChunkWithRetry({ blob, meetId, chunkIndex, mimeType }) {
         }
         if (attempt < RETRY_LIMIT) await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
     }
-    return false; // failed — caller keeps blob
+    return false;
 }
 
 // ── Beacon chunk (page unload) ────────────────────────────────────────────────
@@ -116,12 +122,12 @@ function sendKeepaliveFinalize({ meetId, firstName, mimeType, token, isRejoin })
 }
 
 // ── Normal finalize ───────────────────────────────────────────────────────────
-async function finalizeRecording({ meetId, firstName, mimeType, isRejoin }) {
+async function finalizeRecording({ meetId, firstName, mimeType, isRejoin, speechIntervals }) {
     const token = await getAuthToken();
     const res = await fetch(`${BASE}/cowork/audio/finalize`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ meetId, firstName, mimeType, isRejoin }),
+        body: JSON.stringify({ meetId, firstName, mimeType, isRejoin, speechIntervals: speechIntervals || [] }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Finalize failed");
@@ -138,8 +144,8 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     const [uploadResult, setUploadResult] = useState(null);
 
     const mediaRecorderRef = useRef(null);
-    const pendingChunksRef = useRef([]);   // failed uploads — kept for retry
-    const bufferedChunksRef = useRef([]);  // collected since last flush
+    const pendingChunksRef = useRef([]);
+    const bufferedChunksRef = useRef([]);
     const chunkIndexRef = useRef(0);
     const mimeTypeRef = useRef("");
     const isRecordingRef = useRef(false);
@@ -151,37 +157,48 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     const firstNameRef = useRef(firstName);
     const employeeIdRef = useRef(employeeId);
 
+    // Speech intervals — every unmute→mute transition is logged
+    const speechIntervalsRef = useRef([]);       // [{ startMs, endMs, durationMs }]
+    const currentSpeechStartRef = useRef(null);  // ms timestamp when unmute began
+
     meetIdRef.current = meetId;
     firstNameRef.current = firstName;
     employeeIdRef.current = employeeId;
 
-    // ── setMuted — called by MuteWatcher every 500ms ──────────────────────────
-    // When muted → PAUSE MediaRecorder (no audio captured at hardware level)
-    // When unmuted → RESUME MediaRecorder (audio capture restarts)
-    const prevMutedRef = useRef(null); // null = not yet initialized
+    // ── setMuted ──────────────────────────────────────────────────────────────
+    const prevMutedRef = useRef(null);
 
     const setMuted = useCallback((muted) => {
-        const wasMuted = isMutedRef.current;
         isMutedRef.current = muted;
 
-        // Only act on transitions, not every 500ms poll
         if (prevMutedRef.current === muted) return;
         prevMutedRef.current = muted;
+
+        // Speech interval tracking — runs whether or not recorder is ready yet
+        if (!muted) {
+            currentSpeechStartRef.current = Date.now();
+        } else if (muted && currentSpeechStartRef.current) {
+            const startMs = currentSpeechStartRef.current;
+            const endMs = Date.now();
+            const durationMs = endMs - startMs;
+            if (durationMs >= 250) {
+                speechIntervalsRef.current.push({ startMs, endMs, durationMs });
+                console.log(`[Recording] 🗣️ Speech: ${(durationMs / 1000).toFixed(1)}s`);
+            }
+            currentSpeechStartRef.current = null;
+        }
 
         const recorder = mediaRecorderRef.current;
         if (!recorder) return;
 
         if (muted && recorder.state === "recording") {
-            // Muted → pause recording so no audio is captured
             try {
                 recorder.pause();
                 console.log("[Recording] ⏸ Mic muted — MediaRecorder paused");
             } catch (e) {
-                // Some browsers don't support pause() — fallback: chunks discarded by isMutedRef check
                 console.warn("[Recording] pause() not supported, using chunk discard fallback");
             }
         } else if (!muted && recorder.state === "paused") {
-            // Unmuted → resume recording
             try {
                 recorder.resume();
                 console.log("[Recording] ▶️  Mic unmuted — MediaRecorder resumed");
@@ -208,7 +225,6 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         });
 
         if (!ok) {
-            // Keep in memory — will retry next flush
             pendingChunksRef.current.push(combined);
             chunkIndexRef.current--;
         }
@@ -223,10 +239,11 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         if (chunkTimerRef.current) { clearInterval(chunkTimerRef.current); chunkTimerRef.current = null; }
     }, []);
 
-    // ── Start recording ───────────────────────────────────────────────────────
-    const startRecording = useCallback(async (rejoin = false) => {
+    // ── Start recording (with retry — by hook or crook) ──────────────────────
+    const startRecording = useCallback(async (rejoin = false, attempt = 1) => {
         if (isRecordingRef.current) return;
         if (typeof window === "undefined") return;
+
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             const mimeType = getSupportedMimeType();
@@ -237,19 +254,17 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             chunkIndexRef.current = 0;
             bufferedChunksRef.current = [];
             pendingChunksRef.current = [];
+            speechIntervalsRef.current = [];
+            currentSpeechStartRef.current = isMutedRef.current ? null : Date.now();
 
             const recorder = new MediaRecorder(stream, { mimeType });
             recorder.ondataavailable = (e) => {
-                // Only collect audio when mic is NOT muted
-                // When muted, MediaRecorder still captures from raw mic stream —
-                // we must skip those chunks ourselves
                 if (e.data && e.data.size > 0 && !isMutedRef.current) {
                     bufferedChunksRef.current.push(e.data);
                 }
             };
             recorder.onerror = (e) => console.error("[MediaRecorder] Error:", e.error);
             recorder.start(1000);
-            // If already muted when recording starts, pause immediately
             if (isMutedRef.current) {
                 try { recorder.pause(); } catch (_) { }
             }
@@ -265,8 +280,16 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             console.log(`[Recording] ✅ Started for ${employeeIdRef.current}${rejoin ? " (REJOIN)" : ""}`);
         } catch (e) {
             isRecordingRef.current = false;
-            console.error("[Recording] Could not start:", e.message);
-            setUploadError("Microphone access denied.");
+            console.error(`[Recording] Could not start (attempt ${attempt}/${START_RETRY_LIMIT}):`, e.name, e.message);
+
+            const permanent = e.name === "NotAllowedError" || e.name === "SecurityError" || e.name === "PermissionDeniedError";
+            if (!permanent && attempt < START_RETRY_LIMIT) {
+                console.log(`[Recording] Retrying in ${START_RETRY_DELAY_MS}ms…`);
+                setTimeout(() => startRecording(rejoin, attempt + 1), START_RETRY_DELAY_MS);
+                return;
+            }
+
+            setUploadError(permanent ? "Microphone access denied." : "Microphone unavailable after retries.");
         }
     }, [startChunkTimer]);
 
@@ -275,18 +298,25 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         if (isFinalizedRef.current) return;
         isFinalizedRef.current = true;
 
-        if (!isRecordingRef.current) {
-            // Was never recording (joined after stop, or mic denied)
-            return;
-        }
+        if (!isRecordingRef.current) return;
 
         isRecordingRef.current = false;
         setIsRecording(false);
         stopChunkTimer();
 
+        // Close any open speech interval
+        if (currentSpeechStartRef.current) {
+            const startMs = currentSpeechStartRef.current;
+            const endMs = Date.now();
+            const durationMs = endMs - startMs;
+            if (durationMs >= 250) {
+                speechIntervalsRef.current.push({ startMs, endMs, durationMs });
+            }
+            currentSpeechStartRef.current = null;
+        }
+
         const recorder = mediaRecorderRef.current;
         if (recorder && recorder.state !== "inactive") {
-            // If paused (muted), resume briefly to finalize — then stop
             if (recorder.state === "paused") {
                 try { recorder.resume(); } catch (_) { }
             }
@@ -305,10 +335,11 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
                 firstName: firstNameRef.current,
                 mimeType: mimeTypeRef.current,
                 isRejoin: isRejoinRef.current,
+                speechIntervals: speechIntervalsRef.current,
             });
             setUploadResult(result);
             setUploadDone(true);
-            console.log(`[Recording] ✅ Uploaded: ${result.fileName}`);
+            console.log(`[Recording] ✅ Uploaded: ${result.fileName} (${speechIntervalsRef.current.length} speech intervals)`);
         } catch (e) {
             if (e.message?.includes("No audio") || e.message?.includes("skipped")) {
                 setUploadDone(true);
@@ -380,18 +411,12 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [meetId, employeeId]);
 
-    // ── Socket: listen for CEO/TL start/stop signals ──────────────────────────
+    // ── Socket: listen for start/stop signals ─────────────────────────────────
+    // v2 FIX: listeners registered BEFORE emitting join_meeting_room so the
+    // server's instant "recording_started" reply for late joiners can't be missed.
     useEffect(() => {
         if (!meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
-        socket.emit("join_meeting_room", meetId);
-
-        // Retry join to handle slow auth
-        let retries = 0;
-        const retryJoin = setInterval(() => {
-            if (retries++ >= 5) { clearInterval(retryJoin); return; }
-            socket.emit("join_meeting_room", meetId);
-        }, 3000);
 
         const onStarted = (data) => {
             console.log(`[Recording] ▶️  START from ${data?.startedByName}${data?.lateJoin ? " (late join)" : ""}`);
@@ -402,8 +427,19 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             stopRecording();
         };
 
+        // STEP 1 — register listeners FIRST
         socket.on("recording_started", onStarted);
         socket.on("recording_stopped", onStopped);
+
+        // STEP 2 — now safe to emit (server may reply instantly for late joiners)
+        socket.emit("join_meeting_room", meetId);
+
+        // STEP 3 — retry join every 3s to handle slow auth / reconnects
+        let retries = 0;
+        const retryJoin = setInterval(() => {
+            if (retries++ >= 5) { clearInterval(retryJoin); return; }
+            socket.emit("join_meeting_room", meetId);
+        }, 3000);
 
         return () => {
             clearInterval(retryJoin);
@@ -429,14 +465,14 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         if (!isHost || !meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
         socket.emit("recording_start", { meetId, startedBy: employeeId, startedByName: firstName });
-        startRecording(false); // start self too
+        startRecording(false);
     }, [isHost, meetId, employeeId, firstName, startRecording]);
 
     const hostStopRecording = useCallback(() => {
         if (!isHost || !meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
         socket.emit("recording_stop", { meetId, stoppedBy: employeeId, stoppedByName: firstName });
-        stopRecording(); // stop self too
+        stopRecording();
     }, [isHost, meetId, employeeId, firstName, stopRecording]);
 
     return {
