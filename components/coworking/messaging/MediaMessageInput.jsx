@@ -3,10 +3,10 @@
  * + button → image/pdf picker | emoji button | text field | mic/send button
  * Recording mode: waveform animation + timer + pause/resume + send
  *
- * NEW: @mention support — typing "@" opens a popup of group members
- *      (filtered by what comes after @). Selecting a member inserts
- *      "@FullName " into the textarea and tracks their employeeId in
- *      `mentions` so the parent can notify them specifically.
+ * @mention support — typing "@" opens a popup of group members (filtered by what
+ * comes after @). Selecting a member inserts "@FullName " into the textarea and
+ * tracks their employeeId in `mentions` so the parent can notify them specifically.
+ * Requires the `members` prop with [{ employeeId, name, profilePicUrl }].
  */
 "use client";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
@@ -30,7 +30,7 @@ export default function MediaMessageInput({
     onSend,
     placeholder = "Type a message",
     disabled = false,
-    members = [],          // NEW — list of group members: [{ employeeId, name, profilePicUrl }]
+    members = [],          // [{ employeeId, name, profilePicUrl }] — used for @mentions
 }) {
     const [text, setText] = useState("");
     const [attachments, setAttachments] = useState([]);
@@ -41,17 +41,17 @@ export default function MediaMessageInput({
     const [error, setError] = useState("");
     const [showEmoji, setShowEmoji] = useState(false);
     const [showAttMenu, setShowAttMenu] = useState(false);
-    const [emojiTab, setEmojiTab] = useState(-1); // -1 = recent
+    const [emojiTab, setEmojiTab] = useState(-1);
     const [emojiSearch, setEmojiSearch] = useState("");
     const [recent, setRecent] = useState([]);
     const [waveform, setWaveform] = useState(Array(40).fill(3));
 
-    // NEW — mention state
+    // @mention state
     const [mentionOpen, setMentionOpen] = useState(false);
     const [mentionQuery, setMentionQuery] = useState("");
-    const [mentionAnchorStart, setMentionAnchorStart] = useState(-1); // index of the "@" in text
+    const [mentionAnchorStart, setMentionAnchorStart] = useState(-1);
     const [mentionHoverIdx, setMentionHoverIdx] = useState(0);
-    const [mentionedIds, setMentionedIds] = useState([]); // employeeIds of mentions currently in the text
+    const [mentionedIds, setMentionedIds] = useState([]);
 
     const imageRef = useRef(null);
     const pdfRef = useRef(null);
@@ -71,7 +71,6 @@ export default function MediaMessageInput({
 
     useEffect(() => { if (showEmoji) setRecent(getRecent()); }, [showEmoji]);
 
-    // Close menus on outside click
     useEffect(() => {
         const h = (e) => {
             if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmoji(false);
@@ -84,7 +83,6 @@ export default function MediaMessageInput({
         return () => document.removeEventListener("mousedown", h);
     }, []);
 
-    // Waveform animation during recording
     const startWaveform = useCallback((stream) => {
         try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -102,7 +100,7 @@ export default function MediaMessageInput({
                     return Math.max(3, Math.min(36, (v / 255) * 36));
                 }));
             }, 80);
-        } catch (e) { /* ignore audio ctx failure */ }
+        } catch (e) { /* ignore */ }
     }, []);
 
     const stopWaveform = useCallback(() => {
@@ -183,7 +181,7 @@ export default function MediaMessageInput({
         setUploading(true);
         try {
             const up = await uploadVoice(blob, seconds);
-            onSend?.("", [{ type: "voice", url: up.url, fileId: up.fileId, duration: seconds, name: up.name || "Voice message" }], "voice");
+            onSend?.("", [{ type: "voice", url: up.url, fileId: up.fileId, duration: seconds, name: up.name || "Voice message" }], "voice", []);
         } catch (e) {
             setError("Voice upload failed");
             setTimeout(() => setError(""), 2500);
@@ -195,7 +193,7 @@ export default function MediaMessageInput({
     const handleSend = async () => {
         if (!canSend) return;
         const trimmedText = text.trim();
-        // NEW — only keep mentions whose @Name still appears in the text
+        // Keep only mentions whose @Name still appears in the text
         const kept = mentionedIds.filter(id => {
             const m = members.find(x => x.employeeId === id);
             if (!m) return false;
@@ -209,7 +207,6 @@ export default function MediaMessageInput({
     };
 
     const handleKeyDown = (e) => {
-        // NEW — mention popup key handling takes priority
         if (mentionOpen && filteredMembers.length > 0) {
             if (e.key === "ArrowDown") { e.preventDefault(); setMentionHoverIdx(i => Math.min(i + 1, filteredMembers.length - 1)); return; }
             if (e.key === "ArrowUp") { e.preventDefault(); setMentionHoverIdx(i => Math.max(i - 1, 0)); return; }
@@ -222,7 +219,6 @@ export default function MediaMessageInput({
         }
     };
 
-    // ── Attachments: images ──────────────────────────────────────────────────
     const handleImages = async (e) => {
         const files = Array.from(e.target.files || []);
         e.target.value = "";
@@ -259,7 +255,6 @@ export default function MediaMessageInput({
         setUploading(false);
     };
 
-    // ── Emoji insert ─────────────────────────────────────────────────────────
     const insertEmoji = (emoji) => {
         saveRecent(emoji);
         const ta = textareaRef.current;
@@ -284,27 +279,23 @@ export default function MediaMessageInput({
     }, [emojiTab, emojiSearch, recent]);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // NEW — @mention detection & insertion
+    // @mention detection & insertion
     // ─────────────────────────────────────────────────────────────────────────
-    // Detect @mention based on cursor position inside `text`
     const detectMentionAtCursor = useCallback((nextText, cursorPos) => {
-        // Look backwards from cursor for "@" preceded by whitespace or start of string
         let i = cursorPos - 1;
         while (i >= 0) {
             const ch = nextText[i];
             if (ch === "@") {
                 const before = i === 0 ? " " : nextText[i - 1];
                 if (/\s|^/.test(before) || i === 0) {
-                    // Found an @. Query = chars between @ and cursor.
                     const query = nextText.slice(i + 1, cursorPos);
-                    // Only open if query is short & doesn't contain whitespace or newline
                     if (query.length <= 30 && !/[\s\n]/.test(query)) {
                         return { anchor: i, query };
                     }
                 }
                 return null;
             }
-            if (/[\s\n]/.test(ch)) return null; // whitespace breaks the mention
+            if (/[\s\n]/.test(ch)) return null;
             i--;
         }
         return null;
@@ -331,7 +322,7 @@ export default function MediaMessageInput({
         const list = q
             ? members.filter(m => (m.name || "").toLowerCase().includes(q) || (m.employeeId || "").toLowerCase().includes(q))
             : members;
-        return list.slice(0, 8); // cap
+        return list.slice(0, 8);
     }, [mentionQuery, members]);
 
     const insertMention = (member) => {
@@ -345,13 +336,11 @@ export default function MediaMessageInput({
         setText(next);
         setMentionOpen(false);
         setMentionedIds(prev => prev.includes(member.employeeId) ? prev : [...prev, member.employeeId]);
-        // Restore caret right after the inserted mention
         const newCaret = (before + tag).length;
         setTimeout(() => {
             if (ta) {
                 ta.focus();
                 ta.selectionStart = ta.selectionEnd = newCaret;
-                // Recompute height for textarea
                 ta.style.height = "auto";
                 ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
             }
@@ -360,10 +349,8 @@ export default function MediaMessageInput({
 
     return (
         <div style={{ position: "relative", background: "#202C33", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-            {/* Error toast */}
             {error && <div style={{ padding: "6px 16px", background: "#B03A2E", color: "#fff", fontSize: 12, fontWeight: 600 }}>{error}</div>}
 
-            {/* Attachment previews */}
             {attachments.length > 0 && (
                 <div style={{ display: "flex", gap: 8, padding: "8px 16px 0", flexWrap: "wrap" }}>
                     {attachments.map((att, i) => (
@@ -378,10 +365,9 @@ export default function MediaMessageInput({
                 </div>
             )}
 
-            {/* Uploading indicator */}
             {uploading && <div style={{ padding: "4px 16px", fontSize: 11, color: "#00A884", display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid #2A3942", borderTopColor: "#00A884", borderRadius: "50%", animation: "cwSpin 0.7s linear infinite" }} />Uploading…</div>}
 
-            {/* NEW — Mention popup */}
+            {/* @mention popup */}
             {mentionOpen && filteredMembers.length > 0 && (
                 <div ref={mentionRef} style={{
                     position: "absolute", bottom: "100%", left: 12, right: 12,
@@ -408,7 +394,6 @@ export default function MediaMessageInput({
                                     textAlign: "left", transition: "background 0.1s",
                                 }}
                             >
-                                {/* Avatar */}
                                 {m.profilePicUrl
                                     ? <img src={m.profilePicUrl} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
                                     : <div style={{
@@ -435,22 +420,18 @@ export default function MediaMessageInput({
                 </div>
             )}
 
-            {/* Emoji panel */}
             {showEmoji && (
                 <div ref={emojiRef} style={{ position: "absolute", bottom: "100%", left: 0, width: "min(340px, 100vw)", background: "#233138", borderRadius: "12px 12px 0 0", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)", zIndex: 300, display: "flex", flexDirection: "column", maxHeight: 300 }}>
-                    {/* Search */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px" }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8696A0" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
                         <input autoFocus value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emoji…" style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "none", outline: "none", color: "#E9EDEF", fontSize: 12, padding: "5px 10px", borderRadius: 8, fontFamily: "inherit" }} />
                         {emojiSearch && <button onClick={() => setEmojiSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#8696A0", fontSize: 13, padding: 0 }}>✕</button>}
                     </div>
-                    {/* Tabs */}
                     {!emojiSearch && <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0 8px" }}>
                         {["🕐", ...EMOJI_CATS.map(c => c.icon)].map((icon, i) => (
                             <button key={i} onClick={() => setEmojiTab(i === 0 ? -1 : i - 1)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: "6px 7px", borderBottom: `2px solid ${(i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? "#00A884" : "transparent"}`, opacity: (i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? 1 : 0.5, flexShrink: 0 }}>{icon}</button>
                         ))}
                     </div>}
-                    {/* Grid */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 1, padding: "6px 6px 8px", overflowY: "auto", flex: 1 }}>
                         {displayEmojis.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#8696A0", fontSize: 12, padding: "16px 0" }}>{emojiSearch ? "No results" : "No recent emojis"}</div>}
                         {displayEmojis.map((emoji, i) => (
@@ -463,7 +444,6 @@ export default function MediaMessageInput({
                 </div>
             )}
 
-            {/* Attachment menu popup */}
             {showAttMenu && (
                 <div ref={attMenuRef} style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 12, background: "#233138", borderRadius: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 200, overflow: "hidden", minWidth: 160 }}>
                     <button onClick={() => imageRef.current?.click()} style={attMenuBtn}>
@@ -475,57 +455,46 @@ export default function MediaMessageInput({
                 </div>
             )}
 
-            {/* ── RECORDING MODE ── */}
             {recording ? (
                 <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", gap: 10, minHeight: 56 }}>
-                    {/* Cancel */}
                     <button onClick={cancelRecording} style={iconBtn("#FF6B6B")}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
                     </button>
-                    {/* Timer */}
                     <span style={{ fontSize: 14, fontWeight: 600, color: recPaused ? "#8696A0" : "#FF6B6B", minWidth: 40, fontVariantNumeric: "tabular-nums" }}>{fmt(recSeconds)}</span>
-                    {/* Waveform */}
                     <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 2, height: 36, overflow: "hidden" }}>
                         {waveform.map((h, i) => (
                             <div key={i} style={{ width: 3, height: h, background: recPaused ? "#8696A0" : "#00A884", borderRadius: 2, transition: "height 0.08s ease", flexShrink: 0 }} />
                         ))}
                     </div>
-                    {/* Pause/Resume */}
                     <button onClick={recPaused ? resumeRecording : pauseRecording} style={iconBtn("#8696A0")}>
                         {recPaused
                             ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" /><polygon points="10 8 16 12 10 16 10 8" /></svg>
                             : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
                         }
                     </button>
-                    {/* Send recording */}
                     <button onClick={sendRecording} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff" }}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
                     </button>
                 </div>
             ) : (
-                /* ── NORMAL INPUT MODE ── */
                 <div style={{ display: "flex", alignItems: "flex-end", padding: "8px 10px", gap: 6, minHeight: 56 }}>
                     <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
                     <input ref={pdfRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" style={{ display: "none" }} onChange={handlePDF} />
 
-                    {/* + Attachment */}
                     <button onClick={() => { setShowAttMenu(p => !p); setShowEmoji(false); }} disabled={disabled || uploading} style={iconBtn("#8696A0")}>
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                     </button>
 
-                    {/* Emoji button */}
                     <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#8696A0"), color: showEmoji ? "#00A884" : "#8696A0" }}>
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" /><line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" /></svg>
                     </button>
 
-                    {/* Text input */}
                     <textarea
                         ref={textareaRef}
                         value={text}
                         onChange={onTextChange}
                         onKeyDown={handleKeyDown}
                         onClick={(e) => {
-                            // Re-detect mention when caret is moved by click
                             const cursor = e.target.selectionStart;
                             const m = detectMentionAtCursor(text, cursor);
                             if (m) { setMentionOpen(true); setMentionQuery(m.query); setMentionAnchorStart(m.anchor); setMentionHoverIdx(0); }
@@ -538,7 +507,6 @@ export default function MediaMessageInput({
                         onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
                     />
 
-                    {/* Send or Mic */}
                     {canSend ? (
                         <button onClick={handleSend} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
@@ -558,7 +526,7 @@ export default function MediaMessageInput({
     );
 }
 
-// ── Helpers for the mention popup ────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function initials(name) {
     if (!name) return "?";
     const parts = String(name).trim().split(/\s+/);

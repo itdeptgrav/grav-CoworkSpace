@@ -1,6 +1,6 @@
 "use client";
 /**
- * components/coworking/messaging/GroupChatView.jsx
+ * GRAV-CMS/app/coworking/create-group/group-chat/[groupId]/page.js
  *
  * 100% Firestore-native — zero backend API calls.
  *
@@ -358,7 +358,7 @@ export default function GroupChatView({ groupId, onBack }) {
     }, [messages]);
 
     // ── Send message — writes directly to Firestore ──────────
-    const handleSend = async (text, attachments, messageType) => {
+    const handleSend = async (text, attachments, messageType, mentions = []) => {
         if (!groupId || !employeeId) return;
 
         const tempId = "temp_" + Date.now();
@@ -372,6 +372,7 @@ export default function GroupChatView({ groupId, onBack }) {
             senderName: employeeName,
             text: text || "",
             attachments: attachments || [],
+            mentions: Array.isArray(mentions) ? mentions : [], // NEW — employeeIds tagged with @
             messageType: resolvedType,
             type: resolvedType,
             readBy: [employeeId],
@@ -392,6 +393,7 @@ export default function GroupChatView({ groupId, onBack }) {
                     text: text || "",
                     attachments: attachments || [],
                     messageType: resolvedType,
+                    mentions: Array.isArray(mentions) ? mentions : [], // NEW — backend can use for @-push
                 }),
             });
 
@@ -1011,6 +1013,7 @@ export default function GroupChatView({ groupId, onBack }) {
                         onSend={handleSend}
                         placeholder={`Message ${group?.name || "group"}…`}
                         disabled={msgsLoading}
+                        members={members}
                     />
                 </div>
             </div>
