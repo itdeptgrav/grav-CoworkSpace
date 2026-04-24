@@ -2,22 +2,17 @@
 /**
  * hooks/useMeetingRecording.js
  *
- * BEHAVIOR:
- *   - CEO/TL clicks Record → everyone in meeting starts recording
- *   - CEO/TL clicks Stop  → everyone stops → each person's audio uploads to Drive
- *   - Format: {employeeId}_{Name}_audio_{meetId}.webm  (e.g. E015_Rakesh_audio_M002.webm)
+ * Every participant broadcasts their own recording+upload status to the meeting
+ * room on every state transition. The host aggregates these into a Map so the
+ * UI can render a per-participant "Recording Status" panel.
  *
- * EDGE CASES (handled):
- *   - Late joiner: server notifies them immediately via activeMeetingRecordings map.
- *     v2 FIX — listeners now registered BEFORE the join_meeting_room emit so
- *     the server's immediate "recording_started" reply can't be missed.
- *   - Net drop: chunks kept in memory, retried on next flush
- *   - Page close during recording: beacon saves last chunk + keepalive finalize
- *   - Rejoin after disconnect: session key detects rejoin, (1) suffix added to filename
- *   - Person muted: audio chunks skipped (isMuted check + MediaRecorder pause)
- *   - Double finalize: isFinalizedRef guard prevents duplicate uploads
- *   - getUserMedia transient failure: up to 5 retries with backoff (by hook or crook)
- *   - Speech intervals: every unmute→mute transition logged as {startMs, endMs, durationMs}
+ * Everything else from v2 kept intact:
+ *   - Listener-order fix for late joiners
+ *   - Speech interval tracking (unmute→mute)
+ *   - getUserMedia retry loop (5 attempts)
+ *   - Session-based rejoin continuation
+ *   - Beacon/keepalive emergency save
+ *   - Mute/unmute pause/resume
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -28,7 +23,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const CHUNK_MS = 30_000;
 const RETRY_LIMIT = 3;
 const RETRY_DELAY_MS = 5_000;
-const START_RETRY_LIMIT = 5;       // getUserMedia retries
+const START_RETRY_LIMIT = 5;
 const START_RETRY_DELAY_MS = 3_000;
 
 // ── MIME type ─────────────────────────────────────────────────────────────────
@@ -97,7 +92,6 @@ async function uploadChunkWithRetry({ blob, meetId, chunkIndex, mimeType }) {
     return false;
 }
 
-// ── Beacon chunk (page unload) ────────────────────────────────────────────────
 function sendBeaconChunk({ blob, meetId, chunkIndex, mimeType, token }) {
     try {
         const fd = new FormData();
@@ -121,7 +115,6 @@ function sendKeepaliveFinalize({ meetId, firstName, mimeType, token, isRejoin })
     } catch (_) { }
 }
 
-// ── Normal finalize ───────────────────────────────────────────────────────────
 async function finalizeRecording({ meetId, firstName, mimeType, isRejoin, speechIntervals }) {
     const token = await getAuthToken();
     const res = await fetch(`${BASE}/cowork/audio/finalize`, {
@@ -135,13 +128,17 @@ async function finalizeRecording({ meetId, firstName, mimeType, isRejoin, speech
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
+export function useMeetingRecording({ meetId, employeeId, employeeName, firstName, isHost }) {
 
     const [isRecording, setIsRecording] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadDone, setUploadDone] = useState(false);
     const [uploadError, setUploadError] = useState("");
     const [uploadResult, setUploadResult] = useState(null);
+
+    // NEW — aggregated peer statuses visible to everyone (host uses it in panel)
+    // Map<employeeId, { employeeName, recordingState, uploadState, timestamp }>
+    const [participantStatuses, setParticipantStatuses] = useState(() => new Map());
 
     const mediaRecorderRef = useRef(null);
     const pendingChunksRef = useRef([]);
@@ -156,14 +153,36 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
     const meetIdRef = useRef(meetId);
     const firstNameRef = useRef(firstName);
     const employeeIdRef = useRef(employeeId);
+    const employeeNameRef = useRef(employeeName);
 
-    // Speech intervals — every unmute→mute transition is logged
-    const speechIntervalsRef = useRef([]);       // [{ startMs, endMs, durationMs }]
-    const currentSpeechStartRef = useRef(null);  // ms timestamp when unmute began
+    const speechIntervalsRef = useRef([]);
+    const currentSpeechStartRef = useRef(null);
+
+    // Own upload state — mirrors the UI state flags so broadcasts can include it
+    const myUploadStateRef = useRef("idle"); // "idle" | "uploading" | "uploaded" | "failed"
 
     meetIdRef.current = meetId;
     firstNameRef.current = firstName;
     employeeIdRef.current = employeeId;
+    employeeNameRef.current = employeeName;
+
+    // ── Broadcast my own status to the meeting room ──────────────────────────
+    const broadcastStatus = useCallback((recordingState) => {
+        if (!meetIdRef.current || !employeeIdRef.current) return;
+        try {
+            const socket = getCoworkSocket(employeeIdRef.current);
+            socket.emit("participant_status", {
+                meetId: meetIdRef.current,
+                employeeId: employeeIdRef.current,
+                employeeName:
+                    employeeNameRef.current ||
+                    firstNameRef.current ||
+                    employeeIdRef.current,
+                recordingState,
+                uploadState: myUploadStateRef.current,
+            });
+        } catch (_) { /* non-fatal */ }
+    }, []);
 
     // ── setMuted ──────────────────────────────────────────────────────────────
     const prevMutedRef = useRef(null);
@@ -174,7 +193,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         if (prevMutedRef.current === muted) return;
         prevMutedRef.current = muted;
 
-        // Speech interval tracking — runs whether or not recorder is ready yet
+        // Speech interval tracking
         if (!muted) {
             currentSpeechStartRef.current = Date.now();
         } else if (muted && currentSpeechStartRef.current) {
@@ -195,6 +214,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             try {
                 recorder.pause();
                 console.log("[Recording] ⏸ Mic muted — MediaRecorder paused");
+                if (isRecordingRef.current) broadcastStatus("paused");
             } catch (e) {
                 console.warn("[Recording] pause() not supported, using chunk discard fallback");
             }
@@ -202,11 +222,12 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             try {
                 recorder.resume();
                 console.log("[Recording] ▶️  Mic unmuted — MediaRecorder resumed");
+                if (isRecordingRef.current) broadcastStatus("recording");
             } catch (e) {
                 console.warn("[Recording] resume() not supported");
             }
         }
-    }, []);
+    }, [broadcastStatus]);
 
     // ── Flush chunks to server ────────────────────────────────────────────────
     const flushChunks = useCallback(async () => {
@@ -239,7 +260,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         if (chunkTimerRef.current) { clearInterval(chunkTimerRef.current); chunkTimerRef.current = null; }
     }, []);
 
-    // ── Start recording (with retry — by hook or crook) ──────────────────────
+    // ── Start recording (with retry) ─────────────────────────────────────────
     const startRecording = useCallback(async (rejoin = false, attempt = 1) => {
         if (isRecordingRef.current) return;
         if (typeof window === "undefined") return;
@@ -256,6 +277,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             pendingChunksRef.current = [];
             speechIntervalsRef.current = [];
             currentSpeechStartRef.current = isMutedRef.current ? null : Date.now();
+            myUploadStateRef.current = "idle";
 
             const recorder = new MediaRecorder(stream, { mimeType });
             recorder.ondataavailable = (e) => {
@@ -278,6 +300,9 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             saveSession(meetIdRef.current, employeeIdRef.current, mimeType);
             warmTokenCache();
             console.log(`[Recording] ✅ Started for ${employeeIdRef.current}${rejoin ? " (REJOIN)" : ""}`);
+
+            // NEW — announce my status
+            broadcastStatus(isMutedRef.current ? "paused" : "recording");
         } catch (e) {
             isRecordingRef.current = false;
             console.error(`[Recording] Could not start (attempt ${attempt}/${START_RETRY_LIMIT}):`, e.name, e.message);
@@ -290,8 +315,11 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             }
 
             setUploadError(permanent ? "Microphone access denied." : "Microphone unavailable after retries.");
+            // NEW — announce failure
+            myUploadStateRef.current = "idle";
+            broadcastStatus("failed");
         }
-    }, [startChunkTimer]);
+    }, [startChunkTimer, broadcastStatus]);
 
     // ── Stop and finalize ─────────────────────────────────────────────────────
     const stopRecording = useCallback(async () => {
@@ -304,7 +332,6 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         setIsRecording(false);
         stopChunkTimer();
 
-        // Close any open speech interval
         if (currentSpeechStartRef.current) {
             const startMs = currentSpeechStartRef.current;
             const endMs = Date.now();
@@ -328,6 +355,10 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         await flushChunks();
         clearSession(meetIdRef.current, employeeIdRef.current);
 
+        // NEW — announce uploading
+        myUploadStateRef.current = "uploading";
+        broadcastStatus("not_rec");
+
         setIsUploading(true);
         try {
             const result = await finalizeRecording({
@@ -339,20 +370,26 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             });
             setUploadResult(result);
             setUploadDone(true);
+            myUploadStateRef.current = "uploaded";
+            broadcastStatus("not_rec");
             console.log(`[Recording] ✅ Uploaded: ${result.fileName} (${speechIntervalsRef.current.length} speech intervals)`);
         } catch (e) {
             if (e.message?.includes("No audio") || e.message?.includes("skipped")) {
                 setUploadDone(true);
+                myUploadStateRef.current = "uploaded";
+                broadcastStatus("not_rec");
             } else {
                 console.error("[Recording] Finalize error:", e.message);
                 setUploadError("Upload failed: " + e.message);
+                myUploadStateRef.current = "failed";
+                broadcastStatus("not_rec");
             }
         } finally {
             setIsUploading(false);
         }
-    }, [stopChunkTimer, flushChunks]);
+    }, [stopChunkTimer, flushChunks, broadcastStatus]);
 
-    // ── beforeunload warning ──────────────────────────────────────────────────
+    // ── beforeunload ──────────────────────────────────────────────────────────
     useEffect(() => {
         const handler = (e) => {
             if (!isRecordingRef.current) return;
@@ -364,7 +401,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         return () => window.removeEventListener("beforeunload", handler);
     }, []);
 
-    // ── pagehide: emergency save ──────────────────────────────────────────────
+    // ── pagehide emergency save ───────────────────────────────────────────────
     useEffect(() => {
         const handler = () => {
             if (!isRecordingRef.current) return;
@@ -411,9 +448,8 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [meetId, employeeId]);
 
-    // ── Socket: listen for start/stop signals ─────────────────────────────────
-    // v2 FIX: listeners registered BEFORE emitting join_meeting_room so the
-    // server's instant "recording_started" reply for late joiners can't be missed.
+    // ── Socket: start/stop + peer statuses ────────────────────────────────────
+    // Listeners registered BEFORE emit so late-joiner replies can't be missed.
     useEffect(() => {
         if (!meetId || !employeeId) return;
         const socket = getCoworkSocket(employeeId);
@@ -426,15 +462,30 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             console.log(`[Recording] ⏹️  STOP from ${data?.stoppedByName}`);
             stopRecording();
         };
+        // NEW — peer status updates
+        const onStatus = ({ employeeId: eid, employeeName: ename, recordingState, uploadState, timestamp }) => {
+            if (!eid) return;
+            setParticipantStatuses(prev => {
+                const next = new Map(prev);
+                next.set(eid, {
+                    employeeName: ename || eid,
+                    recordingState: recordingState || "not_rec",
+                    uploadState: uploadState || "idle",
+                    timestamp: timestamp || Date.now(),
+                });
+                return next;
+            });
+        };
 
         // STEP 1 — register listeners FIRST
         socket.on("recording_started", onStarted);
         socket.on("recording_stopped", onStopped);
+        socket.on("participant_status", onStatus);
 
-        // STEP 2 — now safe to emit (server may reply instantly for late joiners)
+        // STEP 2 — now safe to emit join
         socket.emit("join_meeting_room", meetId);
 
-        // STEP 3 — retry join every 3s to handle slow auth / reconnects
+        // STEP 3 — retry join
         let retries = 0;
         const retryJoin = setInterval(() => {
             if (retries++ >= 5) { clearInterval(retryJoin); return; }
@@ -445,6 +496,7 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
             clearInterval(retryJoin);
             socket.off("recording_started", onStarted);
             socket.off("recording_stopped", onStopped);
+            socket.off("participant_status", onStatus);
             socket.emit("leave_meeting_room", meetId);
         };
     }, [meetId, employeeId, startRecording, stopRecording]);
@@ -480,5 +532,6 @@ export function useMeetingRecording({ meetId, employeeId, firstName, isHost }) {
         setMuted,
         hostStartRecording,
         hostStopRecording,
+        participantStatuses, // NEW — Map<empId, {employeeName, recordingState, uploadState, timestamp}>
     };
 }

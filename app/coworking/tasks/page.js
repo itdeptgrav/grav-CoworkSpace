@@ -543,23 +543,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" /><path d="M3 5h4" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" /></svg>
                 Task Name
               </span>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: pri.color, background: pri.bg, display: "inline-flex", alignItems: "center", gap: 3, position: "relative" }}>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>
-                {pri.label}
-                {/* Only task creator (assignedBy) or CEO/TL can change priority */}
-                {(task.assignedBy === employeeId || isCEO || isTL) && (
-                  <select
-                    value={task.priority ?? 5}
-                    onChange={e => onUpdatePriority?.(task.taskId, e.target.value)}
-                    title="Click to change priority"
-                    style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                      <option key={n} value={n}>P{n} — {n === 1 ? "Highest" : n === 2 ? "High" : n <= 9 ? "Medium" : "Lowest"}</option>
-                    ))}
-                  </select>
-                )}
-              </span>
+
               {st && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: st.color, background: st.bg, display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} /> {st.label}
               </span>}
@@ -1989,26 +1973,31 @@ export default function TasksPage() {
     others.splice(dropIdx, 0, { ...dragTask, parentTaskId: parentId });
 
     // Optimistic update + block live listener for 8s so it doesn't overwrite
-    const updates = others.map((t, i) => ({ taskId: t.taskId, order: i * 10, parentTaskId: parentId }));
+    // NEW — saves order AND recalculates priority based on position
+    const updates = others.map((t, i) => ({ taskId: t.taskId, order: i * 10, priority: i + 1, parentTaskId: parentId }));
     const now8 = Date.now() + 8000;
     updates.forEach(u => { ignoreLiveUntilRef.current[u.taskId] = now8; });
 
     setAllTasks(prev => {
       const map = new Map(prev.map(t => [t.taskId, t]));
-      updates.forEach(u => { const t = map.get(u.taskId); if (t) map.set(u.taskId, { ...t, order: u.order, parentTaskId: u.parentTaskId }); });
+      // NEW — also apply priority to local state immediately
+      updates.forEach(u => { const t = map.get(u.taskId); if (t) map.set(u.taskId, { ...t, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId }); });
       return [...map.values()];
     });
     // Also update allTaskMapRef immediately
     updates.forEach(u => {
       const existing = allTaskMapRef.current.get(u.taskId);
-      if (existing) allTaskMapRef.current.set(u.taskId, { ...existing, order: u.order, parentTaskId: u.parentTaskId });
+      // NEW
+      if (existing) allTaskMapRef.current.set(u.taskId, { ...existing, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId });
     });
 
     // Persist to Firestore
     try {
       const { writeBatch: _wb, doc: _doc } = await import("firebase/firestore");
       const batch = _wb(firebaseDb);
-      updates.forEach(u => batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), { order: u.order, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }));
+
+      // NEW — persist priority to Firestore too
+      updates.forEach(u => batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), { order: u.order, priority: u.priority, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }));
       await batch.commit();
     } catch (e) { console.error("[drag] batch update:", e.message); }
   }, []);
@@ -4539,7 +4528,7 @@ export default function TasksPage() {
                   };
                   allTasks.filter(t => !t.parentTaskId).forEach(t => addRow(t, 0));
                   if (!allRows.length) { alert("No tasks to export."); return; }
-                  const HEADERS = ["Task ID", "Type", "Title", "Description", "Status", "Priority", "Assigned To", "Department", "Start Date", "Due Date", "Progress", "Completion Status", "Created By", "Parent Task ID", "Subtask Count"];
+                  const HEADERS = ["Task ID", "Type", "Title", "Description", "Status", "Assigned To", "Department", "Start Date", "Due Date", "Progress", "Completion Status", "Created By", "Parent Task ID", "Subtask Count"];
                   const csv = [HEADERS, ...allRows].map(r => r.map(esc).join(",")).join("\n");
                   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
                   const url = URL.createObjectURL(blob);

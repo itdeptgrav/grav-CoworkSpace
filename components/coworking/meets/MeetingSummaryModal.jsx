@@ -802,7 +802,7 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                 {summary.participants?.length > 0 && (
                                     <div className="M-chips">
                                         <span className="M-chips-lbl">Participants</span>
-                                        {summary.participants.map((p, i) => {
+                                        {[...new Set(summary.participants)].map((p, i) => {
                                             const c = spkColor(p);
                                             return (
                                                 <span key={i} className="M-chip" style={{ background: `${c}12`, color: c, border: `1px solid ${c}28` }}>

@@ -72,6 +72,7 @@ export default function CoworkMeetingRoom() {
 
     const recording = useMeetingRecording({
         meetId, employeeId,
+        employeeName, // full display name — used in heartbeat + upload events
         // Use full name sanitized — avoids collision when two people share first name
         firstName: (employeeName || "Unknown").replace(/[^a-zA-Z0-9]/g, "").slice(0, 20) || employeeId,
         isHost,
@@ -82,14 +83,12 @@ export default function CoworkMeetingRoom() {
 
     // ── AUTO-START recording when HOST enters the room ────────────────────────
     // Requirement: recording begins for the HOST immediately on meeting start.
-    // Guarded by autoStartedRef so it only fires once per mount.
     useEffect(() => {
         if (!isHost) return;
         if (phase !== "room") return;
         if (autoStartedRef.current) return;
         if (recording.isRecording) return;
         autoStartedRef.current = true;
-        // Small delay so LiveKit connects + mic permission prompt settles first
         const t = setTimeout(() => {
             console.log("[CoworkMeetingRoom] 🎙️ Auto-starting recording for host");
             recording.hostStartRecording();
@@ -858,7 +857,17 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
 
                 {/* Record — CEO/TL only */}
                 {isHost && recording && (
-                    <RecordingControls isHost={isHost} isRecording={recording.isRecording} isUploading={recording.isUploading} uploadDone={recording.uploadDone} uploadError={recording.uploadError} uploadResult={recording.uploadResult} onStart={recording.hostStartRecording} onStop={recording.hostStopRecording} />
+                    <RecordingControls
+                        isHost={isHost}
+                        isRecording={recording.isRecording}
+                        isUploading={recording.isUploading}
+                        uploadDone={recording.uploadDone}
+                        uploadError={recording.uploadError}
+                        uploadResult={recording.uploadResult}
+                        onStart={recording.hostStartRecording}
+                        onStop={recording.hostStopRecording}
+                        participantStatuses={recording.participantStatuses}
+                    />
                 )}
 
                 {/* End / Leave */}

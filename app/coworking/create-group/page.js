@@ -23,6 +23,7 @@ import CoworkingShell from "../../../components/coworking/layout/CoworkingShell"
 
 import { GwAvatar, GwSpinner, GwEmpty, GwConfirm } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
+import GroupChatView from "../../../components/coworking/messaging/GroupChatView";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -546,11 +547,39 @@ export default function CreateGroupPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [successToast, setSuccessToast] = useState(null); // { message } | null
+  const [selectedGroupId, setSelectedGroupId] = useState(null); // NEW — currently open chat
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);  // NEW — mobile slide-pane
   const unsubRef = useRef(null);
 
   useEffect(() => {
     if (!loading && !user) router.push("/");
   }, [user, loading, router]);
+
+  // Sync selected group with ?g= query param so deep links work
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search).get("g");
+    if (p) { setSelectedGroupId(p); setMobileChatOpen(true); }
+  }, []);
+
+  const selectGroup = useCallback((id) => {
+    setSelectedGroupId(id);
+    setMobileChatOpen(true);
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      u.searchParams.set("g", id);
+      window.history.replaceState({}, "", u.toString());
+    }
+  }, []);
+
+  const deselectGroup = useCallback(() => {
+    setMobileChatOpen(false);
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("g");
+      window.history.replaceState({}, "", u.toString());
+    }
+  }, []);
 
   // ── Real-time groups from Firestore ──────────────────────
   useEffect(() => {
@@ -640,87 +669,118 @@ export default function CreateGroupPage() {
   return (
     <>
 
-      <div style={{ maxWidth: 860, margin: "0 auto" }}>
+      <div className="grp-root">
 
-        {/* ── Page header ── */}
-        <div style={pg.header}>
-          <div>
-            <h1 style={pg.title}>Groups</h1>
-            <p style={pg.sub}>
-              {groupsLoading ? "Loading…" : `${groups.length} group${groups.length !== 1 ? "s" : ""}${totalUnread > 0 ? ` · ${totalUnread} unread` : ""}`}
-            </p>
+        {/* ══════════════ LEFT PANE — GROUP LIST ══════════════ */}
+        <div className={`grp-left${mobileChatOpen ? " mob-gone" : ""}`}>
+          <div className="grp-left-inner">
+
+            {/* ── Page header ── */}
+            <div style={pg.header}>
+              <div>
+                <h1 style={pg.title}>Groups</h1>
+                <p style={pg.sub}>
+                  {groupsLoading ? "Loading…" : `${groups.length} group${groups.length !== 1 ? "s" : ""}${totalUnread > 0 ? ` · ${totalUnread} unread` : ""}`}
+                </p>
+              </div>
+              {isCeoOrTL && (
+                <button
+                  onClick={() => setModal("create")}
+                  style={pg.createBtn}
+                >
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M6.5 1v11M1 6.5h11" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  New Group
+                </button>
+              )}
+            </div>
+
+            {/* ── Search ── */}
+            {groups.length > 0 && (
+              <div style={pg.searchWrap}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
+                  <circle cx="6" cy="6" r="4.5" stroke="#9AA0A6" strokeWidth="1.3" />
+                  <path d="M9.5 9.5l2.5 2.5" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
+                </svg>
+                <input
+                  style={pg.searchInput}
+                  placeholder="Search groups…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* ── Group list ── */}
+            {groupsLoading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+                <GwSpinner size={32} />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div style={pg.emptyWrap}>
+                <div style={pg.emptyIcon}>👥</div>
+                <div style={pg.emptyTitle}>
+                  {groups.length === 0 ? "No groups yet" : "No groups match your search"}
+                </div>
+                <div style={pg.emptySub}>
+                  {groups.length === 0 && isCeoOrTL
+                    ? "Create a group to start collaborating with your team."
+                    : groups.length === 0
+                      ? "You haven't been added to any groups yet."
+                      : "Try a different search term."}
+                </div>
+                {groups.length === 0 && isCeoOrTL && (
+                  <button onClick={() => setModal("create")} style={{ ...pg.createBtn, marginTop: 16 }}>
+                    + Create First Group
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={pg.grid}>
+                {filtered.map(g => (
+                  <div
+                    key={g.groupId || g.id}
+                    className={(g.groupId || g.id) === selectedGroupId ? "grp-row-active" : ""}
+                    style={{ borderRadius: 10 }}
+                  >
+                    <GroupCard
+                      group={g}
+                      currentEmployeeId={employeeId}
+                      isCEO={isCeoOrTL}
+                      allEmployees={allEmployees}
+                      onOpenChat={id => selectGroup(id)}
+                      onEdit={g => setModal({ type: "edit", group: g })}
+                      onDelete={g => setDeleteTarget(g)}
+                      onAddMember={g => setModal({ type: "add", group: g })}
+                      onManageMembers={g => setModal({ type: "members", group: g })}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {isCeoOrTL && (
-            <button
-              onClick={() => setModal("create")}
-              style={pg.createBtn}
-            >
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 1v11M1 6.5h11" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              New Group
-            </button>
+        </div>
+
+        {/* ══════════════ RIGHT PANE — CHAT ══════════════ */}
+        <div className={`grp-chat${!mobileChatOpen ? " mob-gone-chat" : ""}`}>
+          {selectedGroupId ? (
+            <GroupChatView
+              key={selectedGroupId}
+              groupId={selectedGroupId}
+              onBack={deselectGroup}
+            />
+          ) : (
+            <div className="grp-no-sel">
+              <div className="grp-no-sel-icon">👥</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A" }}>Select a group</div>
+              <div style={{ fontSize: 13, color: "#64748B", maxWidth: 280, textAlign: "center", lineHeight: 1.55 }}>
+                Pick a group from the list on the left to open its chat.
+              </div>
+            </div>
           )}
         </div>
 
-        {/* ── Search ── */}
-        {groups.length > 0 && (
-          <div style={pg.searchWrap}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}>
-              <circle cx="6" cy="6" r="4.5" stroke="#9AA0A6" strokeWidth="1.3" />
-              <path d="M9.5 9.5l2.5 2.5" stroke="#9AA0A6" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
-            <input
-              style={pg.searchInput}
-              placeholder="Search groups…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-        )}
-
-        {/* ── Group list ── */}
-        {groupsLoading ? (
-          <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
-            <GwSpinner size={32} />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={pg.emptyWrap}>
-            <div style={pg.emptyIcon}>👥</div>
-            <div style={pg.emptyTitle}>
-              {groups.length === 0 ? "No groups yet" : "No groups match your search"}
-            </div>
-            <div style={pg.emptySub}>
-              {groups.length === 0 && isCeoOrTL
-                ? "Create a group to start collaborating with your team."
-                : groups.length === 0
-                  ? "You haven't been added to any groups yet."
-                  : "Try a different search term."}
-            </div>
-            {groups.length === 0 && isCeoOrTL && (
-              <button onClick={() => setModal("create")} style={{ ...pg.createBtn, marginTop: 16 }}>
-                + Create First Group
-              </button>
-            )}
-          </div>
-        ) : (
-          <div style={pg.grid}>
-            {filtered.map(g => (
-              <GroupCard
-                key={g.groupId || g.id}
-                group={g}
-                currentEmployeeId={employeeId}
-                isCEO={isCeoOrTL}
-                allEmployees={allEmployees}
-                onOpenChat={id => router.push(`/coworking/create-group/group-chat/${id}`)}
-                onEdit={g => setModal({ type: "edit", group: g })}
-                onDelete={g => setDeleteTarget(g)}
-                onAddMember={g => setModal({ type: "add", group: g })}
-                onManageMembers={g => setModal({ type: "members", group: g })}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
       {/* ══ Modals ══ */}
@@ -790,6 +850,110 @@ export default function CreateGroupPage() {
           <style>{`@keyframes gwc-toast-in { from { opacity:0; transform:translateY(12px) scale(0.96); } to { opacity:1; transform:translateY(0) scale(1); } }`}</style>
         </div>
       )}
+
+      {/* ══ Split-pane + responsive styles ══ */}
+      <style>{`
+        .grp-root {
+          display: flex;
+          position: relative;
+          width: 100%;
+          height: calc(100dvh - 108px);
+          border-radius: 16px;
+          overflow: hidden;
+          border: 1px solid #E2E8F0;
+          background: #fff;
+          box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+          font-family: inherit;
+        }
+        .grp-left {
+          width: 380px;
+          min-width: 380px;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          border-right: 1px solid #EEF2F8;
+          background: #fff;
+        }
+        .grp-left-inner {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          padding: 18px 16px;
+        }
+        .grp-left-inner::-webkit-scrollbar { width: 4px; }
+        .grp-left-inner::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 2px; }
+
+        .grp-row-active > * {
+          background: #EFF6FF !important;
+          border-color: #1a73e8 !important;
+        }
+
+        .grp-chat {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          background: #F8FAFC;
+        }
+
+        .grp-no-sel {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 40px;
+          text-align: center;
+          background: #F8FAFC;
+          background-image: radial-gradient(circle at 1px 1px, #E2E8F0 1px, transparent 0);
+          background-size: 20px 20px;
+        }
+        .grp-no-sel-icon {
+          width: 68px; height: 68px; border-radius: 20px;
+          background: linear-gradient(135deg,#EEF2FF,#F0F9FF);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 32px;
+          border: 1.5px solid #E0E7FF;
+        }
+
+        /* Back button inside GroupChatView: hide on desktop, show on mobile */
+        .grp-back-btn { display: none !important; }
+
+        /* ─── TABLET ─── */
+        @media (min-width: 769px) and (max-width: 1024px) {
+          .grp-left { width: 300px; min-width: 300px; }
+          .grp-back-btn { display: flex !important; }
+        }
+
+        /* ─── MOBILE ─── */
+        @media (max-width: 768px) {
+          .grp-root {
+            height: calc(100dvh - 56px);
+            border-radius: 0;
+            border: none;
+          }
+          .grp-left {
+            position: absolute; inset: 0; z-index: 10;
+            width: 100%; min-width: 100%;
+            border-right: none;
+            transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+          }
+          .grp-left.mob-gone { transform: translateX(-100%); }
+          .grp-chat {
+            position: absolute; inset: 0; z-index: 20;
+            transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+          }
+          .grp-chat.mob-gone-chat { transform: translateX(100%); }
+          .grp-back-btn { display: flex !important; }
+          .grp-left-inner { padding: 14px 12px; }
+        }
+
+        /* ─── LARGE DESKTOP ─── */
+        @media (min-width: 1280px) {
+          .grp-left { width: 400px; min-width: 400px; }
+        }
+      `}</style>
     </>
   );
 }

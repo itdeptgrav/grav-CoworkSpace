@@ -2,9 +2,14 @@
  * MediaMessageInput — WhatsApp-style input bar
  * + button → image/pdf picker | emoji button | text field | mic/send button
  * Recording mode: waveform animation + timer + pause/resume + send
+ *
+ * NEW: @mention support — typing "@" opens a popup of group members
+ *      (filtered by what comes after @). Selecting a member inserts
+ *      "@FullName " into the textarea and tracks their employeeId in
+ *      `mentions` so the parent can notify them specifically.
  */
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { uploadImage, uploadVoice, uploadPDF } from "../../../lib/mediaUploadApi";
 
 // ── Emoji categories ──────────────────────────────────────────────────────────
@@ -21,7 +26,12 @@ const RECENT_KEY = "cwrk_emoji_recent";
 const getRecent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; } };
 const saveRecent = (e) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([e, ...getRecent().filter(x => x !== e)].slice(0, 32))); } catch { } };
 
-export default function MediaMessageInput({ onSend, placeholder = "Type a message", disabled = false }) {
+export default function MediaMessageInput({
+    onSend,
+    placeholder = "Type a message",
+    disabled = false,
+    members = [],          // NEW — list of group members: [{ employeeId, name, profilePicUrl }]
+}) {
     const [text, setText] = useState("");
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
@@ -36,6 +46,13 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
     const [recent, setRecent] = useState([]);
     const [waveform, setWaveform] = useState(Array(40).fill(3));
 
+    // NEW — mention state
+    const [mentionOpen, setMentionOpen] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState("");
+    const [mentionAnchorStart, setMentionAnchorStart] = useState(-1); // index of the "@" in text
+    const [mentionHoverIdx, setMentionHoverIdx] = useState(0);
+    const [mentionedIds, setMentionedIds] = useState([]); // employeeIds of mentions currently in the text
+
     const imageRef = useRef(null);
     const pdfRef = useRef(null);
     const textareaRef = useRef(null);
@@ -45,6 +62,7 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
     const waveTimerRef = useRef(null);
     const emojiRef = useRef(null);
     const attMenuRef = useRef(null);
+    const mentionRef = useRef(null);
     const analyserRef = useRef(null);
     const sourceRef = useRef(null);
     const audioCtxRef = useRef(null);
@@ -58,6 +76,9 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
         const h = (e) => {
             if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmoji(false);
             if (attMenuRef.current && !attMenuRef.current.contains(e.target)) setShowAttMenu(false);
+            if (mentionRef.current && !mentionRef.current.contains(e.target) && textareaRef.current && !textareaRef.current.contains(e.target)) {
+                setMentionOpen(false);
+            }
         };
         document.addEventListener("mousedown", h);
         return () => document.removeEventListener("mousedown", h);
@@ -78,124 +99,269 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
                 analyser.getByteFrequencyData(buf);
                 setWaveform(Array.from({ length: 40 }, (_, i) => {
                     const v = buf[Math.floor(i * buf.length / 40)] || 0;
-                    return Math.max(3, Math.round((v / 255) * 28));
+                    return Math.max(3, Math.min(36, (v / 255) * 36));
                 }));
             }, 80);
-        } catch {
-            waveTimerRef.current = setInterval(() => {
-                setWaveform(Array.from({ length: 40 }, () => Math.max(3, Math.floor(Math.random() * 20))));
-            }, 150);
-        }
+        } catch (e) { /* ignore audio ctx failure */ }
     }, []);
 
     const stopWaveform = useCallback(() => {
-        clearInterval(waveTimerRef.current);
-        try { audioCtxRef.current?.close(); } catch { }
+        if (waveTimerRef.current) { clearInterval(waveTimerRef.current); waveTimerRef.current = null; }
+        if (audioCtxRef.current) { try { audioCtxRef.current.close(); } catch { } audioCtxRef.current = null; }
+        analyserRef.current = null;
+        sourceRef.current = null;
         setWaveform(Array(40).fill(3));
     }, []);
 
-    // ── Image upload ──────────────────────────────────────────────────────────
-    const handleImages = async (e) => {
-        const files = Array.from(e.target.files || []); e.target.value = "";
-        if (!files.length) return;
-        setUploading(true); setError(""); setShowAttMenu(false);
-        try {
-            const r = await Promise.all(files.map(f => uploadImage(f)));
-            setAttachments(p => [...p, ...r.map((res, i) => ({ type: "image", url: res.url, name: files[i].name }))]);
-        } catch (err) { setError("Image upload failed"); }
-        finally { setUploading(false); }
-    };
-
-    // ── PDF upload ────────────────────────────────────────────────────────────
-    const handlePDF = async (e) => {
-        const file = e.target.files?.[0]; e.target.value = "";
-        if (!file) return;
-        setUploading(true); setError(""); setShowAttMenu(false);
-        try {
-            const r = await uploadPDF(file);
-            setAttachments(p => [...p, { type: "pdf", url: r.viewUrl || r.url, downloadUrl: r.downloadUrl, embedUrl: r.embedUrl, name: file.name, fileId: r.fileId }]);
-        } catch (err) { setError(err.message); }
-        finally { setUploading(false); }
-    };
-
-    // ── Start recording ───────────────────────────────────────────────────────
+    // ── Recording ────────────────────────────────────────────────────────────
     const startRecording = async () => {
+        setError("");
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             chunksRef.current = [];
-            const mr = new MediaRecorder(stream);
-            mrRef.current = mr;
+            const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
             mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-            mr.onstop = async () => {
-                stream.getTracks().forEach(t => t.stop());
-                stopWaveform();
-                clearInterval(timerRef.current);
-                const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-                if (blob.size < 500) { setRecording(false); setRecSeconds(0); return; }
-                setUploading(true);
-                try {
-                    const r = await uploadVoice(blob);
-                    const finalAtts = [{ type: "voice", url: r.url, name: "Voice note", duration: r.duration || 0 }];
-                    setAttachments([]); setRecording(false); setRecSeconds(0); setRecPaused(false);
-                    const toSend = { text: "", attachments: finalAtts, messageType: "voice" };
-                    await onSend(toSend.text, toSend.attachments, toSend.messageType);
-                } catch (err) { setError("Voice upload failed"); setRecording(false); setRecSeconds(0); }
-                finally { setUploading(false); }
-            };
-            mr.start(100);
-            setRecording(true); setRecPaused(false); setRecSeconds(0);
-            timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+            mr.start();
+            mrRef.current = mr;
+            setRecording(true);
+            setRecPaused(false);
+            setRecSeconds(0);
             startWaveform(stream);
-        } catch { setError("Microphone access denied"); }
+            timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+        } catch (e) {
+            setError("Microphone access denied");
+            setTimeout(() => setError(""), 2500);
+        }
     };
 
     const pauseRecording = () => {
-        if (mrRef.current?.state === "recording") { mrRef.current.pause(); setRecPaused(true); clearInterval(timerRef.current); }
+        if (!mrRef.current) return;
+        try { mrRef.current.pause(); } catch { }
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setRecPaused(true);
     };
-    const resumeRecording = () => {
-        if (mrRef.current?.state === "paused") { mrRef.current.resume(); setRecPaused(false); timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000); }
-    };
-    const cancelRecording = () => {
-        mrRef.current?.stop(); clearInterval(timerRef.current); stopWaveform();
-        setRecording(false); setRecSeconds(0); setRecPaused(false); chunksRef.current = [];
-    };
-    const sendRecording = () => { mrRef.current?.stop(); };
 
-    // ── Send text ─────────────────────────────────────────────────────────────
+    const resumeRecording = () => {
+        if (!mrRef.current) return;
+        try { mrRef.current.resume(); } catch { }
+        timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+        setRecPaused(false);
+    };
+
+    const cancelRecording = () => {
+        if (mrRef.current) {
+            try { mrRef.current.stop(); } catch { }
+            mrRef.current.stream?.getTracks().forEach(t => t.stop());
+        }
+        mrRef.current = null;
+        chunksRef.current = [];
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        stopWaveform();
+        setRecording(false);
+        setRecPaused(false);
+        setRecSeconds(0);
+    };
+
+    const sendRecording = async () => {
+        const mr = mrRef.current;
+        if (!mr) return;
+        const done = new Promise(r => { mr.onstop = r; });
+        try { mr.stop(); } catch { }
+        await done;
+        mr.stream?.getTracks().forEach(t => t.stop());
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        stopWaveform();
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        mrRef.current = null;
+        chunksRef.current = [];
+        setRecording(false);
+        setRecPaused(false);
+        const seconds = recSeconds;
+        setRecSeconds(0);
+
+        if (blob.size < 1000) { setError("Recording too short"); setTimeout(() => setError(""), 2500); return; }
+        setUploading(true);
+        try {
+            const up = await uploadVoice(blob, seconds);
+            onSend?.("", [{ type: "voice", url: up.url, fileId: up.fileId, duration: seconds, name: up.name || "Voice message" }], "voice");
+        } catch (e) {
+            setError("Voice upload failed");
+            setTimeout(() => setError(""), 2500);
+        }
+        setUploading(false);
+    };
+
+    // ── Send text + attachments ──────────────────────────────────────────────
     const handleSend = async () => {
         if (!canSend) return;
-        const msgType = attachments.length > 0 ? attachments[0].type : "text";
-        const toSend = { text: text.trim(), attachments: [...attachments], messageType: msgType };
-        setText(""); setAttachments([]); setError(""); setShowEmoji(false);
-        try { await onSend(toSend.text, toSend.attachments, toSend.messageType); }
-        catch (err) { setError(err.message); }
-        textareaRef.current?.focus();
+        const trimmedText = text.trim();
+        // NEW — only keep mentions whose @Name still appears in the text
+        const kept = mentionedIds.filter(id => {
+            const m = members.find(x => x.employeeId === id);
+            if (!m) return false;
+            return trimmedText.includes(`@${(m.name || "").trim()}`);
+        });
+        onSend?.(trimmedText, attachments, attachments.length > 0 ? attachments[0].type : "text", kept);
+        setText("");
+        setAttachments([]);
+        setMentionedIds([]);
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
     };
 
     const handleKeyDown = (e) => {
-        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-        if (e.key === "Escape") { setShowEmoji(false); setShowAttMenu(false); }
-    };
-
-    const insertEmoji = (emoji) => {
-        const ta = textareaRef.current;
-        if (!ta) { setText(t => t + emoji); } else {
-            const s = ta.selectionStart ?? text.length, en = ta.selectionEnd ?? text.length;
-            setText(text.slice(0, s) + emoji + text.slice(en));
-            requestAnimationFrame(() => { ta.focus(); const p = s + emoji.length; ta.setSelectionRange(p, p); });
+        // NEW — mention popup key handling takes priority
+        if (mentionOpen && filteredMembers.length > 0) {
+            if (e.key === "ArrowDown") { e.preventDefault(); setMentionHoverIdx(i => Math.min(i + 1, filteredMembers.length - 1)); return; }
+            if (e.key === "ArrowUp") { e.preventDefault(); setMentionHoverIdx(i => Math.max(i - 1, 0)); return; }
+            if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertMention(filteredMembers[mentionHoverIdx]); return; }
+            if (e.key === "Escape") { e.preventDefault(); setMentionOpen(false); return; }
         }
-        saveRecent(emoji); setRecent(getRecent());
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
     };
 
-    const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-    const displayEmojis = emojiSearch
-        ? EMOJI_CATS.flatMap(c => c.emojis).filter(e => e.includes(emojiSearch))
-        : emojiTab === -1 ? recent : (EMOJI_CATS[emojiTab]?.emojis ?? []);
+    // ── Attachments: images ──────────────────────────────────────────────────
+    const handleImages = async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = "";
+        if (!files.length) return;
+        setShowAttMenu(false);
+        setUploading(true);
+        const uploaded = [];
+        for (const file of files) {
+            try {
+                const up = await uploadImage(file);
+                uploaded.push({ type: "image", url: up.url, fileId: up.fileId, name: file.name, width: up.width, height: up.height });
+            } catch (err) {
+                setError(`Upload failed: ${file.name}`);
+                setTimeout(() => setError(""), 2500);
+            }
+        }
+        setAttachments(prev => [...prev, ...uploaded]);
+        setUploading(false);
+    };
+
+    const handlePDF = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setShowAttMenu(false);
+        setUploading(true);
+        try {
+            const up = await uploadPDF(file);
+            setAttachments(prev => [...prev, { type: "pdf", url: up.url, fileId: up.fileId, name: file.name, size: file.size }]);
+        } catch (err) {
+            setError("Document upload failed");
+            setTimeout(() => setError(""), 2500);
+        }
+        setUploading(false);
+    };
+
+    // ── Emoji insert ─────────────────────────────────────────────────────────
+    const insertEmoji = (emoji) => {
+        saveRecent(emoji);
+        const ta = textareaRef.current;
+        if (!ta) { setText(t => t + emoji); return; }
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        setText(t => t.slice(0, start) + emoji + t.slice(end));
+        setTimeout(() => {
+            ta.focus();
+            ta.selectionStart = ta.selectionEnd = start + emoji.length;
+        }, 0);
+    };
+
+    const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+    const displayEmojis = useMemo(() => {
+        if (emojiSearch) {
+            const q = emojiSearch.toLowerCase();
+            return EMOJI_CATS.flatMap(c => c.emojis).filter(e => e.includes(emojiSearch) || q.length < 2);
+        }
+        return emojiTab === -1 ? recent : EMOJI_CATS[emojiTab]?.emojis || [];
+    }, [emojiTab, emojiSearch, recent]);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NEW — @mention detection & insertion
+    // ─────────────────────────────────────────────────────────────────────────
+    // Detect @mention based on cursor position inside `text`
+    const detectMentionAtCursor = useCallback((nextText, cursorPos) => {
+        // Look backwards from cursor for "@" preceded by whitespace or start of string
+        let i = cursorPos - 1;
+        while (i >= 0) {
+            const ch = nextText[i];
+            if (ch === "@") {
+                const before = i === 0 ? " " : nextText[i - 1];
+                if (/\s|^/.test(before) || i === 0) {
+                    // Found an @. Query = chars between @ and cursor.
+                    const query = nextText.slice(i + 1, cursorPos);
+                    // Only open if query is short & doesn't contain whitespace or newline
+                    if (query.length <= 30 && !/[\s\n]/.test(query)) {
+                        return { anchor: i, query };
+                    }
+                }
+                return null;
+            }
+            if (/[\s\n]/.test(ch)) return null; // whitespace breaks the mention
+            i--;
+        }
+        return null;
+    }, []);
+
+    const onTextChange = (e) => {
+        const next = e.target.value;
+        setText(next);
+        const cursor = e.target.selectionStart || next.length;
+        const m = detectMentionAtCursor(next, cursor);
+        if (m) {
+            setMentionOpen(true);
+            setMentionQuery(m.query);
+            setMentionAnchorStart(m.anchor);
+            setMentionHoverIdx(0);
+        } else {
+            setMentionOpen(false);
+        }
+    };
+
+    const filteredMembers = useMemo(() => {
+        const q = mentionQuery.trim().toLowerCase();
+        if (!members || members.length === 0) return [];
+        const list = q
+            ? members.filter(m => (m.name || "").toLowerCase().includes(q) || (m.employeeId || "").toLowerCase().includes(q))
+            : members;
+        return list.slice(0, 8); // cap
+    }, [mentionQuery, members]);
+
+    const insertMention = (member) => {
+        if (!member || mentionAnchorStart < 0) { setMentionOpen(false); return; }
+        const ta = textareaRef.current;
+        const cursor = ta ? ta.selectionStart : text.length;
+        const before = text.slice(0, mentionAnchorStart);
+        const after = text.slice(cursor);
+        const tag = `@${member.name} `;
+        const next = before + tag + after;
+        setText(next);
+        setMentionOpen(false);
+        setMentionedIds(prev => prev.includes(member.employeeId) ? prev : [...prev, member.employeeId]);
+        // Restore caret right after the inserted mention
+        const newCaret = (before + tag).length;
+        setTimeout(() => {
+            if (ta) {
+                ta.focus();
+                ta.selectionStart = ta.selectionEnd = newCaret;
+                // Recompute height for textarea
+                ta.style.height = "auto";
+                ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
+            }
+        }, 0);
+    };
 
     return (
-        <div style={{ background: "#202C33", flexShrink: 0, position: "relative" }}>
-            {/* Error */}
-            {error && <div style={{ background: "#2D1515", color: "#FF6B6B", fontSize: 11, padding: "6px 16px", display: "flex", justifyContent: "space-between" }}>{error}<button onClick={() => setError("")} style={{ background: "none", border: "none", color: "#FF6B6B", cursor: "pointer", fontSize: 13 }}>✕</button></div>}
+        <div style={{ position: "relative", background: "#202C33", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+            {/* Error toast */}
+            {error && <div style={{ padding: "6px 16px", background: "#B03A2E", color: "#fff", fontSize: 12, fontWeight: 600 }}>{error}</div>}
 
             {/* Attachment previews */}
             {attachments.length > 0 && (
@@ -214,6 +380,60 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
 
             {/* Uploading indicator */}
             {uploading && <div style={{ padding: "4px 16px", fontSize: 11, color: "#00A884", display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid #2A3942", borderTopColor: "#00A884", borderRadius: "50%", animation: "cwSpin 0.7s linear infinite" }} />Uploading…</div>}
+
+            {/* NEW — Mention popup */}
+            {mentionOpen && filteredMembers.length > 0 && (
+                <div ref={mentionRef} style={{
+                    position: "absolute", bottom: "100%", left: 12, right: 12,
+                    maxWidth: 360, background: "#233138",
+                    borderRadius: 12, boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
+                    zIndex: 250, overflow: "hidden",
+                    fontFamily: "inherit",
+                }}>
+                    <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#8696A0", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                        {mentionQuery ? `Mention · "${mentionQuery}"` : "Mention a member"}
+                    </div>
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                        {filteredMembers.map((m, i) => (
+                            <button
+                                key={m.employeeId || i}
+                                onMouseEnter={() => setMentionHoverIdx(i)}
+                                onClick={() => insertMention(m)}
+                                style={{
+                                    display: "flex", alignItems: "center", gap: 10,
+                                    width: "100%", padding: "8px 14px",
+                                    background: i === mentionHoverIdx ? "rgba(0,168,132,0.14)" : "none",
+                                    border: "none", cursor: "pointer",
+                                    color: "#E9EDEF", fontSize: 13, fontFamily: "inherit",
+                                    textAlign: "left", transition: "background 0.1s",
+                                }}
+                            >
+                                {/* Avatar */}
+                                {m.profilePicUrl
+                                    ? <img src={m.profilePicUrl} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                                    : <div style={{
+                                        width: 28, height: 28, borderRadius: "50%",
+                                        background: avatarColor(m.employeeId || m.name || ""),
+                                        color: "#fff", fontSize: 11, fontWeight: 700,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        flexShrink: 0,
+                                    }}>{initials(m.name)}</div>
+                                }
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 500, color: "#E9EDEF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {m.name || m.employeeId}
+                                    </div>
+                                    {m.employeeId && m.name && (
+                                        <div style={{ fontSize: 10, color: "#8696A0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {m.employeeId}
+                                        </div>
+                                    )}
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Emoji panel */}
             {showEmoji && (
@@ -302,8 +522,15 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
                     <textarea
                         ref={textareaRef}
                         value={text}
-                        onChange={e => setText(e.target.value)}
+                        onChange={onTextChange}
                         onKeyDown={handleKeyDown}
+                        onClick={(e) => {
+                            // Re-detect mention when caret is moved by click
+                            const cursor = e.target.selectionStart;
+                            const m = detectMentionAtCursor(text, cursor);
+                            if (m) { setMentionOpen(true); setMentionQuery(m.query); setMentionAnchorStart(m.anchor); setMentionHoverIdx(0); }
+                            else setMentionOpen(false);
+                        }}
                         placeholder={uploading ? "Uploading…" : placeholder}
                         rows={1}
                         disabled={disabled || uploading}
@@ -329,6 +556,19 @@ export default function MediaMessageInput({ onSend, placeholder = "Type a messag
             <style>{`@keyframes cwSpin { to { transform: rotate(360deg); } }`}</style>
         </div>
     );
+}
+
+// ── Helpers for the mention popup ────────────────────────────────────────────
+function initials(name) {
+    if (!name) return "?";
+    const parts = String(name).trim().split(/\s+/);
+    return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
+}
+function avatarColor(seed) {
+    const palette = ["#0F766E", "#9333EA", "#DB2777", "#EA580C", "#2563EB", "#059669", "#DC2626", "#CA8A04"];
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return palette[h % palette.length];
 }
 
 const iconBtn = (color) => ({ width: 40, height: 38, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "none", borderRadius: "50%", cursor: "pointer", color, flexShrink: 10, transition: "background 0.12s" });

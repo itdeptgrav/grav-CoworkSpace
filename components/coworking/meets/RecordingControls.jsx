@@ -2,50 +2,46 @@
 /**
  * components/coworking/meets/RecordingControls.jsx
  *
- * Shown ONLY to CEO and TL inside the meeting top bar.
- * Handles:
- *   - Start recording button
- *   - Stop recording button → red danger popup (two-step confirmation)
- *   - Recording active indicator (pulsing red dot)
- *   - Upload status (uploading... / done / error)
+ * Host-only top-bar controls:
+ *   - Start / Stop recording (with danger popup to stop)
+ *   - REC active pill
+ *   - Upload status chip
+ *   - NEW — "Rec Status" button → dropdown showing per-participant state:
+ *        ● Name   RECORDING   ⬆ Uploaded
+ *        ● Name   PAUSED      — idle
+ *        ● Name   NOT REC     ✗ Failed
+ *        ● Name   RECORDING   ⏳ Uploading
  */
 
 import { useState } from "react";
 
 export default function RecordingControls({
-    isHost,         // boolean — only render if true
-    isRecording,    // boolean
-    isUploading,    // boolean
-    uploadDone,     // boolean
-    uploadError,    // string
-    uploadResult,   // object { driveViewUrl, fileName } | null
-    onStart,        // fn
-    onStop,         // fn (called after popup confirmed)
+    isHost,
+    isRecording,
+    isUploading,
+    uploadDone,
+    uploadError,
+    uploadResult,
+    onStart,
+    onStop,
+    participantStatuses, // Map<empId, {employeeName, recordingState, uploadState, timestamp}>
 }) {
     const [showPopup, setShowPopup] = useState(false);
     const [confirmText, setConfirmText] = useState("");
+    const [showStatus, setShowStatus] = useState(false);
     const CONFIRM_WORD = "STOP";
 
     if (!isHost) return null;
 
-    // ── Danger popup ──────────────────────────────────────────────────────────
-    const handleStopClick = () => {
-        setShowPopup(true);
-        setConfirmText("");
-    };
+    const handleStopClick = () => { setShowPopup(true); setConfirmText(""); };
+    const handleConfirmStop = () => { setShowPopup(false); setConfirmText(""); onStop(); };
+    const handleCancelPopup = () => { setShowPopup(false); setConfirmText(""); };
 
-    const handleConfirmStop = () => {
-        setShowPopup(false);
-        setConfirmText("");
-        onStop();
-    };
+    const statusEntries = participantStatuses
+        ? Array.from(participantStatuses.entries())
+            .sort((a, b) => (a[1].employeeName || "").localeCompare(b[1].employeeName || ""))
+        : [];
 
-    const handleCancelPopup = () => {
-        setShowPopup(false);
-        setConfirmText("");
-    };
-
-    // ── Upload status chip ────────────────────────────────────────────────────
     const renderStatus = () => {
         if (isUploading) return (
             <div style={S.statusChip}>
@@ -61,14 +57,8 @@ export default function RecordingControls({
         if (uploadDone && uploadResult && !uploadResult.skipped) return (
             <div style={{ ...S.statusChip, gap: 5 }}>
                 <span style={{ fontSize: 11, color: "#4ADE80" }}>✓ Audio saved</span>
-                <a
-                    href={uploadResult.driveViewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 10, color: "#60A5FA", textDecoration: "underline" }}
-                >
-                    View
-                </a>
+                <a href={uploadResult.driveViewUrl} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 10, color: "#60A5FA", textDecoration: "underline" }}>View</a>
             </div>
         );
         return null;
@@ -76,10 +66,8 @@ export default function RecordingControls({
 
     return (
         <>
-            {/* ── Recording button in top bar ── */}
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
 
-                {/* Active recording indicator */}
                 {isRecording && (
                     <div style={S.recordingPill}>
                         <span style={S.recDot} />
@@ -87,7 +75,6 @@ export default function RecordingControls({
                     </div>
                 )}
 
-                {/* Start / Stop button */}
                 {!isRecording && !isUploading && !uploadDone ? (
                     <button onClick={onStart} style={S.startBtn} title="Start audio recording for all participants">
                         <MicIcon />
@@ -100,16 +87,48 @@ export default function RecordingControls({
                     </button>
                 ) : null}
 
-                {/* Upload status */}
                 {renderStatus()}
+
+                {/* Rec Status panel trigger + dropdown */}
+                {statusEntries.length > 0 && (
+                    <div style={{ position: "relative" }}>
+                        <button
+                            onClick={() => setShowStatus(v => !v)}
+                            style={S.statusTriggerBtn}
+                            title="Per-participant recording status"
+                        >
+                            <ListIcon />
+                            <span style={{ fontSize: 11, fontWeight: 600 }}>
+                                Rec Status · {statusEntries.length}
+                            </span>
+                        </button>
+                        {showStatus && (
+                            <div style={S.statusDropdown} onClick={e => e.stopPropagation()}>
+                                <div style={S.statusDropdownHeader}>Recording Status</div>
+                                <div style={S.statusDropdownSub}>
+                                    Live state of each participant's audio capture and upload.
+                                </div>
+                                <div style={S.statusList}>
+                                    {statusEntries.map(([empId, s]) => (
+                                        <ParticipantStatusRow
+                                            key={empId}
+                                            name={s.employeeName}
+                                            recordingState={s.recordingState}
+                                            uploadState={s.uploadState}
+                                        />
+                                    ))}
+                                </div>
+                                <button onClick={() => setShowStatus(false)} style={S.statusCloseBtn}>Close</button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* ── Danger popup overlay ── */}
+            {/* Danger popup */}
             {showPopup && (
                 <div style={S.overlay}>
                     <div style={S.popup}>
-
-                        {/* Header */}
                         <div style={S.popupHeader}>
                             <div style={S.dangerIcon}>⚠</div>
                             <div>
@@ -118,11 +137,8 @@ export default function RecordingControls({
                             </div>
                         </div>
 
-                        {/* Warning message */}
                         <div style={S.warningBox}>
-                            <p style={S.warningText}>
-                                Once you stop recording:
-                            </p>
+                            <p style={S.warningText}>Once you stop recording:</p>
                             <ul style={S.warningList}>
                                 <li>Each participant's audio will be uploaded to Google Drive</li>
                                 <li>Recording cannot be restarted for this meeting</li>
@@ -130,7 +146,6 @@ export default function RecordingControls({
                             </ul>
                         </div>
 
-                        {/* Two-step: type STOP to confirm */}
                         <div style={S.confirmSection}>
                             <label style={S.confirmLabel}>
                                 Type <strong style={{ color: "#F87171" }}>{CONFIRM_WORD}</strong> to confirm
@@ -147,11 +162,8 @@ export default function RecordingControls({
                             />
                         </div>
 
-                        {/* Buttons */}
                         <div style={S.popupBtns}>
-                            <button onClick={handleCancelPopup} style={S.cancelBtn}>
-                                Cancel
-                            </button>
+                            <button onClick={handleCancelPopup} style={S.cancelBtn}>Cancel</button>
                             <button
                                 onClick={handleConfirmStop}
                                 disabled={confirmText !== CONFIRM_WORD}
@@ -166,7 +178,6 @@ export default function RecordingControls({
                                 Yes, Stop Recording & Upload
                             </button>
                         </div>
-
                     </div>
                 </div>
             )}
@@ -179,7 +190,48 @@ export default function RecordingControls({
     );
 }
 
-// ── Small icons ───────────────────────────────────────────────────────────────
+// ── Single participant row ───────────────────────────────────────────────────
+function ParticipantStatusRow({ name, recordingState, uploadState }) {
+    const rec = REC_STATE_CONFIG[recordingState] || REC_STATE_CONFIG.not_rec;
+    const up = UPLOAD_STATE_CONFIG[uploadState] || UPLOAD_STATE_CONFIG.idle;
+
+    return (
+        <div style={S.statusRow}>
+            <span
+                style={{
+                    ...S.statusDot,
+                    background: rec.color,
+                    boxShadow: recordingState === "recording" ? `0 0 6px ${rec.color}` : "none",
+                    animation: recordingState === "recording" ? "rec-pulse 1.4s ease infinite" : "none",
+                }}
+            />
+            <span style={S.statusName} title={name}>{name}</span>
+            <span style={{ ...S.statusBadge, background: rec.bg, color: rec.color, borderColor: rec.border }}>
+                {rec.label}
+            </span>
+            <span style={{ ...S.statusUpload, color: up.color }}>
+                {up.icon} {up.label}
+            </span>
+        </div>
+    );
+}
+
+// ── State → display config ────────────────────────────────────────────────────
+const REC_STATE_CONFIG = {
+    recording: { label: "RECORDING", color: "#4ADE80", bg: "rgba(74,222,128,0.12)", border: "rgba(74,222,128,0.35)" },
+    paused: { label: "PAUSED", color: "#FCD34D", bg: "rgba(252,211,77,0.12)", border: "rgba(252,211,77,0.35)" },
+    not_rec: { label: "NOT REC", color: "#9AA0A6", bg: "rgba(154,160,166,0.12)", border: "rgba(154,160,166,0.30)" },
+    failed: { label: "FAILED", color: "#F87171", bg: "rgba(248,113,113,0.14)", border: "rgba(248,113,113,0.4)" },
+};
+
+const UPLOAD_STATE_CONFIG = {
+    idle: { label: "idle", icon: "—", color: "#6B7280" },
+    uploading: { label: "Uploading", icon: "⏳", color: "#FCD34D" },
+    uploaded: { label: "Uploaded", icon: "⬆", color: "#4ADE80" },
+    failed: { label: "Failed", icon: "✗", color: "#F87171" },
+};
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
 function MicIcon() {
     return (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -190,7 +242,6 @@ function MicIcon() {
         </svg>
     );
 }
-
 function StopIcon({ size = 13 }) {
     return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -198,10 +249,21 @@ function StopIcon({ size = 13 }) {
         </svg>
     );
 }
+function ListIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <circle cx="4" cy="6" r="1" fill="currentColor" />
+            <circle cx="4" cy="12" r="1" fill="currentColor" />
+            <circle cx="4" cy="18" r="1" fill="currentColor" />
+        </svg>
+    );
+}
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const S = {
-    // Top bar buttons
     startBtn: {
         display: "inline-flex", alignItems: "center", gap: 5,
         padding: "6px 12px",
@@ -243,7 +305,76 @@ const S = {
         borderRadius: "50%", animation: "spin 0.8s linear infinite",
     },
 
-    // Popup overlay
+    // Rec Status trigger + dropdown
+    statusTriggerBtn: {
+        display: "inline-flex", alignItems: "center", gap: 5,
+        padding: "6px 12px",
+        background: "#2A2A2A", border: "1px solid #3C4043",
+        borderRadius: 8, color: "#BDC1C6",
+        fontSize: 12, fontWeight: 600,
+        cursor: "pointer", fontFamily: "inherit",
+    },
+    statusDropdown: {
+        position: "absolute", top: "calc(100% + 8px)", right: 0,
+        background: "#1A1A1A", border: "1px solid #3C4043",
+        borderRadius: 12, padding: "14px 14px 12px",
+        minWidth: 360, maxWidth: 420,
+        boxShadow: "0 14px 40px rgba(0,0,0,0.6)",
+        zIndex: 10000,
+        fontFamily: "'Google Sans','Roboto',sans-serif",
+    },
+    statusDropdownHeader: {
+        fontSize: 13, fontWeight: 700, color: "#F9FAFB",
+        marginBottom: 3,
+    },
+    statusDropdownSub: {
+        fontSize: 11, color: "#9AA0A6", lineHeight: 1.45,
+        marginBottom: 12,
+    },
+    statusList: {
+        display: "flex", flexDirection: "column", gap: 5,
+        maxHeight: 300, overflowY: "auto",
+        paddingRight: 2,
+    },
+    statusRow: {
+        display: "grid",
+        gridTemplateColumns: "14px 1fr auto auto",
+        alignItems: "center", gap: 10,
+        padding: "8px 10px",
+        background: "#111", border: "1px solid #2A2A2A",
+        borderRadius: 8,
+    },
+    statusDot: {
+        width: 8, height: 8, borderRadius: "50%",
+        flexShrink: 0,
+    },
+    statusName: {
+        fontSize: 12.5, color: "#E8EAED",
+        fontWeight: 500,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    },
+    statusBadge: {
+        fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em",
+        padding: "3px 8px",
+        borderRadius: 99,
+        border: "1px solid",
+        flexShrink: 0,
+    },
+    statusUpload: {
+        fontSize: 11, fontWeight: 600,
+        minWidth: 90, textAlign: "right",
+        flexShrink: 0,
+    },
+    statusCloseBtn: {
+        marginTop: 10, width: "100%",
+        background: "#2A2A2A", border: "none",
+        borderRadius: 6, color: "#9AA0A6",
+        fontSize: 11, fontWeight: 600,
+        padding: "7px 0", cursor: "pointer",
+        fontFamily: "inherit",
+    },
+
+    // Stop popup
     overlay: {
         position: "fixed", inset: 0, zIndex: 99999,
         background: "rgba(0,0,0,0.75)",
@@ -261,46 +392,30 @@ const S = {
         display: "flex", flexDirection: "column", gap: 20,
         fontFamily: "'Google Sans','Roboto',sans-serif",
     },
-    popupHeader: {
-        display: "flex", alignItems: "flex-start", gap: 14,
-    },
+    popupHeader: { display: "flex", alignItems: "flex-start", gap: 14 },
     dangerIcon: {
         width: 44, height: 44,
         background: "rgba(239,68,68,0.15)",
         border: "1px solid rgba(239,68,68,0.4)",
         borderRadius: 12,
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 20, flexShrink: 0,
-        color: "#F87171",
+        fontSize: 20, flexShrink: 0, color: "#F87171",
     },
-    popupTitle: {
-        fontSize: 17, fontWeight: 700, color: "#F9FAFB",
-        marginBottom: 4,
-    },
-    popupSubtitle: {
-        fontSize: 12, color: "#9AA0A6",
-    },
+    popupTitle: { fontSize: 17, fontWeight: 700, color: "#F9FAFB", marginBottom: 4 },
+    popupSubtitle: { fontSize: 12, color: "#9AA0A6" },
     warningBox: {
         background: "rgba(239,68,68,0.08)",
         border: "1px solid rgba(239,68,68,0.2)",
-        borderRadius: 10,
-        padding: "14px 16px",
+        borderRadius: 10, padding: "14px 16px",
     },
-    warningText: {
-        fontSize: 13, color: "#FCA5A5",
-        margin: "0 0 8px", fontWeight: 600,
-    },
+    warningText: { fontSize: 13, color: "#FCA5A5", margin: "0 0 8px", fontWeight: 600 },
     warningList: {
         margin: 0, paddingLeft: 18,
         display: "flex", flexDirection: "column", gap: 5,
         fontSize: 12, color: "#9AA0A6", lineHeight: 1.6,
     },
-    confirmSection: {
-        display: "flex", flexDirection: "column", gap: 8,
-    },
-    confirmLabel: {
-        fontSize: 12, color: "#9AA0A6",
-    },
+    confirmSection: { display: "flex", flexDirection: "column", gap: 8 },
+    confirmLabel: { fontSize: 12, color: "#9AA0A6" },
     confirmInput: {
         padding: "10px 13px",
         background: "#111",
@@ -313,22 +428,16 @@ const S = {
         transition: "border-color 0.15s",
         letterSpacing: "0.1em",
     },
-    popupBtns: {
-        display: "flex", gap: 10,
-    },
+    popupBtns: { display: "flex", gap: 10 },
     cancelBtn: {
         flex: 1, padding: "11px 0",
-        background: "#2A2A2A",
-        border: "1px solid #3C4043",
-        borderRadius: 10,
-        color: "#9AA0A6", fontSize: 13, fontWeight: 600,
+        background: "#2A2A2A", border: "1px solid #3C4043",
+        borderRadius: 10, color: "#9AA0A6", fontSize: 13, fontWeight: 600,
         cursor: "pointer", fontFamily: "inherit",
     },
     confirmBtn: {
         flex: 2, padding: "11px 0",
-        background: "#EF4444",
-        border: "none",
-        borderRadius: 10,
+        background: "#EF4444", border: "none", borderRadius: 10,
         color: "#fff", fontSize: 13, fontWeight: 700,
         cursor: "pointer", fontFamily: "inherit",
         display: "flex", alignItems: "center", justifyContent: "center", gap: 7,

@@ -184,6 +184,62 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
   // Keys are sender IDs (fromId). Presence in the Set = expanded.
   const [openPendingSenders, setOpenPendingSenders] = useState(new Set());
   const [openRespondedSenders, setOpenRespondedSenders] = useState(new Set());
+  // Add a new state to hold all tasks
+  const [allTasks, setAllTasks] = useState([]);
+
+  // Fetch all tasks once when the component mounts
+  useEffect(() => {
+    const fetchAllTasks = async () => {
+      try {
+        const snap = await getDocs(collection(firebaseDb, "cowork_tasks"));
+        const tasks = snap.docs
+          .map(d => ({ taskId: d.id, ...d.data() }))
+          .filter(t => !t.parentTaskId && t.status !== "done");
+        setAllTasks(tasks);
+      } catch (error) {
+        console.error("Failed to fetch tasks", error);
+      }
+    };
+    fetchAllTasks();
+  }, []);
+
+  // Function to filter tasks based on query
+  const filterTasks = (query) => {
+    if (!query.trim()) {
+      setTaskSuggestions(allTasks);
+      return;
+    }
+    const lower = query.toLowerCase();
+    const filtered = allTasks.filter(t =>
+      t.title?.toLowerCase().includes(lower) ||
+      t.taskId?.toLowerCase().includes(lower)
+    );
+    setTaskSuggestions(filtered);
+  };
+
+  // Replace the old useEffect that fetched on query change with this one
+  useEffect(() => {
+    filterTasks(taskQuery);
+  }, [taskQuery, allTasks]);
+
+  // Update the input's onFocus and onChange handlers
+  <input
+    className="cw-rf-input"
+    placeholder="Search task name or ID…"
+    value={taskQuery}
+    onChange={(e) => {
+      setTaskQuery(e.target.value);
+      setShowTaskDrop(true);
+    }}
+    onFocus={() => {
+      // Show dropdown with all tasks if no query, otherwise show filtered list
+      if (!taskQuery.trim()) {
+        setTaskSuggestions(allTasks);
+      }
+      setShowTaskDrop(true);
+    }}
+    onBlur={() => setTimeout(() => setShowTaskDrop(false), 180)}
+  />
 
   // Scroll to highlighted request when panel opens
   useEffect(() => {
@@ -799,32 +855,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
                     value={subject} onChange={e => setSubject(e.target.value)} />
                 </div>
 
-                {/* Priority + Type row */}
-                <div className="cw-rf-row">
-                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
-                    <label className="cw-rf-lbl">Priority</label>
-                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-                      {PRIORITY_OPTIONS.map(p => (
-                        <button key={p} onClick={() => setPriority(p)}
-                          style={{
-                            padding: "4px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                            cursor: "pointer", fontFamily: "inherit", border: "1px solid",
-                            color: priority === p ? priColor[p] : "#9AA0A6",
-                            background: priority === p ? priBg[p] : "#F9FAFB",
-                            borderColor: priority === p ? `${priColor[p]}44` : "#E4E7EC"
-                          }}>
-                          {p.charAt(0).toUpperCase() + p.slice(1)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="cw-rf-field" style={{ marginBottom: 0 }}>
-                    <label className="cw-rf-lbl">Type</label>
-                    <select className="cw-rf-input" value={type} onChange={e => setType(e.target.value)}>
-                      {TYPE_OPTIONS.map(t => <option key={t}>{t}</option>)}
-                    </select>
-                  </div>
-                </div>
+
 
                 {/* Proposed Date + Time row */}
                 <div className="cw-rf-row" style={{ marginTop: 14 }}>
