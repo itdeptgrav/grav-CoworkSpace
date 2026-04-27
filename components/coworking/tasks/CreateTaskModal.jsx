@@ -56,6 +56,68 @@ export default function CreateTaskModal({
 
     const [form, setForm] = useState({ title: "", description: "", notes: "" });
     const [isFolder, setIsFolder] = useState(false);
+
+    // ── Repeat Task state ─────────────────────────────────────────────────────
+    const [step, setStep] = useState(1); // 1 = task details, 2 = assign & create
+    const [isRepeat, setIsRepeat] = useState(false);
+    const [isThirdParty, setIsThirdParty] = useState(false);
+    const [thirdPartyConfig, setThirdPartyConfig] = useState({
+        vendorName: "",
+        vendorCategory: "Machine",
+        hasVendorContact: false,
+        vendorContact: "",
+        estimatedDate: "",
+        updateIntervalDays: 2,
+
+    });
+    const setTPC = (k, v) => setThirdPartyConfig(prev => ({ ...prev, [k]: v }));
+
+    const [isGoal, setIsGoal] = useState(false);
+    const [goalConfig, setGoalConfig] = useState({
+        goalType: "amount",
+        targetValue: "",
+        unit: "",
+        baseline: "",
+        goalDescription: "",
+        deadline: "",
+        hasMilestones: false,
+        milestones: [{ pct: 25, date: "", label: "" }, { pct: 50, date: "", label: "" }, { pct: 75, date: "", label: "" }],
+    });
+    const setGC = (k, v) => setGoalConfig(prev => ({ ...prev, [k]: v }));
+    const setMilestone = (i, k, v) => setGoalConfig(prev => ({
+        ...prev,
+        milestones: prev.milestones.map((m, j) => j === i ? { ...m, [k]: v } : m),
+    }));
+
+    const [repeatConfig, setRepeatConfig] = useState({
+        frequency: "daily",
+        activeDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        timesPerDay: 1,
+        deadlineTimes: ["10:00"],
+        startDate: "",
+        endDate: "",
+        missedAction: "lock",
+        hasDailyReport: false,
+        hasTimer: false,
+    });
+    const setRC = (k, v) => setRepeatConfig(prev => ({ ...prev, [k]: v }));
+    const toggleDay = (day) => setRC("activeDays",
+        repeatConfig.activeDays.includes(day)
+            ? repeatConfig.activeDays.filter(d => d !== day)
+            : [...repeatConfig.activeDays, day]
+    );
+    const setTimesPerDay = (n) => {
+        const count = Math.max(1, Math.min(10, Number(n) || 1));
+        const current = repeatConfig.deadlineTimes;
+        const updated = Array.from({ length: count }, (_, i) => current[i] || "10:00");
+        setRepeatConfig(prev => ({ ...prev, timesPerDay: count, deadlineTimes: updated }));
+    };
+    const setDeadlineTime = (i, val) => {
+        const updated = [...repeatConfig.deadlineTimes];
+        updated[i] = val;
+        setRC("deadlineTimes", updated);
+    };
+
     const [subtaskRows, setSubtaskRows] = useState([emptySubtask()]);
     const [employees, setEmployees] = useState([]);
     const [selectedIds, setSelectedIds] = useState([]);
@@ -252,6 +314,12 @@ export default function CreateTaskModal({
                     createdByTl: currentRole === "tl",
                     status: "open",
                     isFolder: isFolder || false,
+                    isRepeat: isRepeat || false,
+                    repeatConfig: isRepeat ? repeatConfig : null,
+                    isThirdParty: isThirdParty || false,
+                    thirdPartyConfig: isThirdParty ? thirdPartyConfig : null,
+                    isGoal: isGoal || false,
+                    goalConfig: isGoal ? goalConfig : null,
                 });
                 if (parentTask?.taskId && newTask?.taskId) {
                     await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
@@ -312,6 +380,31 @@ export default function CreateTaskModal({
                         </svg>
                     </button>
                 </div>
+
+                {/* ── 2-Step Stepper (only for non-multi mode) ── */}
+                {!isMultiMode && (
+                    <div style={{ display: "flex", alignItems: "center", padding: "10px 24px", borderBottom: "1px solid #E5E7EB", gap: 0 }}>
+                        {[{ n: 1, label: "Task Details" }, { n: 2, label: "Assign & Create" }].map((s2, i) => (
+                            <React.Fragment key={s2.n}>
+                                {i > 0 && <div style={{ flex: 1, height: 1, background: step > 1 ? "#2563EB" : "#E5E7EB", maxWidth: 48, margin: "0 8px" }} />}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <div style={{
+                                        width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                                        fontSize: 11, fontWeight: 600, flexShrink: 0,
+                                        background: step > s2.n ? "#166534" : step === s2.n ? "#2563EB" : "#F3F4F6",
+                                        color: step >= s2.n ? "#fff" : "#9CA3AF",
+                                        border: `1.5px solid ${step > s2.n ? "#166534" : step === s2.n ? "#2563EB" : "#E5E7EB"}`,
+                                    }}>
+                                        {step > s2.n ? "✓" : s2.n}
+                                    </div>
+                                    <span style={{ fontSize: 12, color: step === s2.n ? "#2563EB" : "#6B7280", fontWeight: step === s2.n ? 600 : 400 }}>
+                                        {s2.label}
+                                    </span>
+                                </div>
+                            </React.Fragment>
+                        ))}
+                    </div>
+                )}
 
                 {/* ── Approval Notice ── */}
                 {needsApproval && (
@@ -507,6 +600,294 @@ export default function CreateTaskModal({
                                 </label>
                             )}
 
+                            {/* ── Repeat Task Toggle ── */}
+                            {!parentTask && !isMultiMode && !isFolder && (
+                                <>
+                                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isRepeat ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${isRepeat ? "#93C5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                        <div style={{ position: "relative", marginTop: 2, flexShrink: 0 }}>
+                                            <input type="checkbox" checked={isRepeat} onChange={e => setIsRepeat(e.target.checked)}
+                                                style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#2563EB", margin: 0 }} />
+                                        </div>
+                                        <div>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: isRepeat ? "#1D4ED8" : "#374151", display: "flex", alignItems: "center", gap: 5 }}>
+                                                🔁 This is a Repeat Task
+                                            </span>
+                                            <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.45 }}>
+                                                Auto-generates daily/weekly at a fixed deadline time. CEO/TL sets the deadline — final.
+                                            </p>
+                                        </div>
+                                    </label>
+
+                                    {/* ── Repeat Config (only when checked) ── */}
+                                    {isRepeat && (
+                                        <div style={{ border: "1.5px solid #BFDBFE", borderRadius: 10, background: "rgba(239,246,255,0.5)", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#1D4ED8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Schedule</div>
+
+                                            {/* Frequency */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Frequency</label>
+                                                <div style={{ display: "flex", gap: 6 }}>
+                                                    {["daily", "weekly", "custom"].map(f => (
+                                                        <button key={f} type="button" onClick={() => setRC("frequency", f)}
+                                                            style={{ padding: "5px 14px", borderRadius: 20, border: `1.5px solid ${repeatConfig.frequency === f ? "#2563EB" : "#E5E7EB"}`, background: repeatConfig.frequency === f ? "#2563EB" : "#fff", color: repeatConfig.frequency === f ? "#fff" : "#374151", fontSize: 12, fontWeight: repeatConfig.frequency === f ? 600 : 400, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
+                                                            {f}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Day picker for weekly / custom */}
+                                            {(repeatConfig.frequency === "weekly" || repeatConfig.frequency === "custom") && (
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Active days</label>
+                                                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => {
+                                                            const on = repeatConfig.activeDays.includes(d);
+                                                            return (
+                                                                <button key={d} type="button" onClick={() => toggleDay(d)}
+                                                                    style={{ padding: "4px 10px", borderRadius: 5, border: `1.5px solid ${on ? "#2563EB" : "#E5E7EB"}`, background: on ? "#EFF6FF" : "#fff", color: on ? "#1D4ED8" : "#374151", fontSize: 11, fontWeight: on ? 600 : 400, cursor: "pointer", fontFamily: "inherit" }}>
+                                                                    {d}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* How many times per day + dynamic time slots */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>How many times per day? <span style={s.req}>*</span></label>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                                    <input className="ctm-input" style={{ ...s.input, width: 80 }} type="number" min="1" max="10"
+                                                        value={repeatConfig.timesPerDay}
+                                                        onChange={e => setTimesPerDay(e.target.value)} />
+                                                    <span style={{ fontSize: 12, color: "#64748B" }}>time{repeatConfig.timesPerDay > 1 ? "s" : ""} per day</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Dynamic deadline time pickers */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Deadline time{repeatConfig.timesPerDay > 1 ? "s" : ""} <span style={s.req}>*</span></label>
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                                    {repeatConfig.deadlineTimes.map((t, i) => (
+                                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                            <span style={{ fontSize: 11, color: "#64748B", minWidth: 60 }}>Slot {i + 1}</span>
+                                                            <input className="ctm-input" style={{ ...s.input, flex: 1 }} type="time" value={t}
+                                                                onChange={e => setDeadlineTime(i, e.target.value)} />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Start date */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Start date <span style={s.req}>*</span></label>
+                                                <input className="ctm-input" style={s.input} type="date" value={repeatConfig.startDate}
+                                                    onChange={e => setRC("startDate", e.target.value)} />
+                                            </div>
+
+                                            {/* End date + missed action */}
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>End date <span style={{ fontWeight: 400, textTransform: "none", fontSize: 11, color: "#9CA3AF" }}>(optional)</span></label>
+                                                    <input className="ctm-input" style={s.input} type="date" value={repeatConfig.endDate}
+                                                        onChange={e => setRC("endDate", e.target.value)} />
+                                                    {!repeatConfig.endDate && <span style={{ fontSize: 10, color: "#059669", marginTop: 2 }}>∞ No end date — repeats forever</span>}
+                                                </div>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>If deadline missed</label>
+                                                    <select className="ctm-input" style={s.input} value={repeatConfig.missedAction}
+                                                        onChange={e => setRC("missedAction", e.target.value)}>
+                                                        <option value="lock">Mark as Missed — lock</option>
+                                                        <option value="late">Allow late submission</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {/* Divider */}
+                                            <div style={{ height: 1, background: "rgba(37,99,235,0.12)" }} />
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#1D4ED8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Optional features</div>
+
+                                            {/* Timer (pause/play) — checkbox only */}
+                                            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px 12px", borderRadius: 8, background: repeatConfig.hasTimer ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${repeatConfig.hasTimer ? "#93C5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                                <input type="checkbox" checked={repeatConfig.hasTimer} onChange={e => setRC("hasTimer", e.target.checked)}
+                                                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#2563EB", flexShrink: 0 }} />
+                                                <div>
+                                                    <span style={{ fontSize: 12, fontWeight: 700, color: repeatConfig.hasTimer ? "#1D4ED8" : "#374151" }}>⏱ Timer (start / pause)</span>
+                                                    <p style={{ fontSize: 11, color: "#6B7280", margin: "2px 0 0", lineHeight: 1.4 }}>Employee can track time worked. If unchecked, only fixed deadline applies.</p>
+                                                </div>
+                                            </label>
+
+                                            {/* Daily Report — checkbox only, no sub-fields */}
+                                            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "10px 12px", borderRadius: 8, background: repeatConfig.hasDailyReport ? "#F0FDF4" : "#F8FAFC", border: `1.5px solid ${repeatConfig.hasDailyReport ? "#86EFAC" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                                <input type="checkbox" checked={repeatConfig.hasDailyReport} onChange={e => setRC("hasDailyReport", e.target.checked)}
+                                                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#16A34A", flexShrink: 0 }} />
+                                                <div>
+                                                    <span style={{ fontSize: 12, fontWeight: 700, color: repeatConfig.hasDailyReport ? "#15803D" : "#374151" }}>📋 Submission Report</span>
+                                                    <p style={{ fontSize: 11, color: "#6B7280", margin: "2px 0 0", lineHeight: 1.4 }}>Each slot requires a comment + optional file upload (pic, PDF, Excel, doc, etc.)</p>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {/* ── Third-party Dependency Task Toggle ── */}
+                            {!parentTask && !isMultiMode && !isFolder && !isRepeat && (
+                                <>
+                                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isThirdParty ? "#F5F3FF" : "#F8FAFC", border: `1.5px solid ${isThirdParty ? "#C4B5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                        <input type="checkbox" checked={isThirdParty} onChange={e => setIsThirdParty(e.target.checked)}
+                                            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#7C3AED", margin: "2px 0 0", flexShrink: 0 }} />
+                                        <div>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: isThirdParty ? "#6D28D9" : "#374151", display: "flex", alignItems: "center", gap: 5 }}>
+                                                🔗 Third-party Dependency Task
+                                            </span>
+                                            <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.45 }}>
+                                                Task depends on an external vendor. Progress is tracked via update logs.
+                                            </p>
+                                        </div>
+                                    </label>
+
+                                    {isThirdParty && (
+                                        <div style={{ border: "1.5px solid #C4B5FD", borderRadius: 10, background: "rgba(245,243,255,0.5)", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em" }}>Vendor Info</div>
+
+                                            <div style={s.field}>
+                                                <label style={s.label}>Vendor name <span style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400 }}>(optional)</span></label>
+                                                <input className="ctm-input" style={s.input} type="text" placeholder="e.g. TechNova Solutions"
+                                                    value={thirdPartyConfig.vendorName} onChange={e => setTPC("vendorName", e.target.value)} />
+                                            </div>
+
+                                            <div style={s.field}>
+                                                <label style={s.label}>Category</label>
+                                                <select className="ctm-input" style={s.input} value={thirdPartyConfig.vendorCategory} onChange={e => setTPC("vendorCategory", e.target.value)}>
+                                                    {["Machine", "Material", "Service", "Software", "Logistics", "Other"].map(c => <option key={c}>{c}</option>)}
+                                                </select>
+                                            </div>
+
+                                            {/* Vendor contact optional checkbox */}
+                                            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: "#374151" }}>
+                                                <input type="checkbox" checked={thirdPartyConfig.hasVendorContact} onChange={e => setTPC("hasVendorContact", e.target.checked)}
+                                                    style={{ width: 14, height: 14, accentColor: "#7C3AED", cursor: "pointer" }} />
+                                                Add vendor contact info (phone / email)
+                                            </label>
+                                            {thirdPartyConfig.hasVendorContact && (
+                                                <input className="ctm-input" style={s.input} type="text" placeholder="Phone or email"
+                                                    value={thirdPartyConfig.vendorContact} onChange={e => setTPC("vendorContact", e.target.value)} />
+                                            )}
+
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Expected resolution date</label>
+                                                    <input className="ctm-input" style={s.input} type="date" value={thirdPartyConfig.estimatedDate}
+                                                        onChange={e => setTPC("estimatedDate", e.target.value)} />
+                                                </div>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Expect update every (days)</label>
+                                                    <input className="ctm-input" style={s.input} type="number" min="1" max="30" value={thirdPartyConfig.updateIntervalDays}
+                                                        onChange={e => setTPC("updateIntervalDays", Number(e.target.value))} />
+                                                </div>
+                                            </div>
+
+
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {/* ── Goal-based Task Toggle ── */}
+                            {!parentTask && !isMultiMode && !isFolder && !isRepeat && !isThirdParty && (
+                                <>
+                                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isGoal ? "#FDF4FF" : "#F8FAFC", border: `1.5px solid ${isGoal ? "#E879F9" : "#E2E8F0"}`, transition: "all 0.15s" }}>
+                                        <input type="checkbox" checked={isGoal} onChange={e => setIsGoal(e.target.checked)}
+                                            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#9333EA", margin: "2px 0 0", flexShrink: 0 }} />
+                                        <div>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: isGoal ? "#7E22CE" : "#374151" }}>🎯 Goal-based Task</span>
+                                            <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.45 }}>
+                                                Target-driven task. Employee updates progress, system tracks % achieved.
+                                            </p>
+                                        </div>
+                                    </label>
+
+                                    {isGoal && (
+                                        <div style={{ border: "1.5px solid #E879F9", borderRadius: 10, background: "rgba(253,244,255,0.5)", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#7E22CE", textTransform: "uppercase", letterSpacing: "0.05em" }}>Goal Details</div>
+
+                                            {/* Goal type */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Goal type</label>
+                                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                    {["amount", "count", "percentage", "custom"].map(t => (
+                                                        <button key={t} type="button" onClick={() => setGC("goalType", t)}
+                                                            style={{ padding: "5px 13px", borderRadius: 20, border: `1.5px solid ${goalConfig.goalType === t ? "#9333EA" : "#E2E8F0"}`, background: goalConfig.goalType === t ? "#9333EA" : "#fff", color: goalConfig.goalType === t ? "#fff" : "#374151", fontSize: 12, fontWeight: goalConfig.goalType === t ? 700 : 400, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
+                                                            {t === "amount" ? "💰 Amount" : t === "count" ? "🔢 Count" : t === "percentage" ? "📊 Percentage" : "✏️ Custom"}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Target value + unit */}
+                                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Target value <span style={s.req}>*</span></label>
+                                                    <input className="ctm-input" style={s.input} type="number" placeholder={goalConfig.goalType === "amount" ? "e.g. 5000000" : goalConfig.goalType === "percentage" ? "e.g. 30" : "e.g. 50"}
+                                                        value={goalConfig.targetValue} onChange={e => setGC("targetValue", e.target.value)} />
+                                                </div>
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Unit</label>
+                                                    <input className="ctm-input" style={s.input} type="text"
+                                                        placeholder={goalConfig.goalType === "amount" ? "₹" : goalConfig.goalType === "percentage" ? "%" : goalConfig.goalType === "count" ? "clients" : "unit"}
+                                                        value={goalConfig.unit} onChange={e => setGC("unit", e.target.value)} />
+                                                </div>
+                                            </div>
+
+                                            {/* Baseline — only for percentage */}
+                                            {goalConfig.goalType === "percentage" && (
+                                                <div style={s.field}>
+                                                    <label style={s.label}>Baseline value <span style={s.req}>*</span></label>
+                                                    <input className="ctm-input" style={s.input} type="number" placeholder="e.g. 100 (current ticket count)"
+                                                        value={goalConfig.baseline} onChange={e => setGC("baseline", e.target.value)} />
+                                                    <span style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>Employee will enter current value → system calculates reduction</span>
+                                                </div>
+                                            )}
+
+                                            {/* Goal description */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Goal description</label>
+                                                <input className="ctm-input" style={s.input} type="text" placeholder="e.g. Achieve ₹5 crore in sales by June"
+                                                    value={goalConfig.goalDescription} onChange={e => setGC("goalDescription", e.target.value)} />
+                                            </div>
+
+                                            {/* Hard deadline */}
+                                            <div style={s.field}>
+                                                <label style={s.label}>Hard deadline <span style={s.req}>*</span></label>
+                                                <input className="ctm-input" style={s.input} type="date"
+                                                    value={goalConfig.deadline} onChange={e => setGC("deadline", e.target.value)} />
+                                            </div>
+
+                                            {/* Milestones */}
+                                            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 10px", borderRadius: 7, background: goalConfig.hasMilestones ? "#FDF4FF" : "#F8FAFC", border: `1.5px solid ${goalConfig.hasMilestones ? "#E879F9" : "#E2E8F0"}` }}>
+                                                <input type="checkbox" checked={goalConfig.hasMilestones} onChange={e => setGC("hasMilestones", e.target.checked)}
+                                                    style={{ width: 14, height: 14, accentColor: "#9333EA", cursor: "pointer" }} />
+                                                <span style={{ fontSize: 12, fontWeight: 700, color: goalConfig.hasMilestones ? "#7E22CE" : "#374151" }}>🏁 Add milestones</span>
+                                            </label>
+
+                                            {goalConfig.hasMilestones && (
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                    {goalConfig.milestones.map((ms, i) => (
+                                                        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: 8, alignItems: "center" }}>
+                                                            <span style={{ fontSize: 12, fontWeight: 700, color: "#7E22CE", textAlign: "center" }}>{ms.pct}%</span>
+                                                            <input className="ctm-input" style={s.input} type="date" value={ms.date} onChange={e => setMilestone(i, "date", e.target.value)} />
+                                                            <input className="ctm-input" style={s.input} type="text" placeholder="Label (optional)" value={ms.label} onChange={e => setMilestone(i, "label", e.target.value)} />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
                             {/* Description */}
                             <div style={s.field}>
                                 <label style={s.label}>Description</label>
@@ -525,8 +906,8 @@ export default function CreateTaskModal({
                                     placeholder="Specific requirements, deliverables, acceptance criteria" />
                             </div>}
 
-                            {/* Assignees — hidden for folder tasks, required for normal tasks */}
-                            {!isFolder && <div style={s.field}>
+                            {/* Assignees — hidden for folder tasks, required for normal tasks, shown on step 2 */}
+                            {!isFolder && step === 2 && <div style={s.field}>
                                 <label style={s.label}>
                                     Assign to
                                     {selectedIds.length > 0 && <span style={s.countBadge}>{selectedIds.length} selected</span>}
@@ -617,8 +998,8 @@ export default function CreateTaskModal({
                                 </div>
                             </div>}
 
-                            {/* Attachments — hidden for folder tasks */}
-                            {!isFolder && <div style={s.field}>
+                            {/* Attachments — hidden for folder tasks, shown on step 2 */}
+                            {!isFolder && step === 2 && <div style={s.field}>
                                 <label style={s.label}>
                                     Attachments
                                     <span style={{ fontWeight: 400, textTransform: "none", fontSize: 11, color: "#9CA3AF", marginLeft: 6 }}>
@@ -682,23 +1063,51 @@ export default function CreateTaskModal({
 
                     {/* ── Footer ── */}
                     <div style={s.footer}>
-                        <button type="button" className="ctm-cancel" onClick={onClose} style={s.cancelBtn}>
-                            Cancel
-                        </button>
-                        <button type="submit" className="ctm-submit" disabled={submitting || uploadingFiles}
-                            style={{ ...s.submitBtn, opacity: (submitting || uploadingFiles) ? 0.65 : 1 }}>
-                            {submitting ? (
-                                <>
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
-                                    Creating…
-                                </>
-                            ) : isMultiMode
-                                ? `Create ${subtaskRows.filter(r => r.title.trim()).length || 1} Subtask${subtaskRows.filter(r => r.title.trim()).length !== 1 ? "s" : ""}`
-                                : parentTask
-                                    ? "Create Subtask"
-                                    : "Create Task"
-                            }
-                        </button>
+                        {/* Left side: Cancel (step 1) or Back (step 2) */}
+                        {!isMultiMode && step === 2 ? (
+                            <button type="button" className="ctm-cancel" onClick={() => setStep(1)} style={s.cancelBtn}>
+                                ← Back
+                            </button>
+                        ) : (
+                            <button type="button" className="ctm-cancel" onClick={onClose} style={s.cancelBtn}>
+                                Cancel
+                            </button>
+                        )}
+
+                        {/* Right side: Next (step 1) or Create (step 2 / multi mode) */}
+                        {!isMultiMode && step === 1 ? (
+                            <button
+                                type="button"
+                                className="ctm-submit"
+                                style={s.submitBtn}
+                                onClick={() => {
+                                    if (!form.title.trim()) { setError("Title is required."); return; }
+                                    if (isRepeat && (!repeatConfig.deadlineTimes?.length || !repeatConfig.deadlineTimes[0])) { setError("At least one deadline time is required."); return; }
+                                    if (isRepeat && !repeatConfig.startDate) { setError("Start date is required for repeat tasks."); return; }
+                                    setError("");
+                                    setStep(2);
+                                }}
+                            >
+                                Next →
+                            </button>
+                        ) : (
+                            <button type="submit" className="ctm-submit" disabled={submitting || uploadingFiles}
+                                style={{ ...s.submitBtn, opacity: (submitting || uploadingFiles) ? 0.65 : 1 }}>
+                                {submitting ? (
+                                    <>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                                        Creating…
+                                    </>
+                                ) : isMultiMode
+                                    ? `Create ${subtaskRows.filter(r => r.title.trim()).length || 1} Subtask${subtaskRows.filter(r => r.title.trim()).length !== 1 ? "s" : ""}`
+                                    : parentTask
+                                        ? "Create Subtask"
+                                        : isRepeat
+                                            ? "Create Repeat Task"
+                                            : "Create Task"
+                                }
+                            </button>
+                        )}
                     </div>
 
                     <style>{`@keyframes ctm-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>

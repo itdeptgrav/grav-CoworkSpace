@@ -21,7 +21,7 @@ const useLocalParticipant = dynamic ? null : null; // accessed via window event 
 
 import {
   collection, doc, setDoc, updateDoc, getDocs, getDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch,
+  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch, limit,
 } from "firebase/firestore";
 
 
@@ -1716,6 +1716,7 @@ function NavIcon({ name, size = 20 }) {
     employees: <><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" /></>,
     status: <><circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.3" /><circle cx="12" cy="12" r="3" /><path d="M6.3 6.3a8 8 0 000 11.4M17.7 17.7a8 8 0 000-11.4M3.5 3.5a12 12 0 000 17M20.5 20.5a12 12 0 000-17" /></>,
     calendar: <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
+    mail: <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></>,
     logout: <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
     bell: <><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></>,
@@ -1845,7 +1846,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           if (grpCountMap[gid] !== undefined) return; // already listening
           grpCountMap[gid] = 0;
           const unsub = onSnapshot(
-            query(collection(firebaseDb, "cowork_groups", gid, "messages")),
+            query(collection(firebaseDb, "cowork_groups", gid, "messages"), orderBy("createdAt", "asc"), limit(100)),
             msgSnap => {
               grpCountMap[gid] = msgSnap.docs.filter(d => {
                 const data = d.data();
@@ -2188,6 +2189,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     { id: "tasks", label: "Tasks", icon: "tasks", path: "/coworking/tasks" },
     { id: "messages", label: "Messages", icon: "messages", path: "/coworking/direct-messages" },
     { id: "groups", label: "Groups", icon: "groups", path: "/coworking/create-group" },
+    { id: "mail", label: "Mail", icon: "mail", path: "/coworking/mail" },
     { id: "meetings", label: "Meetings", icon: "meetings", path: "/coworking/schedule-meet" },
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),

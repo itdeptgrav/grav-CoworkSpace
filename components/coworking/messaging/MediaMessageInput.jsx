@@ -348,181 +348,208 @@ export default function MediaMessageInput({
     };
 
     return (
-        <div style={{ position: "relative", background: "#202C33", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+        <div style={{ position: "relative", background: "#202C33", borderTop: "1px solid rgba(255,255,255,0.05)", zIndex: 20 }}>
             {error && <div style={{ padding: "6px 16px", background: "#B03A2E", color: "#fff", fontSize: 12, fontWeight: 600 }}>{error}</div>}
 
             {attachments.length > 0 && (
-                <div style={{ display: "flex", gap: 8, padding: "8px 16px 0", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, padding: "6px 12px 0", flexWrap: "wrap" }}>
                     {attachments.map((att, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, background: "#2A3942", borderRadius: 8, padding: "4px 10px", fontSize: 12, color: "#E9EDEF" }}>
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, background: "#E8EAF0", borderRadius: 8, padding: "4px 10px", fontSize: 12, color: "#374151", border: "1px solid #D1D5DB" }}>
                             {att.type === "image" && <img src={att.url} alt="" style={{ width: 28, height: 28, borderRadius: 4, objectFit: "cover" }} />}
                             {att.type === "pdf" && <span>📄</span>}
                             {att.type === "voice" && <span>🎤</span>}
                             <span style={{ maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
                             <button onClick={() => setAttachments(p => p.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#8696A0", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>✕</button>
                         </div>
-                    ))}
-                </div>
+                    ))
+                    }
+                </div >
             )}
 
             {uploading && <div style={{ padding: "4px 16px", fontSize: 11, color: "#00A884", display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid #2A3942", borderTopColor: "#00A884", borderRadius: "50%", animation: "cwSpin 0.7s linear infinite" }} />Uploading…</div>}
 
             {/* @mention popup */}
-            {mentionOpen && filteredMembers.length > 0 && (
-                <div ref={mentionRef} style={{
-                    position: "absolute", bottom: "100%", left: 12, right: 12,
-                    maxWidth: 360, background: "#233138",
-                    borderRadius: 12, boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
-                    zIndex: 250, overflow: "hidden",
-                    fontFamily: "inherit",
-                }}>
-                    <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#8696A0", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                        {mentionQuery ? `Mention · "${mentionQuery}"` : "Mention a member"}
-                    </div>
-                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                        {filteredMembers.map((m, i) => (
-                            <button
-                                key={m.employeeId || i}
-                                onMouseEnter={() => setMentionHoverIdx(i)}
-                                onClick={() => insertMention(m)}
-                                style={{
-                                    display: "flex", alignItems: "center", gap: 10,
-                                    width: "100%", padding: "8px 14px",
-                                    background: i === mentionHoverIdx ? "rgba(0,168,132,0.14)" : "none",
-                                    border: "none", cursor: "pointer",
-                                    color: "#E9EDEF", fontSize: 13, fontFamily: "inherit",
-                                    textAlign: "left", transition: "background 0.1s",
-                                }}
-                            >
-                                {m.profilePicUrl
-                                    ? <img src={m.profilePicUrl} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
-                                    : <div style={{
-                                        width: 28, height: 28, borderRadius: "50%",
-                                        background: avatarColor(m.employeeId || m.name || ""),
-                                        color: "#fff", fontSize: 11, fontWeight: 700,
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        flexShrink: 0,
-                                    }}>{initials(m.name)}</div>
-                                }
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 500, color: "#E9EDEF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                        {m.name || m.employeeId}
-                                    </div>
-                                    {m.employeeId && m.name && (
-                                        <div style={{ fontSize: 10, color: "#8696A0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {m.employeeId}
+            {
+                mentionOpen && filteredMembers.length > 0 && (
+                    <div ref={mentionRef} style={{
+                        position: "absolute", bottom: "100%", left: 12, right: 12,
+                        maxWidth: 360, background: "#233138",
+                        borderRadius: 12, boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
+                        zIndex: 250, overflow: "hidden",
+                        fontFamily: "inherit",
+                    }}>
+                        <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#8696A0", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                            {mentionQuery ? `Mention · "${mentionQuery}"` : "Mention a member"}
+                        </div>
+                        <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                            {filteredMembers.map((m, i) => (
+                                <button
+                                    key={m.employeeId || i}
+                                    onMouseEnter={() => setMentionHoverIdx(i)}
+                                    onClick={() => insertMention(m)}
+                                    style={{
+                                        display: "flex", alignItems: "center", gap: 10,
+                                        width: "100%", padding: "8px 14px",
+                                        background: i === mentionHoverIdx ? "rgba(0,168,132,0.14)" : "none",
+                                        border: "none", cursor: "pointer",
+                                        color: "#E9EDEF", fontSize: 13, fontFamily: "inherit",
+                                        textAlign: "left", transition: "background 0.1s",
+                                    }}
+                                >
+                                    {m.profilePicUrl
+                                        ? <img src={m.profilePicUrl} alt="" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                                        : <div style={{
+                                            width: 28, height: 28, borderRadius: "50%",
+                                            background: avatarColor(m.employeeId || m.name || ""),
+                                            color: "#fff", fontSize: 11, fontWeight: 700,
+                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                            flexShrink: 0,
+                                        }}>{initials(m.name)}</div>
+                                    }
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 500, color: "#E9EDEF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {m.name || m.employeeId}
                                         </div>
-                                    )}
-                                </div>
-                            </button>
-                        ))}
+                                        {m.employeeId && m.name && (
+                                            <div style={{ fontSize: 10, color: "#8696A0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                {m.employeeId}
+                                            </div>
+                                        )}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
-            {showEmoji && (
-                <div ref={emojiRef} style={{ position: "absolute", bottom: "100%", left: 0, width: "min(340px, 100vw)", background: "#233138", borderRadius: "12px 12px 0 0", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)", zIndex: 300, display: "flex", flexDirection: "column", maxHeight: 300 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px" }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8696A0" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
-                        <input autoFocus value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emoji…" style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "none", outline: "none", color: "#E9EDEF", fontSize: 12, padding: "5px 10px", borderRadius: 8, fontFamily: "inherit" }} />
-                        {emojiSearch && <button onClick={() => setEmojiSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#8696A0", fontSize: 13, padding: 0 }}>✕</button>}
+            {
+                showEmoji && (
+                    <div ref={emojiRef} style={{ position: "absolute", bottom: "100%", left: 0, width: "min(340px, 100vw)", background: "#233138", borderRadius: "12px 12px 0 0", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)", zIndex: 300, display: "flex", flexDirection: "column", maxHeight: 300 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px" }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8696A0" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+                            <input autoFocus value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emoji…" style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "none", outline: "none", color: "#E9EDEF", fontSize: 12, padding: "5px 10px", borderRadius: 8, fontFamily: "inherit" }} />
+                            {emojiSearch && <button onClick={() => setEmojiSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#8696A0", fontSize: 13, padding: 0 }}>✕</button>}
+                        </div>
+                        {!emojiSearch && <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0 8px" }}>
+                            {["🕐", ...EMOJI_CATS.map(c => c.icon)].map((icon, i) => (
+                                <button key={i} onClick={() => setEmojiTab(i === 0 ? -1 : i - 1)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: "6px 7px", borderBottom: `2px solid ${(i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? "#00A884" : "transparent"}`, opacity: (i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? 1 : 0.5, flexShrink: 0 }}>{icon}</button>
+                            ))}
+                        </div>}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 1, padding: "6px 6px 8px", overflowY: "auto", flex: 1 }}>
+                            {displayEmojis.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#8696A0", fontSize: 12, padding: "16px 0" }}>{emojiSearch ? "No results" : "No recent emojis"}</div>}
+                            {displayEmojis.map((emoji, i) => (
+                                <button key={i} onClick={() => insertEmoji(emoji)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: "4px 2px", borderRadius: 6, lineHeight: 1 }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "none"}
+                                >{emoji}</button>
+                            ))}
+                        </div>
                     </div>
-                    {!emojiSearch && <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0 8px" }}>
-                        {["🕐", ...EMOJI_CATS.map(c => c.icon)].map((icon, i) => (
-                            <button key={i} onClick={() => setEmojiTab(i === 0 ? -1 : i - 1)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: "6px 7px", borderBottom: `2px solid ${(i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? "#00A884" : "transparent"}`, opacity: (i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? 1 : 0.5, flexShrink: 0 }}>{icon}</button>
-                        ))}
-                    </div>}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 1, padding: "6px 6px 8px", overflowY: "auto", flex: 1 }}>
-                        {displayEmojis.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#8696A0", fontSize: 12, padding: "16px 0" }}>{emojiSearch ? "No results" : "No recent emojis"}</div>}
-                        {displayEmojis.map((emoji, i) => (
-                            <button key={i} onClick={() => insertEmoji(emoji)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: "4px 2px", borderRadius: 6, lineHeight: 1 }}
-                                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
-                                onMouseLeave={e => e.currentTarget.style.background = "none"}
-                            >{emoji}</button>
-                        ))}
-                    </div>
-                </div>
-            )}
+                )
+            }
 
             {showAttMenu && (
-                <div ref={attMenuRef} style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 12, background: "#233138", borderRadius: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 200, overflow: "hidden", minWidth: 160 }}>
-                    <button onClick={() => imageRef.current?.click()} style={attMenuBtn}>
-                        <span style={{ fontSize: 18 }}>🖼️</span> Image
+                <div ref={attMenuRef} className="att-menu" style={{
+                    position: "absolute",
+                    bottom: "calc(100% + 8px)",
+                    left: 8,
+                    background: "#fff",
+                    borderRadius: 12,
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                    border: "1px solid #E5E7EB",
+                    overflow: "hidden",
+                    minWidth: 180,
+                    zIndex: 200,
+                }}>
+                    <button onClick={() => imageRef.current?.click()}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", border: "none", borderBottom: "1px solid #F3F4F6", background: "transparent", width: "100%", fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 500, textAlign: "left" }}>
+                        <span style={{ fontSize: 20 }}>🖼️</span>
+                        <div>
+                            <div style={{ fontWeight: 600 }}>Image</div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF" }}>Send a photo</div>
+                        </div>
                     </button>
-                    <button onClick={() => pdfRef.current?.click()} style={attMenuBtn}>
-                        <span style={{ fontSize: 18 }}>📄</span> Document
+                    <button onClick={() => pdfRef.current?.click()}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", border: "none", background: "transparent", width: "100%", fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 500, textAlign: "left" }}>
+                        <span style={{ fontSize: 20 }}>📄</span>
+                        <div>
+                            <div style={{ fontWeight: 600 }}>Document</div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF" }}>PDF, Word, Excel…</div>
+                        </div>
                     </button>
                 </div>
             )}
-
-            {recording ? (
-                <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", gap: 10, minHeight: 56 }}>
-                    <button onClick={cancelRecording} style={iconBtn("#FF6B6B")}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
-                    </button>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: recPaused ? "#8696A0" : "#FF6B6B", minWidth: 40, fontVariantNumeric: "tabular-nums" }}>{fmt(recSeconds)}</span>
-                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 2, height: 36, overflow: "hidden" }}>
-                        {waveform.map((h, i) => (
-                            <div key={i} style={{ width: 3, height: h, background: recPaused ? "#8696A0" : "#00A884", borderRadius: 2, transition: "height 0.08s ease", flexShrink: 0 }} />
-                        ))}
-                    </div>
-                    <button onClick={recPaused ? resumeRecording : pauseRecording} style={iconBtn("#8696A0")}>
-                        {recPaused
-                            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" /><polygon points="10 8 16 12 10 16 10 8" /></svg>
-                            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
-                        }
-                    </button>
-                    <button onClick={sendRecording} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff" }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
-                    </button>
-                </div>
-            ) : (
-                <div style={{ display: "flex", alignItems: "flex-end", padding: "8px 10px", gap: 6, minHeight: 56 }}>
-                    <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
-                    <input ref={pdfRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" style={{ display: "none" }} onChange={handlePDF} />
-
-                    <button onClick={() => { setShowAttMenu(p => !p); setShowEmoji(false); }} disabled={disabled || uploading} style={iconBtn("#8696A0")}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-                    </button>
-
-                    <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#8696A0"), color: showEmoji ? "#00A884" : "#8696A0" }}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" /><line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" /></svg>
-                    </button>
-
-                    <textarea
-                        ref={textareaRef}
-                        value={text}
-                        onChange={onTextChange}
-                        onKeyDown={handleKeyDown}
-                        onClick={(e) => {
-                            const cursor = e.target.selectionStart;
-                            const m = detectMentionAtCursor(text, cursor);
-                            if (m) { setMentionOpen(true); setMentionQuery(m.query); setMentionAnchorStart(m.anchor); setMentionHoverIdx(0); }
-                            else setMentionOpen(false);
-                        }}
-                        placeholder={uploading ? "Uploading…" : placeholder}
-                        rows={1}
-                        disabled={disabled || uploading}
-                        style={{ flex: 1, background: "#2A3942", border: "none", outline: "none", color: "#267dff", fontSize: 13, padding: "8px 14px", borderRadius: 24, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#00A884" }}
-                        onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
-                    />
-
-                    {canSend ? (
-                        <button onClick={handleSend} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
+            {
+                recording ? (
+                    <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", gap: 10, minHeight: 56 }}>
+                        <button onClick={cancelRecording} style={iconBtn("#FF6B6B")}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+                        </button>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: recPaused ? "#8696A0" : "#FF6B6B", minWidth: 40, fontVariantNumeric: "tabular-nums" }}>{fmt(recSeconds)}</span>
+                        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 2, height: 36, overflow: "hidden" }}>
+                            {waveform.map((h, i) => (
+                                <div key={i} style={{ width: 3, height: h, background: recPaused ? "#8696A0" : "#00A884", borderRadius: 2, transition: "height 0.08s ease", flexShrink: 0 }} />
+                            ))}
+                        </div>
+                        <button onClick={recPaused ? resumeRecording : pauseRecording} style={iconBtn("#8696A0")}>
+                            {recPaused
+                                ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2" /><polygon points="10 8 16 12 10 16 10 8" /></svg>
+                                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                            }
+                        </button>
+                        <button onClick={sendRecording} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff" }}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
                         </button>
-                    ) : (
-                        <button onClick={startRecording} disabled={disabled || uploading} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                                <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0014 0" /><path d="M12 19v3" />
-                            </svg>
+                    </div>
+                ) : (
+                    <div style={{ display: "flex", alignItems: "flex-end", padding: "8px 10px", gap: 6, minHeight: 56 }}>
+                        <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
+                        <input ref={pdfRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" style={{ display: "none" }} onChange={handlePDF} />
+
+                        <button onClick={() => { setShowAttMenu(p => !p); setShowEmoji(false); }} disabled={disabled || uploading} style={iconBtn("#8696A0")}>
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                         </button>
-                    )}
-                </div>
-            )}
+
+                        <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#8696A0"), color: showEmoji ? "#00A884" : "#8696A0" }}>
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" /><line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" /></svg>
+                        </button>
+
+                        <textarea
+                            ref={textareaRef}
+                            value={text}
+                            onChange={onTextChange}
+                            onKeyDown={handleKeyDown}
+                            onClick={(e) => {
+                                const cursor = e.target.selectionStart;
+                                const m = detectMentionAtCursor(text, cursor);
+                                if (m) { setMentionOpen(true); setMentionQuery(m.query); setMentionAnchorStart(m.anchor); setMentionHoverIdx(0); }
+                                else setMentionOpen(false);
+                            }}
+                            placeholder={uploading ? "Uploading…" : placeholder}
+                            rows={1}
+                            disabled={disabled || uploading}
+                            style={{ flex: 1, background: "#2A3942", border: "none", outline: "none", color: "#267dff", fontSize: 13, padding: "8px 14px", borderRadius: 24, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#00A884" }}
+                            onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
+                        />
+
+                        {canSend ? (
+                            <button onClick={handleSend} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+                            </button>
+                        ) : (
+                            <button onClick={startRecording} disabled={disabled || uploading} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                    <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0014 0" /><path d="M12 19v3" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+                )
+            }
 
             <style>{`@keyframes cwSpin { to { transform: rotate(360deg); } }`}</style>
-        </div>
+        </div >
     );
 }
 

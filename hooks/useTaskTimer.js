@@ -111,7 +111,7 @@ export function useTaskTimer(employeeId, opts = {}) {
         // don't reset or it fires again on every Resume click, trapping the
         // employee in an infinite pause loop.
         const currentWin = deadlineWindowsRef?.current?.[taskId] || 0;
-        const alreadyOver = currentWin > 0 && baseSecs >= currentWin;
+        const alreadyOver = currentWin > 0 && baseSecs > currentWin;
         if (!alreadyOver) {
             autoPausedRef.current = false;
         }
@@ -121,18 +121,13 @@ export function useTaskTimer(employeeId, opts = {}) {
             setLiveTick(display);
 
             // ── Auto-pause on deadline hit ────────────────────────────────
-            // Only acts on the CURRENTLY running task. Reads the window via
-            // ref (no re-render dependency). Fires ONCE per resume cycle.
             if (autoPausedRef.current) return;
             const winSecs = deadlineWindowsRef?.current?.[taskId] || 0;
             if (winSecs > 0 && display >= winSecs) {
                 autoPausedRef.current = true;
+                clearInterval(tickRef.current); // stop tick immediately
                 const title = sessionMapRef.current.get(taskId)?.taskTitle || taskId;
-                // Let caller open the commit modal with deadline-reached prompt.
-                // We fire onDeadlineReached BEFORE pauseTask so the modal can
-                // seed its message field before state churns.
                 try { onDeadlineRef.current?.(taskId, title, display); } catch (e) { /* swallow */ }
-                // pauseTaskRef is set after pauseTask is defined below.
                 pauseTaskRef.current?.(taskId, title, { autoReason: "deadline_reached" });
             }
         }, 1000);

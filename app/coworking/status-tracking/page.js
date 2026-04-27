@@ -324,7 +324,7 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                                     Time given: <strong style={{ color: "#0F172A" }}>
                                                         {askedForSecs ? fmtSecs(askedForSecs) : (
                                                             (() => {
-                                                                const ms = new Date(taskDue).getTime() - (task.deadlineApprovedAt?.seconds ? task.deadlineApprovedAt.seconds * 1000 : Date.now());
+                                                                const ms = new Date(taskDue).getTime() - (tData?.deadlineApprovedAt?.seconds ? tData.deadlineApprovedAt.seconds * 1000 : Date.now());
                                                                 if (ms <= 0) return "—";
                                                                 const s = Math.round(Math.abs(ms) / 1000);
                                                                 if (s < 3600) return `${Math.round(s / 60)}m`;
@@ -458,6 +458,25 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                             <div style={{ fontSize: 10, color: "#64748B", marginBottom: 4 }}>
                                                 {askedForSecs ? `${barPct}% of asked time used` : `${barPct}% of window used`}
                                             </div>
+
+                                            {/* Extension breakdown — matches tasks page: 2m (original) + 2m + 3m = 7m */}
+                                            {tData?.extensionCount > 0 && askedForSecs && (() => {
+                                                const exts = tData.extensions || [];
+                                                const orig = tData.originalWindowSecs;
+                                                return (
+                                                    <div style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                                                        {orig > 0 && <span style={{ fontSize: 10, color: "#6B7280" }}>{fmtSecs(orig)}<span style={{ color: "#D1D5DB" }}> (original)</span></span>}
+                                                        {exts.map((e, i) => (
+                                                            <span key={i} style={{ fontSize: 10, color: "#7C3AED" }}>+ {fmtSecs(e.addedSecs || 0)}</span>
+                                                        ))}
+                                                        <span style={{ fontSize: 10, color: "#D1D5DB" }}>=</span>
+                                                        <span style={{ fontSize: 10, fontWeight: 700, color: "#374151" }}>{fmtSecs(askedForSecs)}</span>
+                                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#EDE9FE", padding: "1px 7px", borderRadius: 99 }}>
+                                                            +{tData.extensionCount} ext
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
 
                                             {/* Verdict */}
                                             {state === "incomplete" && (
@@ -748,14 +767,7 @@ function EmployeeRow({ emp, onClick }) {
                             const worked = emp.activeTaskWorkedSecs || 0;
                             const window = emp.deadlineInfo?.deadlineWindowSecs || 0;
                             const pct = window > 0 ? Math.min(100, Math.round((worked / window) * 100)) : 0;
-                            return (
-                                <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
-                                    <div style={{ flex: 1, height: 3, background: "#E5E7EB", borderRadius: 99 }}>
-                                        <div style={{ height: "100%", width: `${pct}%`, background: pct >= 100 ? "#EF4444" : "#22C55E", borderRadius: 99, transition: "width 1s linear" }} />
-                                    </div>
-                                    <span style={{ fontSize: 9, color: "#94A3B8", fontWeight: 600, whiteSpace: "nowrap" }}>{pct}%</span>
-                                </div>
-                            );
+                            return null;
                         })()}
                     </>
                 ) : (
@@ -764,15 +776,6 @@ function EmployeeRow({ emp, onClick }) {
                     </div>
                 )}
 
-                {/* Deadline progress bar — only when working and has deadline */}
-                {emp.isWorking && emp.activeTaskDueDate && (
-                    <DeadlineBar
-                        dueDate={emp.activeTaskDueDate}
-                        workedSecs={emp.activeSessionBase || 0}
-                        isActive={true}
-                        lastStartTime={emp.activeSessionStart}
-                    />
-                )}
                 {/* Deadline badge for not-working — shows 3-state clearly */}
                 {!emp.isWorking && emp.activeTaskDueDate && (() => {
                     const workedSecs = emp.activeTaskWorkedSecs || 0;
@@ -871,13 +874,11 @@ export default function StatusTrackingPage() {
                     const t = d.data();
                     const tid = d.id;
                     if (tid) {
-                        // deadlineWindowSecs = dueDate - deadlineApprovedAt (approval time)
-                        // This is ALWAYS correct: "Asked For" = time from TL approval to deadline
-                        // e.g. approved 10:44 AM, deadline 11:14 AM → 30 min ✅
-                        // We recalculate from approvedAt instead of trusting stored value
-                        // because old tasks stored it at proposal time (hours earlier = wrong)
-                        let deadlineWindowSecs = null;
-                        if (t.dueDate && t.deadlineApprovedAt) {
+                        // Use stored deadlineWindowSecs directly — this is updated by backend on every
+                        // extension approval so it always reflects the CURRENT total asked time
+                        // Fallback: recalculate from dueDate - deadlineApprovedAt for legacy tasks
+                        let deadlineWindowSecs = t.deadlineWindowSecs || null;
+                        if (!deadlineWindowSecs && t.dueDate && t.deadlineApprovedAt) {
                             const approvedMs = t.deadlineApprovedAt?.seconds
                                 ? t.deadlineApprovedAt.seconds * 1000
                                 : (typeof t.deadlineApprovedAt === "number" ? t.deadlineApprovedAt : null);
@@ -891,6 +892,11 @@ export default function StatusTrackingPage() {
                             title: t.title || tid, dueDate: t.dueDate || null,
                             status: t.status, taskId: tid,
                             deadlineWindowSecs,
+                            deadlineApprovedAt: t.deadlineApprovedAt || null,
+                            originalWindowSecs: t.originalWindowSecs || null,
+                            extensions: t.extensions || [],
+                            extensionCount: (t.extensions || []).length,
+                            lastExtensionSecs: t.lastExtensionSecs || null,
                         };
                         tDataMap.set(tid, entry);
                         if (t.title) tDataMap.set(t.title, entry);
