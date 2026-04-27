@@ -524,7 +524,7 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                         ) : (
                             <div style={{ padding: "8px 0" }}>
                                 {commits.map((commit, i) => (
-                                    <div key={commit.id || i} style={{ padding: "12px 20px", borderBottom: "1px solid #F8FAFC" }}>
+                                    <div key={commit.id || i} style={{ padding: "12px 20px", borderBottom: "1px solid #F8FAFC", background: (() => { const ms = commit.stoppedAt?.seconds ? commit.stoppedAt.seconds * 1000 : (commit.stoppedAt?.toMillis?.() || commit.stoppedAt); const h = new Date(ms).getHours() + new Date(ms).getMinutes() / 60; return h >= 18.5 ? "#FFF5F5" : "transparent"; })() }}>
                                         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                                             {/* Commit dot */}
                                             <div style={{ width: 8, height: 8, borderRadius: "50%", background: commit.hasMessage ? "#4F46E5" : "#D1D5DB", flexShrink: 0, marginTop: 5 }} />
@@ -582,13 +582,42 @@ function EmployeeDetailModal({ emp, rawSessions, taskDataMap, onClose }) {
                                                     </div>
                                                 )}
                                                 {/* Meta */}
-                                                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "#ECFDF5", padding: "2px 8px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 3 }}>
-                                                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                                        {fmtSecs(commit.secondsWorked)} worked
-                                                    </span>
-                                                    <span style={{ fontSize: 11, color: "#94A3B8" }}>{fmtTs(commit.stoppedAt)}</span>
-                                                </div>
+                                                {(() => {
+                                                    const stopMs = commit.stoppedAt?.seconds
+                                                        ? commit.stoppedAt.seconds * 1000
+                                                        : (commit.stoppedAt?.toMillis?.() || commit.stoppedAt);
+                                                    const startMs = stopMs - (commit.secondsWorked || 0) * 1000;
+                                                    const fmt12 = (ms) => {
+                                                        if (!ms) return "";
+                                                        const d = new Date(ms);
+                                                        return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+                                                    };
+                                                    const stopHour = new Date(stopMs).getHours() + new Date(stopMs).getMinutes() / 60;
+                                                    const isAfterHours = stopHour >= 18.5; // after 6:30 PM
+                                                    return (
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                                            {/* Start / Stop times */}
+                                                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                                                <span style={{ fontSize: 11, color: "#64748B", display: "flex", alignItems: "center", gap: 3 }}>
+                                                                    ▶ Started: <b style={{ color: "#374151" }}>{fmt12(startMs)}</b>
+                                                                </span>
+                                                                <span style={{ fontSize: 11, color: "#64748B" }}>→</span>
+                                                                <span style={{ fontSize: 11, color: isAfterHours ? "#DC2626" : "#64748B", display: "flex", alignItems: "center", gap: 3 }}>
+                                                                    ⏸ Paused: <b style={{ color: isAfterHours ? "#DC2626" : "#374151" }}>{fmt12(stopMs)}</b>
+                                                                    {isAfterHours && <span style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 4, fontWeight: 700, marginLeft: 3 }}>After Hours</span>}
+                                                                </span>
+                                                            </div>
+                                                            {/* Worked + relative time */}
+                                                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", background: "#ECFDF5", padding: "2px 8px", borderRadius: 99, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                                    {fmtSecs(commit.secondsWorked)} worked
+                                                                </span>
+                                                                <span style={{ fontSize: 11, color: "#94A3B8" }}>{fmtTs(commit.stoppedAt)}</span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     </div>
