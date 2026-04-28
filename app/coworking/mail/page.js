@@ -499,9 +499,9 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
                 const file = item.getAsFile();
                 if (!file) return null;
                 const fd = new FormData(); fd.append("file", file);
-                const res = await fetch(`${BASE}/cowork/upload/pdf`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                const res = await fetch(`${BASE}/cowork/upload/image`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
                 const d = await res.json(); if (!res.ok) throw new Error(d.error || "Upload failed");
-                return { name: "pasted-image.png", url: d.viewUrl || d.webViewLink || d.url, downloadUrl: d.downloadUrl, type: "image" };
+                return { name: "pasted-image.png", url: d.url, type: "image" };
             }));
             setAtts(p => [...p, ...done.filter(Boolean)]);
         } catch (e) { alert(e.message); }
@@ -770,12 +770,12 @@ function ThreadView({ threadId, myId, myName, myPic, employees, empMap, onReply,
                                                 a.type === "image" || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || "") ? (
                                                     <a key={i} href={a.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginBottom: 4 }}>
                                                         <img
-                                                            src={a.downloadUrl || (a.fileId ? `https://drive.google.com/uc?export=view&id=${a.fileId}` : a.url)}
+                                                            src={a.url}
                                                             alt={a.name}
                                                             style={{ maxWidth: 320, maxHeight: 240, borderRadius: 8, border: "1px solid var(--cw-border)", objectFit: "cover", cursor: "pointer", display: "block" }}
-                                                            onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
+                                                            onError={e => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }}
                                                         />
-                                                        <div style={{ display: "none", alignItems: "center", gap: 5, padding: "6px 10px", background: "var(--cw-hover)", borderRadius: 7, fontSize: 11, color: "var(--cw-text-2)" }}>
+                                                        <div style={{ display:"none", alignItems:"center", gap:5, padding:"6px 10px", background:"var(--cw-hover)", borderRadius:7, fontSize:11, color:"var(--cw-text-2)" }}>
                                                             <Icon name="paperclip" size={11} strokeWidth={2} />{a.name}
                                                         </div>
                                                     </a>
