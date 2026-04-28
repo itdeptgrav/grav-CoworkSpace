@@ -472,10 +472,12 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
     const execCmd = (c, v) => { document.execCommand(c, false, v); bodyRef.current?.focus(); };
 
     const uploadFiles = async files => {
+        const fileArr = Array.isArray(files) ? files : Array.from(files || []);
+        if (!fileArr.length) return;
         setUpl(true);
         try {
             const token = await tok();
-            const done = await Promise.all(Array.from(files).map(async f => {
+            const done = await Promise.all(fileArr.map(async f => {
                 const fd = new FormData(); fd.append("file", f);
                 const res = await fetch(`${BASE}/cowork/upload/pdf`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
                 const d = await res.json(); if (!res.ok) throw new Error(d.error || "Upload failed");
@@ -620,7 +622,7 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
                         <Icon name="link" size={14} />
                     </button>
                     <label className="cw-icon-btn" style={{ cursor: "pointer" }} title={upl ? "Uploading…" : "Attach files"}>
-                        <input type="file" multiple style={{ display: "none" }} onChange={e => { uploadFiles(e.target.files); e.target.value = ""; }} />
+                        <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ""; if (files.length) uploadFiles(files); }} />
                         {upl
                             ? <div style={{ width: 12, height: 12, borderRadius: "50%", border: "1.5px solid currentColor", borderTopColor: "transparent", animation: "cw-spin 0.7s linear infinite" }} />
                             : <Icon name="paperclip" size={14} />}
@@ -672,13 +674,7 @@ function MailRow({ mail, active, myId, myPic, folder, empMap, onSelect, onStar, 
                     aria-label={starred ? "Unstar" : "Star"} title={starred ? "Unstar" : "Star"}>
                     <Icon name="star" size={13} fill={starred} strokeWidth={1.5} />
                 </button>
-                <button onClick={e => { e.stopPropagation(); onDelete(); }} className="cw-icon-btn"
-                    style={{ width: 24, height: 24 }}
-                    onMouseEnter={e => e.currentTarget.style.color = "var(--cw-danger)"}
-                    onMouseLeave={e => e.currentTarget.style.color = ""}
-                    aria-label="Delete" title="Delete">
-                    <Icon name="trash" size={13} />
-                </button>
+
             </div>
             {!hov && starred && (
                 <div style={{ color: "var(--cw-warn)", flexShrink: 0, display: "flex", alignItems: "center", marginLeft: 2 }}>
@@ -773,9 +769,9 @@ function ThreadView({ threadId, myId, myName, myPic, employees, empMap, onReply,
                                                             src={a.url}
                                                             alt={a.name}
                                                             style={{ maxWidth: 320, maxHeight: 240, borderRadius: 8, border: "1px solid var(--cw-border)", objectFit: "cover", cursor: "pointer", display: "block" }}
-                                                            onError={e => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }}
+                                                            onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
                                                         />
-                                                        <div style={{ display:"none", alignItems:"center", gap:5, padding:"6px 10px", background:"var(--cw-hover)", borderRadius:7, fontSize:11, color:"var(--cw-text-2)" }}>
+                                                        <div style={{ display: "none", alignItems: "center", gap: 5, padding: "6px 10px", background: "var(--cw-hover)", borderRadius: 7, fontSize: 11, color: "var(--cw-text-2)" }}>
                                                             <Icon name="paperclip" size={11} strokeWidth={2} />{a.name}
                                                         </div>
                                                     </a>
