@@ -476,17 +476,34 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
         try {
             const token = await tok();
             const done = await Promise.all(Array.from(files).map(async f => {
-                if (f.type.startsWith("image/")) {
-                    const { uploadImage } = await import("../../../lib/mediaUploadApi");
-                    const r = await uploadImage(f, "cowork-mail");
-                    return { name: f.name, url: r.url, type: "image" };
-                }
                 const fd = new FormData(); fd.append("file", f);
                 const res = await fetch(`${BASE}/cowork/upload/pdf`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
-                const d = await res.json(); if (!res.ok) throw new Error(d.error);
-                return { name: f.name, url: d.viewUrl || d.webViewLink || d.url, downloadUrl: d.downloadUrl, type: "file" };
+                const d = await res.json(); if (!res.ok) throw new Error(d.error || "Upload failed");
+                return { name: f.name, url: d.viewUrl || d.webViewLink || d.url, downloadUrl: d.downloadUrl, fileId: d.fileId, type: f.type.startsWith("image/") ? "image" : "file" };
             }));
             setAtts(p => [...p, ...done]);
+        } catch (e) { alert(e.message); }
+        finally { setUpl(false); }
+    };
+
+    const handlePaste = async e => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        const imageItems = Array.from(items).filter(item => item.type.startsWith("image/"));
+        if (!imageItems.length) return;
+        e.preventDefault();
+        setUpl(true);
+        try {
+            const token = await tok();
+            const done = await Promise.all(imageItems.map(async item => {
+                const file = item.getAsFile();
+                if (!file) return null;
+                const fd = new FormData(); fd.append("file", file);
+                const res = await fetch(`${BASE}/cowork/upload/pdf`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                const d = await res.json(); if (!res.ok) throw new Error(d.error || "Upload failed");
+                return { name: "pasted-image.png", url: d.viewUrl || d.webViewLink || d.url, downloadUrl: d.downloadUrl, type: "image" };
+            }));
+            setAtts(p => [...p, ...done.filter(Boolean)]);
         } catch (e) { alert(e.message); }
         finally { setUpl(false); }
     };
@@ -560,7 +577,7 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
                 </div>
 
                 {/* Body */}
-                <div ref={bodyRef} contentEditable suppressContentEditableWarning className="cw-ce cw-mailbody"
+                <div ref={bodyRef} contentEditable suppressContentEditableWarning onPaste={handlePaste} className="cw-ce cw-mailbody"
                     data-placeholder="Compose your message…"
                     style={{ flex: 1, padding: "14px 18px", outline: "none", fontSize: 13.5, color: "var(--cw-text)", lineHeight: 1.65, overflowY: "auto", minHeight: 180 }}
                     dangerouslySetInnerHTML={replyTo ? { __html: `<br><br><div class="cw-quote"><div style="font-size:11px;color:#a1a1aa;margin-bottom:6px">On ${fmtFull(replyTo.sentAt)}, ${replyTo.fromName} wrote:</div>${replyTo.body}</div>` } : undefined}
@@ -750,10 +767,24 @@ function ThreadView({ threadId, myId, myName, myPic, employees, empMap, onReply,
                                     {mail.attachments?.length > 0 && (
                                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 18px 14px", paddingLeft: 62 }}>
                                             {mail.attachments.map((a, i) => (
-                                                <a key={i} href={a.url} target="_blank" rel="noreferrer" className="cw-chip cw-chip-link">
-                                                    <Icon name="paperclip" size={11} strokeWidth={2} />
-                                                    {a.name}
-                                                </a>
+                                                a.type === "image" || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || "") ? (
+                                                    <a key={i} href={a.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginBottom: 4 }}>
+                                                        <img
+                                                            src={a.downloadUrl || (a.fileId ? `https://drive.google.com/uc?export=view&id=${a.fileId}` : a.url)}
+                                                            alt={a.name}
+                                                            style={{ maxWidth: 320, maxHeight: 240, borderRadius: 8, border: "1px solid var(--cw-border)", objectFit: "cover", cursor: "pointer", display: "block" }}
+                                                            onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
+                                                        />
+                                                        <div style={{ display: "none", alignItems: "center", gap: 5, padding: "6px 10px", background: "var(--cw-hover)", borderRadius: 7, fontSize: 11, color: "var(--cw-text-2)" }}>
+                                                            <Icon name="paperclip" size={11} strokeWidth={2} />{a.name}
+                                                        </div>
+                                                    </a>
+                                                ) : (
+                                                    <a key={i} href={a.url} target="_blank" rel="noreferrer" className="cw-chip cw-chip-link">
+                                                        <Icon name="paperclip" size={11} strokeWidth={2} />
+                                                        {a.name}
+                                                    </a>
+                                                )
                                             ))}
                                         </div>
                                     )}
@@ -838,7 +869,7 @@ export default function MailPage() {
 
             const merge = () => {
                 const m = Object.values(mailMap)
-                    .filter(m => !(m.deletedBy || []).includes(myId))
+                    .filter(m => !(m.deletedBy || []).includes(myId) && m.from !== myId)
                     .sort((a, b) => (b.sentAt?.seconds || 0) - (a.sentAt?.seconds || 0));
                 setMails(m);
                 setUcounts(p => ({ ...p, inbox: m.filter(m => !(m.readBy || []).includes(myId)).length }));
