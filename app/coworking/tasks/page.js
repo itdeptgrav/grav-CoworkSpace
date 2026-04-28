@@ -3371,13 +3371,21 @@ export default function TasksPage() {
       pendingMapRef.current.set(tempId, messageId);
       const msgsRef = collection(firebaseDb, "cowork_tasks", tid, "chat");
       const taskRef = doc(firebaseDb, "cowork_tasks", tid);
+
+      // Strip undefined from attachments — Firestore rejects undefined values
+      const cleanAttachments = (attachments || []).map(a => {
+        const clean = {};
+        Object.entries(a).forEach(([k, v]) => { if (v !== undefined) clean[k] = v; });
+        return clean;
+      });
+
       await setDoc(doc(msgsRef, messageId), {
         messageId,
         taskId: tid,
         senderId: employeeId,
         senderName: employeeName,
         text: text || "",
-        attachments: attachments || [],
+        attachments: cleanAttachments,
         messageType: resolvedType,
         replyTo: currentReplyTo || null,
         mention: null,
