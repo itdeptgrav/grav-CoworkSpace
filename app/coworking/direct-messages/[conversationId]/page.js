@@ -190,6 +190,7 @@ export default function ConversationPage() {
       }
 
       // 3. Write message to Firestore
+      const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
       const messageData = {
         messageId,
         threadType: "direct",
@@ -197,12 +198,13 @@ export default function ConversationPage() {
         senderId: employeeId,
         senderName: employeeName,
         text: text || "",
-        attachments: attachments || [],
+        attachments: cleanAtts,
         messageType: resolvedType,
         type: resolvedType,
         readBy: [employeeId],
         createdAt: serverTimestamp(),
       };
+      const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
 
       await setDoc(doc(msgsRef, messageId), messageData);
 

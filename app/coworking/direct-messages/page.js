@@ -620,10 +620,11 @@ export default function DirectMessagesPage() {
         });
       }
       // Write message
+      const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
       await setDoc(doc(msgsRef, messageId), {
         messageId, threadType: "direct", threadId: cid,
         senderId: employeeId, senderName: employeeName,
-        text: text || "", attachments: attachments || [],
+        text: text || "", attachments: cleanAtts,
         messageType: rt, type: rt,
         readBy: [employeeId], status: "sent",
         createdAt: serverTimestamp(),

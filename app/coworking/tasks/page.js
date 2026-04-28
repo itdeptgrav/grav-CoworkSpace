@@ -647,7 +647,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority }) {
+  deadlineFlow, onUpdatePriority, extFlow }) {
   const st = STATUS[task.status] || STATUS.open;
   // Derive comp label — for "submitted" status, show flow-appropriate label
   const _compBase = task.completionStatus ? COMP[task.completionStatus] : null;
@@ -1220,6 +1220,128 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                   </button>
                 </div>
               )}
+
+              {(task.isThirdParty || task.isGoal || task.isRepeat) && task.status !== "done" && (() => {
+                const { showExtReqForm, setShowExtReqForm, extReqDate, setExtReqDate, extReqReason, setExtReqReason, extReqBusy, handleRequestExtension, reviewExtDate, setReviewExtDate, reviewExtBusy, handleReviewExtension } = extFlow || {};
+                // Each task type stores deadline differently
+                const deadlineStr = task.isGoal
+                  ? task.goalConfig?.deadline
+                  : task.isThirdParty
+                    ? task.thirdPartyConfig?.estimatedDate
+                    : task.fixedDeadline; // repeat
+
+                if (!deadlineStr) return null;
+
+                const dl = new Date(deadlineStr);
+                const now = new Date();
+                const isOverdue = dl < now;
+                const daysLeft = Math.ceil((dl - now) / 86400000);
+                const ext = task.deadlineExtRequest;
+                const fmtDl = dl.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                const fmtDate = (d) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+                return (
+                  <div style={{ marginBottom: 10 }}>
+                    {/* Deadline pill */}
+                    <div style={{ background: isOverdue ? "#FEF2F2" : daysLeft <= 2 ? "#FFFBEB" : "#F0FDF4", border: `1.5px solid ${isOverdue ? "#FECDD3" : daysLeft <= 2 ? "#FDE68A" : "#86EFAC"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: isOverdue ? "#991B1B" : daysLeft <= 2 ? "#92400E" : "#166534", marginBottom: 3 }}>📅 Deadline</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isOverdue ? "#7F1D1D" : "#14532D" }}>{fmtDl}</div>
+                      <div style={{ fontSize: 10, marginTop: 2, color: isOverdue ? "#DC2626" : daysLeft <= 2 ? "#D97706" : "#166534" }}>
+                        {isOverdue ? `⛔ ${Math.abs(daysLeft)} day${Math.abs(daysLeft) !== 1 ? "s" : ""} overdue` : daysLeft === 0 ? "⚠️ Due today" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} remaining`}
+                      </div>
+                    </div>
+
+                    {/* Pending request — shown to everyone */}
+                    {ext?.status === "pending" && (
+                      <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
+                        <div style={{ fontWeight: 700, color: "#92400E", marginBottom: 4 }}>⏳ Extension Request Pending</div>
+                        <div style={{ color: "#78350F" }}>Proposed date: <b>{fmtDate(ext.proposedDate)}</b></div>
+                        {ext.reason && <div style={{ color: "#78350F", marginTop: 2 }}>Reason: {ext.reason}</div>}
+                        <div style={{ color: "#92400E", marginTop: 2, fontSize: 10 }}>Requested by {ext.requestedByName} · Awaiting CEO/TL approval</div>
+                      </div>
+                    )}
+
+                    {/* Approved */}
+                    {ext?.status === "approved" && (
+                      <div style={{ background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
+                        <div style={{ fontWeight: 700, color: "#166534" }}>✅ Deadline Extended</div>
+                        <div style={{ color: "#15803D", marginTop: 2 }}>Approved by {ext.reviewedByName} · New deadline: <b>{fmtDate(ext.approvedDate || deadlineStr)}</b></div>
+                      </div>
+                    )}
+
+                    {/* Rejected */}
+                    {ext?.status === "rejected" && (
+                      <div style={{ background: "#FEF2F2", border: "1.5px solid #FECDD3", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
+                        <div style={{ fontWeight: 700, color: "#991B1B" }}>❌ Extension Rejected by {ext.reviewedByName}</div>
+                      </div>
+                    )}
+
+                    {/* Countered */}
+                    {ext?.status === "countered" && (
+                      <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
+                        <div style={{ fontWeight: 700, color: "#1E40AF" }}>📅 New deadline set by {ext.reviewedByName}: <b>{fmtDate(ext.counterDate)}</b></div>
+                      </div>
+                    )}
+
+                    {/* ASSIGNEE — request form */}
+                    {isAssignee && task.status !== "done" && (!ext || ext.status === "rejected") && (isOverdue || daysLeft <= 3) && (
+                      !showExtReqForm ? (
+                        <button onClick={() => setShowExtReqForm(true)}
+                          style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: `1.5px solid ${isOverdue ? "#FECDD3" : "#FDE68A"}`, background: isOverdue ? "#FFF1F2" : "#FFFBEB", color: isOverdue ? "#991B1B" : "#92400E", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                          📅 Request Deadline Extension
+                        </button>
+                      ) : (
+                        <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: 12 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 8 }}>📅 Request Extension</div>
+                          <input type="datetime-local" value={extReqDate} onChange={e => setExtReqDate(e.target.value)}
+                            style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 6, boxSizing: "border-box", outline: "none" }} />
+                          <input type="text" placeholder="Reason (optional)" value={extReqReason} onChange={e => setExtReqReason(e.target.value)}
+                            style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button disabled={!extReqDate || extReqBusy} onClick={handleRequestExtension}
+                              style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !extReqDate || extReqBusy ? "#E5E7EB" : "#4F46E5", color: !extReqDate || extReqBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !extReqDate || extReqBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                              {extReqBusy ? "Submitting…" : "Submit Request"}
+                            </button>
+                            <button onClick={() => { setShowExtReqForm(false); setExtReqDate(""); setExtReqReason(""); }}
+                              style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#fff", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {/* CEO/TL — review panel */}
+                    {(isCEO || isTL) && ext?.status === "pending" && (
+                      <div style={{ background: "#F8FAFC", border: "1.5px solid #C4B5FD", borderRadius: 10, padding: 12 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6D28D9", marginBottom: 10 }}>Review Extension Request</div>
+                        <div style={{ fontSize: 11, color: "#374151", marginBottom: 8 }}>
+                          <b>{ext.requestedByName}</b> requested: <b>{fmtDate(ext.proposedDate)}</b>
+                          {ext.reason && <div style={{ color: "#64748B", marginTop: 2 }}>"{ext.reason}"</div>}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                          <button disabled={reviewExtBusy} onClick={() => handleReviewExtension("approve")}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: "#059669", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            ✅ Approve
+                          </button>
+                          <button disabled={reviewExtBusy} onClick={() => handleReviewExtension("reject")}
+                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: "#DC2626", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                            ❌ Reject
+                          </button>
+                        </div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "#64748B", marginBottom: 5 }}>Or set a different date:</div>
+                        <input type="datetime-local" value={reviewExtDate} onChange={e => setReviewExtDate(e.target.value)}
+                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 6, boxSizing: "border-box", outline: "none" }} />
+                        <button disabled={!reviewExtDate || reviewExtBusy} onClick={() => handleReviewExtension("counter", reviewExtDate)}
+                          style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !reviewExtDate || reviewExtBusy ? "#E5E7EB" : "#7C3AED", color: !reviewExtDate || reviewExtBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !reviewExtDate || reviewExtBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                          Set This Date Instead
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
 
               {/* ── Fixed deadline (non-timer normal tasks) ── */}
               {!task.isRepeat && !task.isThirdParty && !task.isGoal && !task.hasTimer && task.fixedDeadline && (
@@ -1997,6 +2119,13 @@ export default function TasksPage() {
   const [rightPanel, setRightPanel] = useState(null); // "info" | "reports" | "requests" | null  -- starts hidden so chat owns the right column (matches Image-2)
   const [taskFiles, setTaskFiles] = useState([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [extReqDate, setExtReqDate] = useState("");
+  const [extReqReason, setExtReqReason] = useState("");
+  const [extReqBusy, setExtReqBusy] = useState(false);
+  const [showExtReqForm, setShowExtReqForm] = useState(false);
+  const [reviewExtDate, setReviewExtDate] = useState("");
+  const [reviewExtBusy, setReviewExtBusy] = useState(false);
+
 
   // Load all files when Files tab is opened
   useEffect(() => {
@@ -2050,7 +2179,7 @@ export default function TasksPage() {
   const [employeeMapFull, setEmployeeMapFull] = useState(new Map());
 
   // ── Resizable split panel state ──
-  const [sidebarWidth, setSidebarWidth] = useState(38); // percentage
+  const [sidebarWidth, setSidebarWidth] = useState(50); // percentage — task list : chat split
   const isDraggingRef = useRef(false);
   const rootRef = useRef(null);
 
@@ -2526,6 +2655,42 @@ export default function TasksPage() {
       }
     }
   }, [commitModal, commitMessage, commitAttachments, employeeId, employeeName, timerPause, timerSessionMap]);
+
+
+  const handleRequestExtension = useCallback(async () => {
+    if (!extReqDate || !selectedTask) return;
+    setExtReqBusy(true);
+    try {
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/request-deadline-extension`, {
+        method: "POST", body: JSON.stringify({ proposedDate: extReqDate, reason: extReqReason }),
+      });
+      setShowExtReqForm(false); setExtReqDate(""); setExtReqReason("");
+      setSelectedTask(prev => prev ? { ...prev, deadlineExtRequest: { proposedDate: extReqDate, reason: extReqReason, requestedByName: employeeName, status: "pending" } } : prev);
+    } catch (e) { alert(e.message); }
+    finally { setExtReqBusy(false); }
+  }, [extReqDate, extReqReason, selectedTask, employeeName]);
+
+  const handleReviewExtension = useCallback(async (action, counterDate) => {
+    if (!selectedTask) return;
+    setReviewExtBusy(true);
+    try {
+      const newDate = action === "approve" ? selectedTask.deadlineExtRequest?.proposedDate : counterDate;
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/review-deadline-extension`, {
+        method: "POST",
+        body: JSON.stringify({ action, newDate }),
+      });
+      setReviewExtDate("");
+      setSelectedTask(prev => {
+        if (!prev) return prev;
+        const updatedExt = { ...prev.deadlineExtRequest, status: action === "approve" ? "approved" : action === "counter" ? "countered" : "rejected", reviewedByName: employeeName, approvedDate: action === "approve" ? newDate : undefined, counterDate: action === "counter" ? newDate : undefined };
+        return { ...prev, deadlineExtRequest: updatedExt, fixedDeadline: action !== "reject" ? newDate : prev.fixedDeadline };
+      });
+    } catch (e) { alert(e.message); }
+    finally { setReviewExtBusy(false); }
+  }, [selectedTask, employeeName]);
+
+
+
 
   // ── TL counter-propose deadline ──────────────────────────────────────────────
   const handleTlCounterPropose = useCallback(async () => {
@@ -3948,8 +4113,7 @@ export default function TasksPage() {
     /* ═══ COL 1 — LIST PANEL ═══ */
 @keyframes chatSlideIn { from{opacity:1;transform:none} to{opacity:1;transform:none} }
 .gv-list-panel { display:flex; flex-direction:column; background:var(--surface); z-index:3; overflow:hidden; border-right:1px solid var(--border); transition: none; }
-.gv-chat { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; position:relative; }
-
+.gv-chat { flex:1; min-width:200px; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; position:relative; }
     .gv-lp-topbar { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--border); flex-shrink:0; background:var(--surface); }
     .gv-lp-title { font-size:13px; font-weight:700; color:var(--text-1); flex:1; }
     .gv-search-box { display:flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); transition:all 0.15s; flex:1; max-width:220px; }
@@ -4126,8 +4290,7 @@ export default function TasksPage() {
     /* (base input bar CSS: now handled by edit-16 block) */
 
     /* ═══ COL 3 — RIGHT PANEL ═══ */
-    .gv-right-area { display:flex; height:100%; }
-    .gv-toolbar { width:38px; min-width:38px; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:3px; }
+.gv-right-area { display:flex; height:100%; flex-shrink:0; width:360px; }    .gv-toolbar { width:38px; min-width:38px; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:3px; }
     .gv-tool-btn { width:30px; height:30px; border-radius:8px; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; color:var(--text-3); transition:all 0.12s; position:relative; }
     .gv-tool-btn:hover { background:var(--bg); color:var(--text-1); }
     .gv-tool-btn.active { background:var(--p-lt); color:var(--p); }
@@ -4468,10 +4631,10 @@ export default function TasksPage() {
 
     /* === Width fix: chat panel is a fixed 30% strip, task list takes the rest === */
     @media (min-width:768px) {
-      .gv-chat.gv-has-task {
-        flex: 0 0 32% !important;
-        min-width: 360px !important;
-        max-width: 480px !important;
+     .gv-chat.gv-has-task {
+        flex: 1 1 0% !important;
+        min-width: 200px !important;
+        max-width: none !important;
       }
     }
 
@@ -5901,7 +6064,7 @@ em-emoji-picker,
           const isCompact = !!task;
 
           return (
-            <div className={`gv-list-panel ${isCompact ? "is-compact" : ""} ${mobileView === "chat" ? "mob-hidden" : ""}`} style={isCompact ? { flex: '1 1 0%', minWidth: 0 } : { flex: '1 1 100%', minWidth: '100%' }}>
+            <div className={`gv-list-panel ${isCompact ? "is-compact" : ""} ${mobileView === "chat" ? "mob-hidden" : ""}`} style={isCompact ? { flexBasis: `${sidebarWidth}%`, flexShrink: 0, flexGrow: 0, minWidth: 0 } : { flex: '1 1 100%', minWidth: '100%' }}>
 
               {/* ── Drag mode banner ── */}
               {false && (  // drag banner removed — CSS handles feedback
@@ -7616,6 +7779,16 @@ em-emoji-picker,
                       onPropose: handleProposeDeadline,
                       onApprove: handleApproveDeadline,
                     }}
+                    extFlow={{
+                      showExtReqForm, setShowExtReqForm,
+                      extReqDate, setExtReqDate,
+                      extReqReason, setExtReqReason,
+                      extReqBusy,
+                      handleRequestExtension,
+                      reviewExtDate, setReviewExtDate,
+                      reviewExtBusy,
+                      handleReviewExtension,
+                    }}
                   />
                 )}
               </div>
@@ -7761,6 +7934,16 @@ em-emoji-picker,
                   showEmpCounterForm, setShowEmpCounterForm,
                   onPropose: handleProposeDeadline,
                   onApprove: handleApproveDeadline,
+                }}
+                extFlow={{
+                  showExtReqForm, setShowExtReqForm,
+                  extReqDate, setExtReqDate,
+                  extReqReason, setExtReqReason,
+                  extReqBusy,
+                  handleRequestExtension,
+                  reviewExtDate, setReviewExtDate,
+                  reviewExtBusy,
+                  handleReviewExtension,
                 }}
               />
             </div>
@@ -7999,6 +8182,16 @@ em-emoji-picker,
                         onPropose: handleProposeDeadline,
                         onApprove: handleApproveDeadline,
                       }}
+                      extFlow={{
+                        showExtReqForm, setShowExtReqForm,
+                        extReqDate, setExtReqDate,
+                        extReqReason, setExtReqReason,
+                        extReqBusy,
+                        handleRequestExtension,
+                        reviewExtDate, setReviewExtDate,
+                        reviewExtBusy,
+                        handleReviewExtension,
+                      }}
                       timerPause={handleTimerPause}
                       onUpdatePriority={handleUpdatePriority}
                       employeeMapFull={employeeMapFull}
@@ -8010,87 +8203,80 @@ em-emoji-picker,
             </div>
           </div>
         </div>
-      </div>
+      </div >
 
 
       {/* Mobile bottom sheet row menu */}
-      {sheetTask && (
-        <>
-          <div className="gv-row-menu-sheet-overlay" onClick={() => setSheetTask(null)} />
-          <div className="gv-row-menu-sheet">
-            <div className="gv-row-menu-sheet-handle" />
-            <div className="gv-row-menu-sheet-title">{sheetTask.title}</div>
-            {[
-              ...(!sheetTask.isFolder ? [{ l: "Open Chat", icon: <MessageCircle />, a: () => { handleSelectNode(sheetTask); setSheetTask(null); } }] : []),
-              ...((isCEO || isTL) ? [{ l: "Add Subtask", icon: <Plus />, a: () => { setActiveModal({ type: "add_subtask", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(!isCEO && !sheetTask.isFolder ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(!isCEO && !sheetTask.isFolder ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(isCEO ? [{ l: "Edit Deadline", icon: <Calendar />, a: () => { setActiveModal({ type: "deadline", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(isCEO && sheetTask.completionStatus === "submitted" && sheetTask.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(isTL && sheetTask.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(sheetTask.reviewFlow) ? [{ l: "Review Submission", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-              ...(isCEO && sheetTask.completionStatus === "tl_approved" && sheetTask.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", icon: <CheckCircle />, a: () => { setActiveModal({ type: "ceo_review", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
-            ].map((item, i) => (
-              <button key={i} className="gv-row-menu-sheet-item" onClick={item.a}>
-                <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>{item.icon}</span>
-                {item.l}
-              </button>
-            ))}
-            {isCEO && (
-              <>
-                <div className="gv-row-menu-sheet-sep" />
-                <button className="gv-row-menu-sheet-item danger" onClick={() => { setActiveModal({ type: "delete_task", taskId: sheetTask.taskId, task: sheetTask }); setShowDeleteConf(true); setSheetTask(null); }}>
-                  <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>🗑</span>
-                  Delete Task
+      {
+        sheetTask && (
+          <>
+            <div className="gv-row-menu-sheet-overlay" onClick={() => setSheetTask(null)} />
+            <div className="gv-row-menu-sheet">
+              <div className="gv-row-menu-sheet-handle" />
+              <div className="gv-row-menu-sheet-title">{sheetTask.title}</div>
+              {[
+                ...(!sheetTask.isFolder ? [{ l: "Open Chat", icon: <MessageCircle />, a: () => { handleSelectNode(sheetTask); setSheetTask(null); } }] : []),
+                ...((isCEO || isTL) ? [{ l: "Add Subtask", icon: <Plus />, a: () => { setActiveModal({ type: "add_subtask", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(!isCEO && !sheetTask.isFolder ? [{ l: "Forward Task", icon: <Forward />, a: () => { setActiveModal({ type: "forward", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(!isCEO && !sheetTask.isFolder ? [{ l: "Daily Report", icon: <BarChart3 />, a: () => { setActiveModal({ type: "report", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(isCEO ? [{ l: "Edit Deadline", icon: <Calendar />, a: () => { setActiveModal({ type: "deadline", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(isCEO && sheetTask.completionStatus === "submitted" && sheetTask.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(isTL && sheetTask.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(sheetTask.reviewFlow) ? [{ l: "Review Submission", icon: <CheckCircle />, a: () => { setActiveModal({ type: "review_completion", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+                ...(isCEO && sheetTask.completionStatus === "tl_approved" && sheetTask.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", icon: <CheckCircle />, a: () => { setActiveModal({ type: "ceo_review", taskId: sheetTask.taskId, task: sheetTask }); setSheetTask(null); } }] : []),
+              ].map((item, i) => (
+                <button key={i} className="gv-row-menu-sheet-item" onClick={item.a}>
+                  <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>{item.icon}</span>
+                  {item.l}
                 </button>
-              </>
-            )}
-          </div>
-        </>
-      )}
+              ))}
+              {isCEO && (
+                <>
+                  <div className="gv-row-menu-sheet-sep" />
+                  <button className="gv-row-menu-sheet-item danger" onClick={() => { setActiveModal({ type: "delete_task", taskId: sheetTask.taskId, task: sheetTask }); setShowDeleteConf(true); setSheetTask(null); }}>
+                    <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>🗑</span>
+                    Delete Task
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        )
+      }
 
       {/* Context Menu */}
-      {contextMenu && (
-        <div className="gv-ctx-menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 180), top: Math.min(contextMenu.y, window.innerHeight - 200) }} onClick={e => e.stopPropagation()}>
-          {/* Reply */}
-          <button className="gv-ctx-item" onClick={() => {
-            setReplyTo({ messageId: contextMenu.message.messageId, text: contextMenu.message.text || (contextMenu.message.attachments?.length ? "📎 Attachment" : ""), senderName: contextMenu.message.senderName });
-            setContextMenu(null);
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 00-4-4H4" /></svg>
-            Reply
-          </button>
-          {/* Copy */}
-          <button className="gv-ctx-item" onClick={() => {
-            if (contextMenu.message?.text) navigator.clipboard?.writeText(contextMenu.message.text);
-            setContextMenu(null);
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
-            Copy text
-          </button>
-          {contextMenu.message?.attachments?.some(a => a.type === "image") && (
+      {
+        contextMenu && (
+          <div className="gv-ctx-menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 180), top: Math.min(contextMenu.y, window.innerHeight - 200) }} onClick={e => e.stopPropagation()}>
+            {/* Reply */}
             <button className="gv-ctx-item" onClick={() => {
-              const img = contextMenu.message.attachments.find(a => a.type === "image");
-              if (img) downloadImage(img.url);
+              setReplyTo({ messageId: contextMenu.message.messageId, text: contextMenu.message.text || (contextMenu.message.attachments?.length ? "📎 Attachment" : ""), senderName: contextMenu.message.senderName });
               setContextMenu(null);
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-              Download image
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 00-4-4H4" /></svg>
+              Reply
             </button>
-          )}
-          {isCEO && (
-            <>
-              <div className="gv-ctx-sep" />
-              <button className="gv-ctx-item danger" onClick={() => {
-                handleDeleteMessage(contextMenu.message);
+            {/* Copy */}
+            <button className="gv-ctx-item" onClick={() => {
+              if (contextMenu.message?.text) navigator.clipboard?.writeText(contextMenu.message.text);
+              setContextMenu(null);
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+              Copy text
+            </button>
+            {contextMenu.message?.attachments?.some(a => a.type === "image") && (
+              <button className="gv-ctx-item" onClick={() => {
+                const img = contextMenu.message.attachments.find(a => a.type === "image");
+                if (img) downloadImage(img.url);
                 setContextMenu(null);
               }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
-                Delete message
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                Download image
               </button>
-            </>
-          )}
-        </div>
-      )}
+            )}
+
+          </div>
+        )
+      }
 
       {/* Modals */}
       {
@@ -8116,15 +8302,17 @@ em-emoji-picker,
       {activeModal?.type === "ceo_review" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="ceo_review" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
 
       {/* Delete message confirmation modal */}
-      {deleteMsgConf && (
-        <GwConfirm
-          open={true}
-          title="Delete Message?"
-          message={`Delete this message from ${deleteMsgConf.message.senderName}? This action cannot be undone.`}
-          onConfirm={confirmDeleteMessage}
-          onCancel={() => setDeleteMsgConf(null)}
-        />
-      )}
+      {
+        deleteMsgConf && (
+          <GwConfirm
+            open={true}
+            title="Delete Message?"
+            message={`Delete this message from ${deleteMsgConf.message.senderName}? This action cannot be undone.`}
+            onConfirm={confirmDeleteMessage}
+            onCancel={() => setDeleteMsgConf(null)}
+          />
+        )
+      }
 
       {/* ── Work Commit Modal — shown when employee pauses timer ── */}
       <WorkCommitModal
