@@ -96,9 +96,39 @@ self.addEventListener("message", e => {
 self.addEventListener("push", e => {
     if (!e.data) return;
     let payload = {};
-    try { payload = e.data.json(); } catch { return; }
+    try {
+        const raw = e.data.json();
+        // FCM can wrap payload in different structures:
+        // 1. { title, body, data: {...} }        — notification message
+        // 2. { data: { title, body, type, ... } } — data-only message (our preferred format)
+        // 3. { notification: { title, body }, data: {...} } — combined
+        if (raw.data?.title) {
+            // data-only message — extract everything from data field
+            payload = {
+                title: raw.data.title,
+                body: raw.data.body || "",
+                type: raw.data.type || "",
+                tag: raw.data.tag || "",
+                data: raw.data,
+            };
+        } else if (raw.notification?.title) {
+            // notification message
+            payload = {
+                title: raw.notification.title,
+                body: raw.notification.body || "",
+                type: raw.data?.type || "",
+                tag: raw.data?.tag || "",
+                data: raw.data || {},
+            };
+        } else {
+            // direct format
+            payload = raw;
+        }
+    } catch { return; }
+
+    const title = payload.title || "CoWork";
     e.waitUntil(
-        self.registration.showNotification(payload.title || "CoWork", buildOptions(payload))
+        self.registration.showNotification(title, buildOptions(payload))
     );
 });
 
