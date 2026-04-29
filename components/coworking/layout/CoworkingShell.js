@@ -432,9 +432,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         await batch.commit();
         // FCM push for group request recipients
         for (const toId of toIds) {
-          fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
             body: JSON.stringify({
               recipientId: toId,
               title: `📨 New Request · ${employeeName}`,
@@ -488,9 +488,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             createdAt: serverTimestamp(),
           });
           // FCM push for new request
-          fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
             body: JSON.stringify({
               recipientId: toId,
               title: `📨 New Request · ${employeeName}`,
@@ -565,9 +565,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
         // Backend FCM push
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
           body: JSON.stringify({
             recipientId: req.fromId,
             title: `✅ Request Accepted · ${req.subject || ""}`,
@@ -616,9 +616,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
           body: JSON.stringify({
             recipientId: req.fromId,
             title: `📅 New Date Suggested · ${req.subject || ""}`,
@@ -659,9 +659,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
           body: JSON.stringify({
             recipientId: req.fromId,
             title: `Completion submitted: ${req.subject || ""}`,
@@ -697,9 +697,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
           body: JSON.stringify({
             recipientId: req.toId,
             title: `Request marked complete: ${req.subject || ""}`,
@@ -736,9 +736,9 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
         });
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/cowork/notify-request-response`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(await (async () => { try { const { firebaseAuth } = await import("../../../lib/coworkFirebase"); const t = await firebaseAuth.currentUser?.getIdToken(); return t ? { Authorization: `Bearer ${t}` } : {}; } catch { return {}; } })()) },
           body: JSON.stringify({
             recipientId: req.toId,
             title: `❌ Request Rejected · ${req.subject || ""}`,
