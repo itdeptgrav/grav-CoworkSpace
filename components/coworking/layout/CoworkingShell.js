@@ -2836,6 +2836,23 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         @media (max-width: 768px) {
           .cw-req-panel { width: 100vw; }
+          /* Inner list pane: stop forcing 480px — fill the panel */
+          .cw-req-panel-left {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+          /* When a chat is opened, hide the list and show the chat full-width.
+             (On desktop they sit side-by-side at 820px total.) */
+          .cw-req-panel.chat-open { width: 100vw; }
+          .cw-req-panel.chat-open .cw-req-panel-left { display: none; }
+          .cw-req-panel.chat-open .cw-req-panel-chat { flex: 1; }
+
+          /* Slightly tighter header padding so close button sits comfortably */
+          .cw-req-panel-head { padding: 14px 14px; }
+          /* Make close button bigger and more tappable on mobile */
+          .cw-req-panel-close {
+            width: 34px; height: 34px; border-radius: 8px;
+          }
         }
 
         
