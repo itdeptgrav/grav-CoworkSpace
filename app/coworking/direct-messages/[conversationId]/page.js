@@ -204,6 +204,7 @@ export default function ConversationPage() {
         readBy: [employeeId],
         createdAt: serverTimestamp(),
       };
+      const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
 
       await setDoc(doc(msgsRef, messageId), messageData);
 
@@ -253,6 +254,152 @@ export default function ConversationPage() {
 
   return (
     <>
+      {/* ── Responsive styles ── */}
+      <style jsx global>{`
+        .gv-chat-container {
+          display: flex;
+          flex-direction: column;
+          height: calc(100vh - 108px);
+          border-radius: 14px;
+          overflow: hidden;
+          border: 1px solid var(--gray-200);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+          background: #fff;
+        }
+        .gv-chat-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 14px 20px;
+          border-bottom: 1px solid var(--gray-200);
+          background: #fff;
+          flex-shrink: 0;
+        }
+        .gv-chat-back {
+          display: flex; align-items: center; justify-content: center;
+          width: 36px; height: 36px;
+          border: 1.5px solid var(--gray-200); border-radius: 10px;
+          background: #fff; cursor: pointer; color: var(--gray-600);
+          flex-shrink: 0; transition: all 0.15s;
+        }
+        .gv-chat-back:hover { background: var(--gray-50); border-color: var(--gray-300); }
+        .gv-chat-info { flex: 1; min-width: 0; }
+        .gv-chat-name {
+          font-size: 15px; font-weight: 700; color: var(--gray-900);
+          letter-spacing: -0.01em; line-height: 1.3;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .gv-chat-sub {
+          display: flex; align-items: center; gap: 6px; margin-top: 2px;
+          font-size: 11px; color: var(--gray-500); flex-wrap: wrap;
+        }
+        .gv-chat-tag {
+          padding: 1px 7px; background: var(--gray-100);
+          border-radius: 99px; border: 1px solid var(--gray-200);
+          color: var(--gray-600); font-weight: 500;
+          white-space: nowrap;
+        }
+        .gv-chat-id {
+          padding: 1px 6px; background: var(--gray-100);
+          border-radius: 4px; border: 1px solid var(--gray-200);
+          color: var(--gray-400); font-family: var(--font-mono);
+          font-size: 10px;
+        }
+        .gv-chat-call, .gv-chat-req {
+          display: flex; align-items: center; justify-content: center;
+          width: 38px; height: 38px;
+          border: 1.5px solid var(--gray-200); border-radius: 10px;
+          background: #fff; cursor: pointer; color: var(--gray-600);
+          flex-shrink: 0; transition: all 0.15s;
+        }
+        .gv-chat-call:hover {
+          background: #ECFDF5; border-color: #86EFAC; color: #16A34A;
+        }
+        .gv-chat-msgs {
+          flex: 1; overflow-y: auto;
+          padding: 16px 20px;
+          display: flex; flex-direction: column;
+          background: linear-gradient(180deg, #FAFAFB 0%, #F4F5F7 100%);
+        }
+        .gv-chat-input {
+          flex-shrink: 0;
+          border-top: 1px solid var(--gray-200);
+          background: #fff;
+          padding: 0;
+        }
+
+        /* Message bubbles — wider on mobile */
+        .gv-msg-content { max-width: min(75%, 480px); }
+
+        /* ── MOBILE — FULL RESPONSIVE OVERRIDE ── */
+        @media (max-width: 767px) {
+          .gv-msg-content { max-width: 80% !important; }
+          .gv-chat-container {
+            height: calc(100dvh - 60px);
+            border-radius: 0;
+            border: none;
+            box-shadow: none;
+          }
+          .gv-chat-header {
+            padding: 10px 12px;
+            gap: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            backdrop-filter: blur(8px);
+            background: rgba(255,255,255,0.95);
+          }
+          .gv-chat-back {
+            width: 34px; height: 34px;
+          }
+          .gv-chat-call, .gv-chat-req {
+            width: 36px; height: 36px;
+          }
+          .gv-chat-name {
+            font-size: 14px;
+          }
+          .gv-chat-sub {
+            font-size: 10px;
+            gap: 4px;
+            margin-top: 1px;
+          }
+          .gv-chat-tag {
+            padding: 1px 6px;
+            font-size: 10px;
+          }
+          /* Hide convId on mobile — too cluttered */
+          .gv-chat-id {
+            display: none;
+          }
+          .gv-chat-msgs {
+            padding: 12px 10px;
+            background: #F8F9FB;
+          }
+          /* Bigger touch targets on mobile */
+          .gv-chat-input button {
+            min-height: 40px;
+          }
+        }
+
+        /* Extra small phones */
+        @media (max-width: 380px) {
+          .gv-chat-header {
+            padding: 8px 10px;
+            gap: 8px;
+          }
+          .gv-chat-name {
+            font-size: 13px;
+          }
+          .gv-chat-tag {
+            padding: 0 5px;
+            font-size: 9px;
+          }
+          .gv-chat-back, .gv-chat-call, .gv-chat-req {
+            width: 32px; height: 32px;
+          }
+        }
+      `}</style>
+
       {/* ── Audio Call Manager (handles outgoing calls + LiveKit) ── */}
       {employeeId && otherEmpId && (
         <DMCallManager
@@ -263,39 +410,43 @@ export default function ConversationPage() {
           convId={conversationId}
         />
       )}
-      {/* GlobalCallReceiver is mounted in layout.js — covers ALL pages including this one */}
 
-      <div style={s.container} className="grav-chat-container">
+      <div className="gv-chat-container">
 
         {/* ── Header ── */}
-        <div style={s.header}>
+        <div className="gv-chat-header">
           <button
             onClick={() => router.push("/coworking/direct-messages")}
-            style={s.backBtn}
+            className="gv-chat-back"
             title="Back to messages"
+            aria-label="Back"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
 
-          <GwAvatar name={otherName} size={36} />
+          <GwAvatar name={otherName} size={38} />
 
-          <div style={s.headerInfo}>
-            <div style={s.headerName}>{otherName}</div>
-            <div style={s.headerSub}>
+          <div className="gv-chat-info">
+            <div className="gv-chat-name">{otherName}</div>
+            <div className="gv-chat-sub">
               {otherEmployee?.department && (
-                <span style={s.deptTag}>{otherEmployee.department}</span>
+                <span className="gv-chat-tag">{otherEmployee.department}</span>
               )}
-              <span style={s.convIdTag}>{conversationId}</span>
+              {otherEmployee?.role && (
+                <span className="gv-chat-tag">{otherEmployee.role}</span>
+              )}
+              <span className="gv-chat-id">{conversationId}</span>
             </div>
           </div>
 
           {/* ── Audio Call button ── */}
           <button
             onClick={() => triggerCall(conversationId)}
-            style={s.callBtn}
+            className="gv-chat-call"
             title="Audio call"
+            aria-label="Call"
           >
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8 19.79 19.79 0 01.01 1.18 2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z" />
@@ -304,9 +455,11 @@ export default function ConversationPage() {
         </div>
 
         {/* ── Messages ── */}
-        <div style={s.messagesArea}>
+        <div className="gv-chat-msgs">
           {msgsLoading ? (
-            <div style={s.center}><GwSpinner size={30} /></div>
+            <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", padding: 40 }}>
+              <GwSpinner size={30} />
+            </div>
           ) : messages.length === 0 ? (
             <GwEmpty
               icon="💬"
@@ -319,9 +472,8 @@ export default function ConversationPage() {
                 key={msg.messageId || msg.id || i}
                 msg={{
                   ...msg,
-                  // Inject profile pic: other user's pic for received messages, own pic for sent
                   senderPicUrl: msg.senderId === employeeId
-                    ? ""  // own pic not shown (isMe side has no avatar)
+                    ? ""
                     : (otherEmployee?.profilePicUrl || ""),
                 }}
                 isMe={msg.senderId === employeeId}
@@ -334,7 +486,7 @@ export default function ConversationPage() {
         </div>
 
         {/* ── Input ── */}
-        <div style={s.inputArea}>
+        <div className="gv-chat-input">
           <MediaMessageInput
             onSend={handleSend}
             placeholder={`Message ${otherName}…`}

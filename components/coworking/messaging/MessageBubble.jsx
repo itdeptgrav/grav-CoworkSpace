@@ -206,11 +206,11 @@ export default function MessageBubble({ msg, isMe, showSender = true, showAvatar
                     : <div style={{ width: 28 }} />
             )}
 
-            <div style={{
+            <div className="gv-msg-content" style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 3,
-                maxWidth: "75%",
+                maxWidth: "min(75%, 480px)",
                 alignItems: isMe ? "flex-end" : "flex-start",
             }}>
                 {/* Sender name (others only) */}
