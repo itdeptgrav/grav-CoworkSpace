@@ -406,7 +406,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
         )}
       </div>
       {/* Column */}
-      <div style={{ display: "flex", flexDirection: "column", maxWidth: "64%", alignItems: isMe ? "flex-end" : "flex-start" }}>
+      <div className="dm-bub-col" style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
         {showAvatar && !isMe && (
           <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>
         )}
@@ -929,11 +929,11 @@ export default function DirectMessagesPage() {
               <div className="dm-chat-head">
                 <button className="dm-back" onClick={() => { setMobileChatOpen(false); setSelectedPerson(null); }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
-                  Back
+                  <span className="dm-back-lbl">Back</span>
                 </button>
-                <div style={{ position: "relative", flexShrink: 0 }}>
+                <div className="dm-chat-av-wrap" style={{ position: "relative", flexShrink: 0 }}>
                   <Av name={selectedPerson.name || selectedPerson.employeeId} size={44} url={selectedPerson.profilePicUrl || ""} />
-                  <div style={{ position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%", background: "#22C55E", border: "2px solid #fff" }} />
+                  <div className="dm-chat-presence" style={{ position: "absolute", bottom: 1, right: 1, width: 11, height: 11, borderRadius: "50%", background: "#22C55E", border: "2px solid #fff" }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="dm-chat-name">{selectedPerson.name || selectedPerson.employeeId}</div>
@@ -946,13 +946,13 @@ export default function DirectMessagesPage() {
 
                 {/* Audio Call button */}
                 <button
+                  className="dm-head-call"
                   onClick={() => {
                     const cid = convId(employeeId, selectedPerson.employeeId);
                     const socket = (typeof window !== "undefined") ? require("../../../lib/coworkSocket").getCoworkSocket(employeeId) : null;
                     if (socket) socket.emit("call_invite", { toEmployeeId: selectedPerson.employeeId, fromEmployeeId: employeeId, fromName: employeeName, convId: cid });
                     router.push(`/coworking/audio-call/${cid}`);
                   }}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, border: "1.5px solid #DCFCE7", background: "#F0FDF4", color: "#16A34A", cursor: "pointer", flexShrink: 0 }}
                   title="Audio call"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -961,29 +961,28 @@ export default function DirectMessagesPage() {
                 </button>
 
                 {/* Request button */}
-                <button onClick={() => {
+                <button className="dm-head-btn dm-head-req" onClick={() => {
                   window.dispatchEvent(new CustomEvent("openRequestPanel", {
                     detail: {
                       tab: "compose",
                       threadContext: { type: "dm", threadId: convId(employeeId, selectedPerson.employeeId), recipientId: selectedPerson.employeeId, recipientName: selectedPerson.name }
                     }
                   }));
-                }} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9, border: "1.5px solid #E9D5FF", background: "#FAF5FF", color: "#7C3AED", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                }} title="Request">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
                     <line x1="12" y1="8" x2="12" y2="12" /><line x1="10" y1="10" x2="14" y2="10" />
                   </svg>
-                  Request
+                  <span className="dm-head-btn-lbl">Request</span>
                 </button>
 
                 {/* Schedule Meeting button — CEO/TL only */}
                 {isCeoOrTl && (
-                  <button onClick={() => { setShowMeetModal(true); setMeetError(""); }}
-                    style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 9, border: "1.5px solid #BFDBFE", background: "#EFF6FF", color: "#1D4ED8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                  <button className="dm-head-btn dm-head-meet" onClick={() => { setShowMeetModal(true); setMeetError(""); }} title="Schedule Meeting">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" />
                     </svg>
-                    Schedule Meeting
+                    <span className="dm-head-btn-lbl">Schedule</span>
                   </button>
                 )}
               </div>
@@ -1303,6 +1302,29 @@ const CSS = `
 }
 .dm-back:hover { background: #EFF6FF; border-color: #1a73e8; }
 
+/* Bubble column — responsive max width */
+.dm-bub-col { max-width: 64%; }
+
+/* Chat header action buttons */
+.dm-head-call {
+  display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 10px;
+  border: 1.5px solid #DCFCE7; background: #F0FDF4; color: #16A34A;
+  cursor: pointer; flex-shrink: 0; transition: all 0.12s;
+}
+.dm-head-call:hover { background: #DCFCE7; }
+.dm-head-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 9px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit; flex-shrink: 0; transition: all 0.12s;
+  white-space: nowrap;
+}
+.dm-head-req { border: 1.5px solid #E9D5FF; background: #FAF5FF; color: #7C3AED; }
+.dm-head-req:hover { background: #F3E8FF; }
+.dm-head-meet { border: 1.5px solid #BFDBFE; background: #EFF6FF; color: #1D4ED8; }
+.dm-head-meet:hover { background: #DBEAFE; }
+
 /* Messages */
 .dm-msgs {
   flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px;
@@ -1330,10 +1352,26 @@ const CSS = `
 .dm-input { flex-shrink: 0; border-top: 1.5px solid #EEF2F8; background: #fff; padding: 10px 16px 12px; }
 
 /* ─── RESPONSIVE ─── */
+
+/* Tablet portrait — slightly wider mobile feel */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .dm-left { width: 280px; min-width: 280px; }
+  .dm-back { display: flex !important; }
+}
+
+/* MOBILE — phones up to 768px */
 @media (max-width: 768px) {
-  .dm-root { height: calc(100dvh - 56px); border-radius: 0; border: none; }
+  .dm-root {
+    height: calc(100dvh - 56px);
+    min-height: calc(100dvh - 56px);
+    max-height: calc(100dvh - 56px);
+    border-radius: 0; border: none; box-shadow: none;
+  }
+
+  /* Slide panels */
   .dm-left {
-    position: absolute; inset: 0; z-index: 10; width: 100%; min-width: 100%;
+    position: absolute; inset: 0; z-index: 10;
+    width: 100%; min-width: 100%;
     transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
   }
   .dm-left.mob-gone { transform: translateX(-100%); }
@@ -1342,14 +1380,111 @@ const CSS = `
     transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
   }
   .dm-chat.mob-gone-chat { transform: translateX(100%); }
-  .dm-back { display: flex !important; }
-  .dm-msgs { padding: 12px 14px; }
-  .dm-chat-head { padding: 10px 14px; }
+
+  /* Sidebar tweaks */
+  .dm-lhead { padding: 14px 14px 12px; }
+  .dm-search-wrap { margin: 8px 12px 4px; padding: 10px 12px; }
+  .dm-search-in { font-size: 14px; }
+  .dm-dept-row { padding: 4px 12px 8px; }
+  .dm-tabs { padding: 0 12px; }
+  .dm-row { padding: 11px 14px; gap: 11px; }
+  .dm-row-name { font-size: 14px; }
+  .dm-row-prev { font-size: 12px; }
+
+  /* ── Chat header — the main fix ── */
+  .dm-chat-head {
+    padding: 8px 10px;
+    gap: 8px;
+    min-height: 56px;
+    flex-wrap: nowrap;
+  }
+  .dm-back {
+    display: flex !important;
+    padding: 7px 8px;
+    gap: 0;
+  }
+  .dm-back-lbl { display: none; }
+  .dm-chat-av-wrap > img,
+  .dm-chat-av-wrap > div:first-child {
+    width: 36px !important; height: 36px !important;
+    font-size: 13px !important;
+  }
+  .dm-chat-presence {
+    width: 9px !important; height: 9px !important;
+    border-width: 1.5px !important;
+  }
+  .dm-chat-name {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dm-chat-meta {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .dm-chat-meta .dm-pill {
+    font-size: 9.5px;
+    padding: 1.5px 6px;
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100px;
+  }
+  /* Hide the EmployeeId pill on small mobile to save space */
+  .dm-chat-meta .dm-pill.mono { display: none; }
+
+  /* Action buttons — collapse to icon only */
+  .dm-head-call {
+    width: 36px; height: 36px;
+    border-radius: 9px;
+  }
+  .dm-head-btn {
+    padding: 0;
+    width: 36px; height: 36px;
+    justify-content: center;
+    border-radius: 9px;
+    gap: 0;
+  }
+  .dm-head-btn-lbl { display: none; }
+  /* Hide the Schedule Meeting on phones — it lives in detail panel anyway */
+  .dm-head-meet { display: none; }
+
+  /* Messages area — give bubbles room to breathe */
+  .dm-msgs { padding: 10px 10px; gap: 1px; }
+  .dm-bub-col { max-width: 78%; }
+
+  /* Input area */
+  .dm-input { padding: 8px 10px 10px; }
+
+  /* Date separator */
+  .dm-datesep { margin: 10px 0 6px; }
+  .dm-datesep-label { font-size: 10px; padding: 2px 10px; }
 }
-@media (min-width: 769px) and (max-width: 1024px) {
-  .dm-left { width: 272px; min-width: 272px; }
-  .dm-back { display: flex !important; }
+
+/* SMALL PHONES — under 380px */
+@media (max-width: 380px) {
+  .dm-chat-head {
+    padding: 7px 8px;
+    gap: 6px;
+  }
+  .dm-back {
+    padding: 7px 7px;
+    border-radius: 8px;
+  }
+  .dm-chat-name { font-size: 13.5px; }
+  .dm-chat-meta .dm-pill { font-size: 9px; padding: 1px 5px; }
+  /* On very small screens, also hide Request label and shrink everything */
+  .dm-head-call,
+  .dm-head-btn {
+    width: 34px; height: 34px;
+  }
+  .dm-bub-col { max-width: 82%; }
+  .dm-msgs { padding: 8px 8px; }
 }
+
 @media (min-width: 1280px) {
   .dm-left { width: 360px; min-width: 360px; }
 }
