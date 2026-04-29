@@ -204,7 +204,6 @@ export default function ConversationPage() {
         readBy: [employeeId],
         createdAt: serverTimestamp(),
       };
-      const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
 
       await setDoc(doc(msgsRef, messageId), messageData);
 
