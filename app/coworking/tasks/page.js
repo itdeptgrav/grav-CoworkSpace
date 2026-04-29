@@ -4504,6 +4504,9 @@ export default function TasksPage() {
       .gv-desk-only { display:none !important; }
       .gv-mob-people-names { display:block; margin-top:1px; overflow:hidden; line-height:1.2; }
       .gv-mobile-back { display:none; }
+      .gv-img2-tabs { display:flex !important; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 12px; }
+      .gv-img2-tabs::-webkit-scrollbar { display:none; }
+      .gv-img2-tab { flex-shrink:0; padding:10px 12px; font-size:12px; }
     }
 
     /* ════════════════════════════════════════════════════════════════════
@@ -6957,7 +6960,7 @@ em-emoji-picker,
 
                 {/* "Chat with team" avatar strip -- Image-2 style (desktop only) */}
                 {/* Image-2 OUTER TABS: Chat / Activity / Files / Details (now BEFORE team strip) */}
-                <div className="gv-img2-tabs gv-desk-only">
+                <div className="gv-img2-tabs">
                   <button type="button" className={`gv-img2-tab ${rightPanel === null ? "active" : ""}`} onClick={() => setRightPanel(null)}>Chat</button>
                   <button type="button" className={`gv-img2-tab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => setRightPanel("reports")}>Activity</button>
                   <button type="button" className={`gv-img2-tab ${rightPanel === "files" ? "active" : ""}`} onClick={() => setRightPanel("files")}>Files</button>
