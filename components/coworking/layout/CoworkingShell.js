@@ -430,6 +430,20 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           });
         }
         await batch.commit();
+        // FCM push for group request recipients
+        for (const toId of toIds) {
+          fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipientId: toId,
+              title: `📨 New Request · ${employeeName}`,
+              body: subject.trim().slice(0, 80),
+              type: "request",
+              subject: subject.trim(),
+            }),
+          }).catch(() => { });
+        }
       } else {
         // Create one request doc per recipient (DM / task context)
         for (const toId of toIds) {
@@ -473,6 +487,18 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
             read: false,
             createdAt: serverTimestamp(),
           });
+          // FCM push for new request
+          fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/cowork/notify-request-response`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipientId: toId,
+              title: `📨 New Request · ${employeeName}`,
+              body: `${subject.trim().slice(0, 60)}${priority ? " · " + priority : ""}`,
+              type: "request",
+              subject: subject.trim(),
+            }),
+          }).catch(() => { });
         }
       }
       // ── Post system message to task chat if this request is linked to a task ──
@@ -531,7 +557,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         await setDoc(notifRef, {
           recipientEmployeeId: req.fromId,
           type: "request_accepted",
-          title: `Request accepted: ${req.subject || ""}`,
+          title: `✅ Request Accepted · ${req.subject || ""}`,
           body: req.proposedDateTime
             ? `Accepted for ${new Date(req.proposedDateTime).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
             : "Your request was accepted.",
@@ -544,7 +570,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recipientId: req.fromId,
-            title: `Request accepted: ${req.subject || ""}`,
+            title: `✅ Request Accepted · ${req.subject || ""}`,
             body: "Your request was accepted.",
             type: "request_accepted",
             subject: req.subject,
@@ -585,7 +611,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         await setDoc(notifRef, {
           recipientEmployeeId: req.fromId,
           type: "request_date_suggested",
-          title: `New date suggested: ${req.subject || ""}`,
+          title: `📅 New Date Suggested · ${req.subject || ""}`,
           body: `${employeeName} suggested ${new Date(finalDT).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${suggestMsg.trim() ? ` — ${suggestMsg.trim()}` : ""}`,
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
@@ -595,7 +621,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recipientId: req.fromId,
-            title: `New date suggested: ${req.subject || ""}`,
+            title: `📅 New Date Suggested · ${req.subject || ""}`,
             body: suggestMsg.trim() || `${employeeName} suggested a new date.`,
             type: "request_date_suggested",
             subject: req.subject,
@@ -705,7 +731,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
         await setDoc(notifRef, {
           recipientEmployeeId: req.toId,
           type: "request_completion_rejected",
-          title: `Completion rejected: ${req.subject || ""}`,
+          title: `❌ Request Rejected · ${req.subject || ""}`,
           body: rejectReason.trim(),
           fromId: employeeId, fromName: employeeName,
           requestId: reqId, read: false, createdAt: serverTimestamp(),
@@ -715,7 +741,7 @@ function RequestSidebarPanel({ employeeId, employeeName, onClose, initialTab = "
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recipientId: req.toId,
-            title: `Completion rejected: ${req.subject || ""}`,
+            title: `❌ Request Rejected · ${req.subject || ""}`,
             body: rejectReason.trim(),
             type: "request_completion_rejected",
             subject: req.subject,
