@@ -1309,7 +1309,7 @@ const s = {
     memberChip: { display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--surface)", borderRadius: "var(--radius-full)", border: "1px solid var(--gray-200)" },
     memberName: { fontSize: 12, color: "var(--gray-700)", fontWeight: 500 },
     memberDept: { fontSize: 10, color: "var(--gray-400)" },
-    messagesArea: { flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", background: "var(--gray-50)" },
+    messagesArea: { flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", background: "var(--gray-50)", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" },
     center: { flex: 1, display: "flex", justifyContent: "center", alignItems: "center", padding: 40 },
     inputArea: { flexShrink: 0, borderTop: "1px solid var(--gray-200)", background: "var(--surface)" },
 };

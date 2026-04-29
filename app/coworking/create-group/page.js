@@ -857,13 +857,15 @@ export default function CreateGroupPage() {
           display: flex;
           position: relative;
           width: 100%;
-          height: calc(100dvh - 108px);
+          height: 100%;
+          min-height: 0;
           border-radius: 16px;
           overflow: hidden;
           border: 1px solid #E2E8F0;
           background: #fff;
           box-shadow: 0 1px 3px rgba(15,23,42,0.04);
           font-family: inherit;
+          overscroll-behavior: contain;
         }
         .grp-left {
           width: 380px;
@@ -929,9 +931,10 @@ export default function CreateGroupPage() {
         /* ─── MOBILE ─── */
         @media (max-width: 768px) {
           .grp-root {
-            height: calc(100dvh - 56px);
+            height: 100%;
             border-radius: 0;
             border: none;
+            box-shadow: none;
           }
           .grp-left {
             position: absolute; inset: 0; z-index: 10;

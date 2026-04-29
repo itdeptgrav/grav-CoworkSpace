@@ -2313,24 +2313,32 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         .cw-shell {
           display: flex;
-          height: 100vh;
+          height: 100dvh;
+          min-height: 100dvh;
           min-width: 320px;
           overflow: hidden;
           font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           background: #F0F2F5;
+        }
+        /* Fallback for browsers without dvh */
+        @supports not (height: 100dvh) {
+          .cw-shell { height: 100vh; min-height: 100vh; }
         }
 
         /* ── Sidebar ── */
         .cw-sidebar {
           width: 240px;
           min-width: 240px;
-          height: 100vh;
+          height: 100dvh;
           background: #FFFFFF;
           border-right: 1px solid #E4E7EC;
           display: flex;
           flex-direction: column;
           z-index: 100;
           transition: width 0.2s ease, min-width 0.2s ease;
+        }
+        @supports not (height: 100dvh) {
+          .cw-sidebar { height: 100vh; }
         }
 
         .cw-sidebar-brand {
@@ -2837,7 +2845,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             position: fixed;
             left: -260px;
             top: 0;
-            height: 100vh;
+            height: 100dvh;
             z-index: 200;
             box-shadow: 4px 0 24px rgba(0,0,0,0.08);
             transition: left 0.25s ease;

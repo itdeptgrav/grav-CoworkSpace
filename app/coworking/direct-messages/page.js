@@ -1159,8 +1159,8 @@ const CSS = `
 
 .dm-root {
   display: flex;
-  height: calc(100vh - 56px);
-  max-height: calc(100vh - 56px);
+  height: calc(100dvh - 56px);
+  max-height: calc(100dvh - 56px);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: #F1F5F9;
   border-radius: 16px;
@@ -1168,6 +1168,12 @@ const CSS = `
   border: 1px solid #E2E8F0;
   box-shadow: 0 4px 24px rgba(0,0,0,0.07);
   position: relative;
+  /* Prevent the messages list from bouncing the parent on overscroll */
+  overscroll-behavior: contain;
+}
+/* Fallback for browsers without dvh support */
+@supports not (height: 100dvh) {
+  .dm-root { height: calc(100vh - 56px); max-height: calc(100vh - 56px); }
 }
 
 /* ─── SIDEBAR ─── */
@@ -1330,6 +1336,8 @@ const CSS = `
   flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px;
   display: flex; flex-direction: column; gap: 2px;
   background: inherit;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .dm-msgs::-webkit-scrollbar { width: 4px; }
 .dm-msgs::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 2px; }
