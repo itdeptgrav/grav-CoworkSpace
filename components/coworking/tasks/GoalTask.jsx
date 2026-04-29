@@ -650,8 +650,45 @@ function InteractiveFlowchart({
     const totalEvents = components.reduce((s, c) => s + (c.history?.length || 0), 0);
     const unseen = Math.max(0, totalEvents - seenCount);
 
+    // Detect narrow container — observe the wrapper width, not viewport,
+    // because this component lives inside a sidebar that can be narrower.
+    const wrapRef = useRef(null);
+    const [isNarrow, setIsNarrow] = useState(false);
+    useEffect(() => {
+        const el = wrapRef.current;
+        if (!el || typeof ResizeObserver === "undefined") {
+            // Fallback: viewport-based check
+            const check = () => setIsNarrow(window.innerWidth <= 640);
+            check();
+            window.addEventListener("resize", check);
+            return () => window.removeEventListener("resize", check);
+        }
+        const ro = new ResizeObserver(entries => {
+            for (const e of entries) {
+                setIsNarrow(e.contentRect.width <= 560);
+            }
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
     return (
-        <>
+        <div ref={wrapRef}>
+            <style>{`
+                /* Single-column timeline: shifts the line to the left and reorders rows */
+                .gt-narrow .gt-tl-line { left: 14px !important; transform: none !important; }
+                .gt-narrow .gt-tl-side-left,
+                .gt-narrow .gt-tl-side-right {
+                    width: auto !important;
+                    min-width: 0 !important;
+                }
+                .gt-narrow .gt-tl-item.left .gt-tl-side-left { flex: 1 1 0% !important; display: block !important; }
+                .gt-narrow .gt-tl-item.right .gt-tl-side-right { flex: 1 1 0% !important; display: block !important; }
+                .gt-narrow .gt-tl-dot-wrap { width: 28px !important; }
+                .gt-narrow .gt-tl-item.left .gt-tl-row { flex-direction: row-reverse; }
+                .gt-narrow .gt-tl-item.left .gt-tl-side-right { display: none !important; }
+                .gt-narrow .gt-tl-item.right .gt-tl-side-left { display: none !important; }
+            `}</style>
             {showDeleteConfirm && (
                 <ConfirmModal icon="🗑️" title="Delete entire roadmap?" confirmLabel="Yes, Delete All" confirmVariant="danger"
                     desc="This permanently removes all components and cannot be undone."
@@ -659,71 +696,122 @@ function InteractiveFlowchart({
             )}
             {showHistory && <HistoryPanel components={components} onClose={() => setShowHistory(false)} />}
 
-            <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden", boxShadow: T.shadow }}>
+            <div
+                className="gt-roadmap"
+                style={
+                    isNarrow
+                        ? { background: "transparent", border: "none", borderRadius: 0, overflow: "visible", boxShadow: "none" }
+                        : { background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden", boxShadow: T.shadow }
+                }
+            >
                 {/* ── Header ── */}
-                <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: T.bg }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 18 }}>⭐</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.2px" }}>Goal Roadmap</span>
-                        {components.length > 0 && (
-                            <span style={{ fontSize: 10, fontWeight: 700, background: "#FEF3C7", color: "#92400E", padding: "3px 8px", borderRadius: 99, border: "1px solid #FDE68A" }}>
-                                {components.length} component{components.length !== 1 ? "s" : ""}
-                            </span>
-                        )}
-                        {/* Progress */}
-                        {components.length > 0 && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: progressPct === 100 ? "#166534" : "#64748B", background: progressPct === 100 ? T.successBg : T.bg, padding: "3px 8px", borderRadius: 99, border: `1px solid ${progressPct === 100 ? T.successBorder : T.border}` }}>
-                                {progressPct}% done
-                            </span>
-                        )}
-                    </div>
-
-                    {/* Right controls */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                        {submitted && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 99, background: T.successBg, border: `1px solid ${T.successBorder}`, fontSize: 10, fontWeight: 700, color: "#166534" }}>
-                                ✅ Submitted
+                {isNarrow ? (
+                    /* Narrow: stacked header inside its own clean card */
+                    <div className="gt-roadmap-head" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 12, marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 16 }}>⭐</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.2px" }}>Goal Roadmap</span>
+                            {components.length > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, background: "#FEF3C7", color: "#92400E", padding: "3px 8px", borderRadius: 99, border: "1px solid #FDE68A", whiteSpace: "nowrap" }}>
+                                    {components.length} component{components.length !== 1 ? "s" : ""}
+                                </span>
+                            )}
+                            {components.length > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: progressPct === 100 ? "#166534" : "#64748B", background: progressPct === 100 ? T.successBg : T.bg, padding: "3px 8px", borderRadius: 99, border: `1px solid ${progressPct === 100 ? T.successBorder : T.border}`, whiteSpace: "nowrap" }}>
+                                    {progressPct}% done
+                                </span>
+                            )}
+                        </div>
+                        {(submitted || components.length > 0 || (submitted && canEdit) || (canEdit && components.length > 0)) && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                                {submitted && (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", borderRadius: 99, background: T.successBg, border: `1px solid ${T.successBorder}`, fontSize: 10, fontWeight: 700, color: "#166534", whiteSpace: "nowrap" }}>
+                                        ✅ Submitted
+                                    </div>
+                                )}
+                                {components.length > 0 && (
+                                    <button onClick={() => { setShowHistory(true); onSeen(totalEvents); }}
+                                        style={{ ...btn("ghost"), padding: "4px 9px", fontSize: 10, gap: 4, position: "relative", borderColor: unseen > 0 ? T.primary : T.border, color: unseen > 0 ? T.primary : T.textMuted, background: unseen > 0 ? "#EEF2FF" : "#fff", whiteSpace: "nowrap" }}>
+                                        🕐 History
+                                        <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 99, background: unseen > 0 ? T.primary : T.border, color: "#fff", lineHeight: 1.4 }}>{unseen}</span>
+                                    </button>
+                                )}
+                                {submitted && canEdit && (
+                                    <button onClick={onToggleEditMode}
+                                        style={{ ...btn(editingMode ? "danger" : "ghost"), padding: "4px 9px", fontSize: 10, whiteSpace: "nowrap" }}>
+                                        {editingMode ? "🔒 Lock" : "✏️ Edit"}
+                                    </button>
+                                )}
+                                {canEdit && components.length > 0 && (
+                                    <button onClick={() => setShowDeleteConfirm(true)}
+                                        style={{ ...btn("ghost"), padding: "4px 9px", fontSize: 10, color: T.danger, borderColor: T.dangerBorder, background: T.dangerBg }}>
+                                        🗑
+                                    </button>
+                                )}
                             </div>
                         )}
-
-                        {/* History button */}
-                        {components.length > 0 && (
-                            <button onClick={() => { setShowHistory(true); onSeen(totalEvents); }}
-                                style={{ ...btn("ghost"), padding: "5px 10px", fontSize: 10, gap: 5, position: "relative", borderColor: unseen > 0 ? T.primary : T.border, color: unseen > 0 ? T.primary : T.textMuted, background: unseen > 0 ? "#EEF2FF" : "#fff" }}>
-                                🕐 History
-                                <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 99, background: unseen > 0 ? T.primary : T.border, color: "#fff", lineHeight: 1.4 }}>
-                                    {unseen}
-                                </span>
-                            </button>
-                        )}
-
-                        {/* Edit mode toggle (after submit, assignee only) */}
-                        {submitted && canEdit && (
-                            <button onClick={onToggleEditMode}
-                                style={{ ...btn(editingMode ? "danger" : "ghost"), padding: "5px 10px", fontSize: 10 }}>
-                                {editingMode ? "🔒 Lock" : "✏️ Edit"}
-                            </button>
-                        )}
-
-                        {/* Delete all */}
-                        {canEdit && components.length > 0 && (
-                            <button onClick={() => setShowDeleteConfirm(true)}
-                                style={{ ...btn("ghost"), padding: "5px 10px", fontSize: 10, color: T.danger, borderColor: T.dangerBorder, background: T.dangerBg }}>
-                                🗑
-                            </button>
-                        )}
                     </div>
-                </div>
+                ) : (
+                    /* Desktop: original single-row header */
+                    <div className="gt-roadmap-head" style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: T.bg }}>
+                        <div className="gt-roadmap-title" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: 18 }}>⭐</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: T.text, letterSpacing: "-0.2px" }}>Goal Roadmap</span>
+                            {components.length > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, background: "#FEF3C7", color: "#92400E", padding: "3px 8px", borderRadius: 99, border: "1px solid #FDE68A" }}>
+                                    {components.length} component{components.length !== 1 ? "s" : ""}
+                                </span>
+                            )}
+                            {components.length > 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: progressPct === 100 ? "#166534" : "#64748B", background: progressPct === 100 ? T.successBg : T.bg, padding: "3px 8px", borderRadius: 99, border: `1px solid ${progressPct === 100 ? T.successBorder : T.border}` }}>
+                                    {progressPct}% done
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="gt-roadmap-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            {submitted && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 99, background: T.successBg, border: `1px solid ${T.successBorder}`, fontSize: 10, fontWeight: 700, color: "#166534" }}>
+                                    ✅ Submitted
+                                </div>
+                            )}
+
+                            {components.length > 0 && (
+                                <button onClick={() => { setShowHistory(true); onSeen(totalEvents); }}
+                                    style={{ ...btn("ghost"), padding: "5px 10px", fontSize: 10, gap: 5, position: "relative", borderColor: unseen > 0 ? T.primary : T.border, color: unseen > 0 ? T.primary : T.textMuted, background: unseen > 0 ? "#EEF2FF" : "#fff" }}>
+                                    🕐 History
+                                    <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 99, background: unseen > 0 ? T.primary : T.border, color: "#fff", lineHeight: 1.4 }}>
+                                        {unseen}
+                                    </span>
+                                </button>
+                            )}
+
+                            {submitted && canEdit && (
+                                <button onClick={onToggleEditMode}
+                                    style={{ ...btn(editingMode ? "danger" : "ghost"), padding: "5px 10px", fontSize: 10 }}>
+                                    {editingMode ? "🔒 Lock" : "✏️ Edit"}
+                                </button>
+                            )}
+
+                            {canEdit && components.length > 0 && (
+                                <button onClick={() => setShowDeleteConfirm(true)}
+                                    style={{ ...btn("ghost"), padding: "5px 10px", fontSize: 10, color: T.danger, borderColor: T.dangerBorder, background: T.dangerBg }}>
+                                    🗑
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* ── Progress bar ── */}
-                {components.length > 0 && (
+                {components.length > 0 && !isNarrow && (
                     <div style={{ height: 3, background: T.bg }}>
                         <div style={{ height: "100%", width: `${progressPct}%`, background: `linear-gradient(to right,${T.success},#16A34A)`, transition: "width 0.5s ease", borderRadius: "0 99px 99px 0" }} />
                     </div>
                 )}
 
                 {/* ── Body ── */}
-                <div style={{ padding: "16px" }}>
+                <div className={`gt-roadmap-body ${isNarrow ? "gt-narrow" : ""}`} style={{ padding: isNarrow ? "0" : "16px" }}>
                     {/* Empty state */}
                     {components.length === 0 && addingAfter === null && (
                         <div style={{ textAlign: "center", padding: "32px 0" }}>
@@ -738,12 +826,12 @@ function InteractiveFlowchart({
                     )}
 
                     {components.length > 0 && (
-                        <div style={{ position: "relative" }}>
+                        <div className="gt-timeline" style={{ position: "relative" }}>
                             {/* Base line */}
-                            <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 2, background: T.border, transform: "translateX(-50%)", zIndex: 0, borderRadius: 99 }} />
+                            <div className="gt-tl-line" style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 2, background: T.border, transform: "translateX(-50%)", zIndex: 0, borderRadius: 99 }} />
                             {/* Progress line */}
                             {progressPct > 0 && (
-                                <div style={{ position: "absolute", left: "50%", top: 0, height: `${progressPct}%`, width: 2, background: `linear-gradient(to bottom,${T.success},#16A34A)`, transform: "translateX(-50%)", zIndex: 1, borderRadius: 99, transition: "height 0.5s ease" }} />
+                                <div className="gt-tl-line gt-tl-line-progress" style={{ position: "absolute", left: "50%", top: 0, height: `${progressPct}%`, width: 2, background: `linear-gradient(to bottom,${T.success},#16A34A)`, transform: "translateX(-50%)", zIndex: 1, borderRadius: 99, transition: "height 0.5s ease" }} />
                             )}
 
                             {/* Add before first */}
@@ -764,11 +852,11 @@ function InteractiveFlowchart({
                                 const isEditing = editingIdx === i;
 
                                 return (
-                                    <div key={comp.id} style={{ position: "relative", zIndex: 2 }}>
+                                    <div key={comp.id} className={`gt-tl-item ${isLeft ? "left" : "right"}`} style={{ position: "relative", zIndex: 2 }}>
                                         {/* Node row */}
-                                        <div style={{ display: "flex", alignItems: "flex-start" }}>
+                                        <div className="gt-tl-row" style={{ display: "flex", alignItems: "flex-start" }}>
                                             {/* Left side */}
-                                            <div style={{ width: "calc(50% - 16px)", flexShrink: 0 }}>
+                                            <div className="gt-tl-side gt-tl-side-left" style={{ width: "calc(50% - 16px)", flexShrink: 0 }}>
                                                 {isLeft && !isEditing && (
                                                     <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId}
                                                         onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
@@ -778,7 +866,7 @@ function InteractiveFlowchart({
                                             </div>
 
                                             {/* Center dot */}
-                                            <div style={{ width: 32, flexShrink: 0, display: "flex", justifyContent: "center", paddingTop: 14 }}>
+                                            <div className="gt-tl-dot-wrap" style={{ width: 32, flexShrink: 0, display: "flex", justifyContent: "center", paddingTop: 14 }}>
                                                 <div style={{
                                                     width: 18, height: 18, borderRadius: "50%",
                                                     background: isDone ? T.success : "#fff",
@@ -792,7 +880,7 @@ function InteractiveFlowchart({
                                             </div>
 
                                             {/* Right side */}
-                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div className="gt-tl-side gt-tl-side-right" style={{ flex: 1, minWidth: 0 }}>
                                                 {!isLeft && !isEditing && (
                                                     <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId}
                                                         onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
@@ -825,7 +913,7 @@ function InteractiveFlowchart({
                     )}
                 </div>
             </div>
-        </>
+        </div>
     );
 }
 
@@ -960,7 +1048,12 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
     const doneCount = components.filter(c => c.status === "done").length;
 
     return (
-        <div style={{ padding: "14px 14px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="gt-activities-wrap" style={{ padding: "14px 14px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <style>{`
+                @media (max-width: 640px) {
+                    .gt-activities-wrap { padding: 10px 10px 20px !important; gap: 10px !important; }
+                }
+            `}</style>
             <InteractiveFlowchart
                 components={components} editingIdx={editingIdx} addingAfter={addingAfter}
                 submitted={submitted} canEdit={canEdit} isHead={isHead} editingMode={editingMode}
