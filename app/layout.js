@@ -3,6 +3,13 @@ import ToastProvider from "@/components/ToastProvider"
 import { Providers } from "./providers" // Import the new Providers component
 import "./globals.css"
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  interactiveWidget: "resizes-content",
+};
+
 export const metadata = {
   title: {
     default: "Grav Clothing – Management System",

@@ -145,6 +145,36 @@ export default function ConversationPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Keep the latest message visible when keyboard opens / closes
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const onViewportChange = () => {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      });
+    };
+    window.visualViewport.addEventListener("resize", onViewportChange);
+    return () => window.visualViewport.removeEventListener("resize", onViewportChange);
+  }, []);
+
+  // When user taps the input, scroll to last message right away
+  useEffect(() => {
+    const onFocusIn = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) {
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }, 100);
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }, 350);
+      }
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+
   // ── Send message — writes directly to Firestore ──────────
   const handleSend = async (text, attachments, messageType) => {
     if (!otherEmpId || !employeeId) return;

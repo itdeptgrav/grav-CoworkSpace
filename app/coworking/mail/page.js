@@ -11,14 +11,17 @@ const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 async function tok() { return firebaseAuth.currentUser?.getIdToken(); }
 
 // ── Gmail (Google) API helpers ────────────────────────────────────────────────
-async function fetchMyGmail(email, max = 30) {
-    const res = await fetch(`${BASE}/api/google/gmail/my-inbox?email=${encodeURIComponent(email)}&max=${max}`);
+// Per-employee Gmail — uses the employee's own connected Google account
+async function fetchEmployeeGmail(employeeId, max = 30) {
+    if (!employeeId) throw new Error("Employee ID required");
+    const res = await fetch(`${BASE}/api/google/employee-gmail/inbox?employeeId=${encodeURIComponent(employeeId)}&max=${max}`);
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || "Gmail fetch failed"); }
-    return res.json();
+    return res.json(); // { connected, messages, connectedEmail }
 }
-async function fetchGmailMessage(id) {
-    const res = await fetch(`${BASE}/api/google/gmail/message/${id}`);
-    if (!res.ok) throw new Error("Message fetch failed");
+async function fetchEmployeeGmailStatus(employeeId) {
+    if (!employeeId) return null;
+    const res = await fetch(`${BASE}/api/google/employee-gmail/status?employeeId=${encodeURIComponent(employeeId)}`);
+    if (!res.ok) return null;
     return res.json();
 }
 
@@ -755,11 +758,18 @@ function GmailView({ userEmail, isMobile }) {
     const [mobilePanel, setGmailMobilePanel] = useState("list");
 
     useEffect(() => {
-        if (!userEmail) return;
+        if (!userEmail) return; // userEmail is actually employeeId here
         setLoading(true);
         setError(null);
-        fetchMyGmail('itdeptgrav@gmail.com', 40)
-            .then(res => { setEmails(res.data || []); setLoading(false); })
+        fetchEmployeeGmail(userEmail, 40)
+            .then(res => {
+                if (!res.connected) {
+                    setError("NOT_CONNECTED");
+                } else {
+                    setEmails(res.messages || []);
+                }
+                setLoading(false);
+            })
             .catch(err => { setError(err.message); setLoading(false); });
     }, [userEmail]);
 
@@ -806,7 +816,7 @@ function GmailView({ userEmail, isMobile }) {
                             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search Gmail…" className="cw-input" />
                         </div>
                         <div style={{ fontSize: 10.5, color: "var(--cw-text-3)", marginTop: 6, fontWeight: 500 }}>
-                            Showing mail for: <span style={{ color: "var(--cw-accent)" }}>{userEmail}</span>
+                            {emails.length > 0 ? <>Your Gmail inbox</> : <>Connect Gmail in Settings to see your inbox</>}
                         </div>
                     </div>
                     {/* Rows */}
@@ -818,16 +828,30 @@ function GmailView({ userEmail, isMobile }) {
                             </div>
                         ) : error ? (
                             <div style={{ padding: "40px 20px", textAlign: "center" }}>
-                                <div style={{ fontSize: 13, color: "var(--cw-danger)", fontWeight: 500, marginBottom: 8 }}>Gmail connection error</div>
-                                <div style={{ fontSize: 11.5, color: "var(--cw-text-3)", lineHeight: 1.5, maxWidth: 260, margin: "0 auto" }}>
-                                    {error.includes("refresh_token") || error.includes("credentials")
-                                        ? "Google OAuth not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN to your backend .env"
-                                        : error}
-                                </div>
-                                <div style={{ fontSize: 10.5, color: "var(--cw-text-3)", marginTop: 12, padding: "8px 12px", background: "var(--cw-panel-1)", borderRadius: 6, border: "1px solid var(--cw-border)", textAlign: "left" }}>
-                                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Required .env keys:</div>
-                                    <code style={{ fontSize: 10 }}>GOOGLE_CLIENT_ID<br />GOOGLE_CLIENT_SECRET<br />GOOGLE_REFRESH_TOKEN<br />GOOGLE_REDIRECT_URI</code>
-                                </div>
+                                {error === "NOT_CONNECTED" ? (
+                                    <>
+                                        <div className="cw-empty-icon" style={{ margin: "0 auto 14px", background: "rgba(234,67,53,0.08)", border: "1px solid rgba(234,67,53,0.15)", color: "#ea4335" }}>
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                                                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                                                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                                                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                                            </svg>
+                                        </div>
+                                        <div style={{ fontSize: 13.5, color: "var(--cw-text)", fontWeight: 600, marginBottom: 6 }}>Gmail not connected</div>
+                                        <div style={{ fontSize: 12, color: "var(--cw-text-3)", lineHeight: 1.6, maxWidth: 240, margin: "0 auto 16px" }}>
+                                            Connect your Gmail account in Settings to view your inbox here.
+                                        </div>
+                                        <a href="/coworking/settings" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px", background: "#ea4335", color: "#fff", borderRadius: 8, textDecoration: "none", fontSize: 12.5, fontWeight: 600 }}>
+                                            Go to Settings → Connect Gmail
+                                        </a>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div style={{ fontSize: 13, color: "var(--cw-danger)", fontWeight: 500, marginBottom: 8 }}>Gmail error</div>
+                                        <div style={{ fontSize: 11.5, color: "var(--cw-text-3)", lineHeight: 1.5, maxWidth: 260, margin: "0 auto" }}>{error}</div>
+                                    </>
+                                )}
                             </div>
                         ) : filtered.length === 0 ? (
                             <div style={{ padding: "60px 24px", textAlign: "center" }}>
@@ -1092,8 +1116,7 @@ export default function MailPage() {
     const [mobilePanel, setMobilePanel] = useState("list");
     const [theme, setTheme] = useState("light");
     const [isMobile, setIsMobile] = useState(false);
-    const [myEmail, setMyEmail] = useState("");
-    const [showGmail, setShowGmail] = useState(false);  // true = show Gmail view
+    const [myEmail, setMyEmail] = useState("");  // true = show Gmail view
     const [gmailOpen, setGmailOpen] = useState(true);   // sidebar section expanded
 
     useEffect(() => {
@@ -1236,7 +1259,7 @@ export default function MailPage() {
                             const active = folder === f.id;
                             const count = ucounts[f.id] || 0;
                             return (
-                                <button key={f.id} onClick={() => { setFolder(f.id); setSelected(null); setMobilePanel("list"); setShowGmail(false); }}
+                                <button key={f.id} onClick={() => { setFolder(f.id); setSelected(null); setMobilePanel("list"); }}
                                     className={`cw-folder ${active ? "active" : ""}`}
                                     style={{ justifyContent: isMobile ? "center" : "flex-start", padding: isMobile ? "8px" : "6px 10px" }}
                                     title={f.label}>
@@ -1248,39 +1271,6 @@ export default function MailPage() {
                             );
                         })}
                     </div>
-
-                    {/* ── My Gmail section ── */}
-                    {!isMobile && (
-                        <>
-                            <div style={{ height: 1, background: "var(--cw-border)", margin: "10px 0" }} />
-                            <button
-                                onClick={() => setGmailOpen(o => !o)}
-                                className="cw-section-header"
-                                style={{ marginBottom: 2 }}>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform .15s", transform: gmailOpen ? "rotate(90deg)" : "rotate(0deg)" }}>
-                                    <path d="m9 18 6-6-6-6" />
-                                </svg>
-                                <span>My Gmail</span>
-                            </button>
-                            {gmailOpen && (
-                                <button
-                                    onClick={() => { setShowGmail(true); setSelected(null); setMobilePanel("list"); }}
-                                    className={`cw-folder ${showGmail ? "active" : ""}`}
-                                    style={{ justifyContent: "flex-start", padding: "6px 10px" }}>
-                                    <span className="cw-folder-icon" style={{ color: showGmail ? "#ea4335" : undefined }}>
-                                        {/* Gmail G icon */}
-                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style={{ display: "block" }}>
-                                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                                        </svg>
-                                    </span>
-                                    <span>My Gmail</span>
-                                </button>
-                            )}
-                        </>
-                    )}
 
                     {/* Footer */}
                     <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--cw-border)", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1307,11 +1297,8 @@ export default function MailPage() {
                     </div>
                 </aside>
 
-                {/* ── Gmail View (replaces list+thread when active) ── */}
-                {showGmail && <GmailView userEmail={myEmail} isMobile={isMobile} />}
-
                 {/* ── CoWork Mail list ── */}
-                {!showGmail && (!isMobile || mobilePanel === "list") && (
+                {(!isMobile || mobilePanel === "list") && (
                     <section style={{ width: isMobile ? "100%" : 340, display: "flex", flexDirection: "column", flexShrink: 0, background: "var(--cw-panel-2)", borderRight: "1px solid var(--cw-border)" }}>
 
                         {/* Header */}
@@ -1354,8 +1341,8 @@ export default function MailPage() {
                     </section>
                 )}
 
-                {/* ── CoWork Thread / empty ── */}
-                {!showGmail && (!isMobile || mobilePanel === "thread") && (
+                {/* ── Thread / empty ── */}
+                {(!isMobile || mobilePanel === "thread") && (
                     <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--cw-panel-3)" }}>
                         {selected
                             ? <ThreadView threadId={selected} myId={myId} myName={myName} myPic={myPic} employees={employees} empMap={empMap}

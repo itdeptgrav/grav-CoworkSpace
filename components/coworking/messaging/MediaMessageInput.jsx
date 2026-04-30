@@ -348,7 +348,7 @@ export default function MediaMessageInput({
     };
 
     return (
-        <div style={{ position: "relative", background: "#202C33", borderTop: "1px solid rgba(255,255,255,0.05)", zIndex: 20 }}>
+        <div style={{ position: "relative", background: "#fff", borderTop: "1px solid #EEF2F8", zIndex: 20 }}>
             {error && <div style={{ padding: "6px 16px", background: "#B03A2E", color: "#fff", fontSize: 12, fontWeight: 600 }}>{error}</div>}
 
             {attachments.length > 0 && (
@@ -507,11 +507,11 @@ export default function MediaMessageInput({
                         <input ref={imageRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImages} />
                         <input ref={pdfRef} type="file" accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" style={{ display: "none" }} onChange={handlePDF} />
 
-                        <button onClick={() => { setShowAttMenu(p => !p); setShowEmoji(false); }} disabled={disabled || uploading} style={iconBtn("#8696A0")}>
+                        <button onClick={() => { setShowAttMenu(p => !p); setShowEmoji(false); }} disabled={disabled || uploading} style={iconBtn("#64748B")}>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                         </button>
 
-                        <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#8696A0"), color: showEmoji ? "#00A884" : "#8696A0" }}>
+                        <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#64748B"), color: showEmoji ? "#1a73e8" : "#64748B" }}>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" /><line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" /></svg>
                         </button>
 
@@ -529,16 +529,16 @@ export default function MediaMessageInput({
                             placeholder={uploading ? "Uploading…" : placeholder}
                             rows={1}
                             disabled={disabled || uploading}
-                            style={{ flex: 1, background: "#2A3942", border: "none", outline: "none", color: "#267dff", fontSize: 13, padding: "8px 14px", borderRadius: 24, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#00A884" }}
+                            style={{ flex: 1, background: "#F1F5F9", border: "1px solid #E2E8F0", outline: "none", color: "#0F172A", fontSize: 14, padding: "9px 14px", borderRadius: 22, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#1a73e8" }}
                             onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
                         />
 
                         {canSend ? (
-                            <button onClick={handleSend} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
+                            <button onClick={handleSend} style={{ ...iconBtn("#fff"), background: "linear-gradient(135deg, #1a73e8, #4F46E5)", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0, boxShadow: "0 2px 8px rgba(26,115,232,0.3)" }}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
                             </button>
                         ) : (
-                            <button onClick={startRecording} disabled={disabled || uploading} style={{ ...iconBtn("#00A884"), background: "#00A884", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0 }}>
+                            <button onClick={startRecording} disabled={disabled || uploading} style={{ ...iconBtn("#fff"), background: "linear-gradient(135deg, #1a73e8, #4F46E5)", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0, boxShadow: "0 2px 8px rgba(26,115,232,0.3)" }}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                                     <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0014 0" /><path d="M12 19v3" />
                                 </svg>

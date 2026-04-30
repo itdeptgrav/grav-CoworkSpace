@@ -2209,6 +2209,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   const isCEO = role === "ceo";
   const isTL = role === "tl";
+  const [mailExpanded, setMailExpanded] = React.useState(false);
 
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard", path: "/coworking" },
@@ -2893,55 +2894,97 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
           <nav className="cw-sidebar-nav">
             <div className="cw-sidebar-section">Menu</div>
-            {NAV.map(item => (
-              <div
-                key={item.id}
-                className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
-                onClick={() => handleNav(item.path)}
-              >
-                <NavIcon name={item.icon} size={18} />
-                <span>{item.label}</span>
-                {(() => {
-                  // Badge counts:
-                  // messages → real-time DM readBy count
-                  // groups   → real-time group message readBy count
-                  // tasks    → notification-based (task events)
-                  // meetings → notification-based (meet events)
-                  // All badges use real-time readBy-based counts so they decrement
-                  // as messages are actually read — 3 → 2 → 1 → 0
-                  const cnt =
-                    item.id === "messages" ? dmUnreadCount        // per-message readBy live
-                      : item.id === "groups" ? groupUnreadCount     // per-message readBy live
-                        : item.id === "tasks" ? taskChatUnreadCount  // per-message readBy live
-                          : item.id === "meetings" ? meetingUnreadCount   // notification-based
-                            : 0;
+            {NAV.map(item => {
+              if (item.id === "mail") return (
+                <div key="mail-group">
+                  <div
+                    className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                    onClick={() => { handleNav(item.path); setMailExpanded(e => !e); }}
+                    style={{ userSelect: "none" }}
+                  >
+                    <NavIcon name={item.icon} size={18} />
+                    <span style={{ flex: 1 }}>Mail</span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transition: "transform 0.2s", transform: mailExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.5, flexShrink: 0 }}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </div>
+                  {mailExpanded && (
+                    <div
+                      onClick={() => { router.push("/coworking/mail/gmail"); if (isMobile) setMobileOpen(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "7px 14px 7px 44px", cursor: "pointer",
+                        borderRadius: 8, margin: "1px 8px",
+                        fontSize: 13, fontWeight: 500,
+                        color: "var(--cw-text-2)",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "var(--cw-hover)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                      </svg>
+                      <span>My Gmail</span>
+                    </div>
+                  )}
+                </div>
+              );
+              return (
 
-                  // NEW badge on Settings — only when no profile pic uploaded yet
-                  if (item.id === "settings" && !ownProfilePicUrl) return (
-                    <span style={{
-                      fontSize: 8, fontWeight: 900, color: "#FACC15",
-                      background: "#DC2626",
-                      padding: "2px 6px", borderRadius: 99,
-                      letterSpacing: "0.06em",
-                      boxShadow: "0 0 0 1.5px #fff, 0 2px 6px rgba(220,38,38,0.5)",
-                      animation: "newBadgePulse 1.8s ease-in-out infinite",
-                      textTransform: "uppercase",
-                    }}>NEW!</span>
-                  );
+                <div
+                  key={item.id}
+                  className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                  onClick={() => handleNav(item.path)}
+                >
+                  <NavIcon name={item.icon} size={18} />
+                  <span>{item.label}</span>
+                  {(() => {
+                    // Badge counts:
+                    // messages → real-time DM readBy count
+                    // groups   → real-time group message readBy count
+                    // tasks    → notification-based (task events)
+                    // meetings → notification-based (meet events)
+                    // All badges use real-time readBy-based counts so they decrement
+                    // as messages are actually read — 3 → 2 → 1 → 0
+                    const cnt =
+                      item.id === "messages" ? dmUnreadCount        // per-message readBy live
+                        : item.id === "groups" ? groupUnreadCount     // per-message readBy live
+                          : item.id === "tasks" ? taskChatUnreadCount  // per-message readBy live
+                            : item.id === "meetings" ? meetingUnreadCount   // notification-based
+                              : 0;
 
-                  if (cnt <= 0) return null;
-                  const bg =
-                    item.id === "tasks" ? "#8B5CF6"
-                      : item.id === "groups" ? "#0891B2"
-                        : "#EF4444";
-                  return (
-                    <span className="cw-nav-badge" style={{ background: bg }}>
-                      {cnt > 99 ? "99+" : cnt > 9 ? "9+" : cnt}
-                    </span>
-                  );
-                })()}
-              </div>
-            ))}
+                    // NEW badge on Settings — only when no profile pic uploaded yet
+                    if (item.id === "settings" && !ownProfilePicUrl) return (
+                      <span style={{
+                        fontSize: 8, fontWeight: 900, color: "#FACC15",
+                        background: "#DC2626",
+                        padding: "2px 6px", borderRadius: 99,
+                        letterSpacing: "0.06em",
+                        boxShadow: "0 0 0 1.5px #fff, 0 2px 6px rgba(220,38,38,0.5)",
+                        animation: "newBadgePulse 1.8s ease-in-out infinite",
+                        textTransform: "uppercase",
+                      }}>NEW!</span>
+                    );
+
+                    if (cnt <= 0) return null;
+                    const bg =
+                      item.id === "tasks" ? "#8B5CF6"
+                        : item.id === "groups" ? "#0891B2"
+                          : "#EF4444";
+                    return (
+                      <span className="cw-nav-badge" style={{ background: bg }}>
+                        {cnt > 99 ? "99+" : cnt > 9 ? "9+" : cnt}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
 
             {/* ── Install App button ── */}
             {!isInstalled && (

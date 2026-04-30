@@ -128,7 +128,6 @@ function Lightbox({ url, onClose, onDl }) {
   );
 }
 
-
 // ─── PDF / Document attachment card ──────────────────────────────────────────
 function DocCard({ att, isMe, onDl }) {
   const isPdf = att.type === "pdf";
@@ -213,7 +212,6 @@ function ThreadRequestsBar({ requests, employeeId, employeeName }) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
-
 
   const pending = requests.filter(r => r.status === "pending").length;
 
@@ -554,8 +552,6 @@ export default function DirectMessagesPage() {
     return () => unsub();
   }, [user, employeeId]);
 
-
-
   // ── Real-time messages ────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedPerson || !employeeId) return;
@@ -597,51 +593,39 @@ export default function DirectMessagesPage() {
     return () => { unsub(); activeConv.current = null; };
   }, [selectedPerson, employeeId]);
 
+  // Scroll to last message when: messages change, person selected, or keyboard opens
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, selectedPerson]);
 
-  // Lock the page when keyboard opens — prevents header from being pushed up.
-  // Uses Visual Viewport API: when keyboard appears, viewport.height shrinks.
-  // We force every scrollable ancestor back to top so the chat header stays visible.
+  // Keep the latest message visible when keyboard opens / closes
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
-
-    const lockToTop = () => {
-      // Reset every scroll offset on the way up to body
-      let el = document.activeElement;
-      while (el && el !== document.body) {
-        if (el.scrollTop > 0) el.scrollTop = 0;
-        el = el.parentElement;
-      }
-      // Also reset window scroll
-      window.scrollTo(0, 0);
-    };
-
-    const onResize = () => {
-      // Run after the browser settles the keyboard animation
+    const onViewportChange = () => {
+      // Wait for layout to settle, then scroll to last message
       requestAnimationFrame(() => {
-        requestAnimationFrame(lockToTop);
+        endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
       });
     };
+    window.visualViewport.addEventListener("resize", onViewportChange);
+    return () => window.visualViewport.removeEventListener("resize", onViewportChange);
+  }, []);
 
-    // Fires whenever keyboard opens/closes on Android & iOS
-    window.visualViewport.addEventListener("resize", onResize);
-
-    // Also lock when an input gets focused (catches the moment keyboard begins to open)
+  // When user taps the input, scroll to last message right away
+  useEffect(() => {
     const onFocusIn = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) {
-        // Wait for keyboard animation to start, then lock
-        setTimeout(lockToTop, 50);
-        setTimeout(lockToTop, 300);
+      const t = e.target;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) {
+        // Slight delay so the keyboard has time to start opening
+        setTimeout(() => {
+          endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }, 100);
+        setTimeout(() => {
+          endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }, 350);
       }
     };
     document.addEventListener("focusin", onFocusIn);
-
-    return () => {
-      window.visualViewport.removeEventListener("resize", onResize);
-      document.removeEventListener("focusin", onFocusIn);
-    };
+    return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   // ── Send ──────────────────────────────────────────────────────────────────
   const handleSend = async (text, attachments, messageType) => {
@@ -1330,7 +1314,7 @@ const CSS = `
   border: 1.5px solid #E0E7FF;
 }
 
-/* Chat header — stays at top even when keyboard opens */
+/* Chat header */
 .dm-chat-head {
   padding: 12px 18px; background: #fff;
   border-bottom: 1.5px solid #EEF2F8;
@@ -1338,8 +1322,6 @@ const CSS = `
   flex-shrink: 0; min-height: 66px;
   box-shadow: 0 1px 3px rgba(15,23,42,0.04);
 }
-
-
 .dm-chat-name { font-size: 15px; font-weight: 700; color: #0F172A; letter-spacing: -0.02em; }
 .dm-chat-meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
 .dm-pill {
@@ -1420,9 +1402,9 @@ const CSS = `
 /* MOBILE — phones up to 768px */
 @media (max-width: 768px) {
   .dm-root {
-    height: 100%;
-    min-height: 0;
-    max-height: 100%;
+    height: calc(100dvh - 56px);
+    min-height: calc(100dvh - 56px);
+    max-height: calc(100dvh - 56px);
     border-radius: 0; border: none; box-shadow: none;
   }
 
