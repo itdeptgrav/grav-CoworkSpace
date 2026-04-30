@@ -10,6 +10,18 @@ import { listEmployees, getMe } from "../../../lib/coworkApi";
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 async function tok() { return firebaseAuth.currentUser?.getIdToken(); }
 
+// ── Gmail (Google) API helpers ────────────────────────────────────────────────
+async function fetchMyGmail(email, max = 30) {
+    const res = await fetch(`${BASE}/api/google/gmail/my-inbox?email=${encodeURIComponent(email)}&max=${max}`);
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || "Gmail fetch failed"); }
+    return res.json();
+}
+async function fetchGmailMessage(id) {
+    const res = await fetch(`${BASE}/api/google/gmail/message/${id}`);
+    if (!res.ok) throw new Error("Message fetch failed");
+    return res.json();
+}
+
 function fmt(ts) {
     if (!ts) return "";
     const d = ts?.toDate ? ts.toDate() : new Date(ts);
@@ -380,6 +392,39 @@ const GLOBAL_CSS = `
   color: var(--cw-text-3); font-size: 13px;
 }
 
+/* Gmail section in sidebar */
+.cw-section-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px 3px; cursor: pointer; user-select: none;
+  border-radius: 6px; transition: background .12s;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--cw-text-3);
+  width: 100%; border: none; background: transparent; font-family: inherit;
+}
+.cw-section-header:hover { background: var(--cw-hover); color: var(--cw-text-2); }
+.cw-gmail-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  background: #ea4335; color: #fff;
+  font-size: 9px; font-weight: 700; padding: 0 4px;
+  font-variant-numeric: tabular-nums; margin-left: auto;
+}
+.cw-gmail-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 14px 11px 18px; cursor: pointer;
+  border-bottom: 1px solid var(--cw-border);
+  transition: background .12s ease; position: relative;
+}
+.cw-gmail-row:hover { background: var(--cw-hover); }
+.cw-gmail-row.active { background: var(--cw-active-bg); }
+.cw-gmail-row.unread .cw-row-name { font-weight: 600; color: var(--cw-text); }
+.cw-gmail-row.unread .cw-row-subj { font-weight: 500; color: var(--cw-text); }
+.cw-gmail-unread-dot {
+  position: absolute; left: 8px; top: 18px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #ea4335;
+}
+
 @media (max-width: 640px) {
   .cw-modal { max-height: 95vh; border-radius: 10px; }
   .cw-modal-overlay { padding: 8px; }
@@ -641,6 +686,226 @@ function Compose({ employees, myId, myName, myPic, replyTo, onClose }) {
     );
 }
 
+/* ─── Gmail Components ─────────────────────────────────── */
+
+function GmailMessagePanel({ message, onBack }) {
+    if (!message) return null;
+    const from = message.from || "";
+    const fromName = from.includes("<") ? from.split("<")[0].trim().replace(/"/g, "") : from;
+    const dateStr = message.dateMs ? new Date(message.dateMs).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : message.date || "";
+    return (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--cw-panel-3)" }}>
+            <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--cw-border)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0, background: "var(--cw-panel-2)", minHeight: 52 }}>
+                <button onClick={onBack} className="cw-icon-btn cw-icon-btn-lg" aria-label="Back">
+                    <Icon name="back" size={16} />
+                </button>
+                <h2 style={{ margin: 0, fontSize: "clamp(13px,1.5vw,15px)", fontWeight: 600, color: "var(--cw-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.015em" }}>{message.subject}</h2>
+                {message.isStarred && <span style={{ color: "#f59e0b" }}><Icon name="star" size={14} fill={true} strokeWidth={1.5} /></span>}
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
+                <div style={{ background: "var(--cw-panel-2)", border: "1px solid var(--cw-border)", borderRadius: 10, overflow: "hidden", boxShadow: "var(--cw-card-shadow)" }}>
+                    {/* Header */}
+                    <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--cw-border)" }}>
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#ea4335", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>
+                                {(fromName || "?")[0].toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--cw-text)", marginBottom: 2 }}>{fromName || from}</div>
+                                <div style={{ fontSize: 11.5, color: "var(--cw-text-3)" }}>
+                                    {from.includes("<") ? from.match(/<(.+)>/)?.[1] : from}
+                                </div>
+                            </div>
+                            <span style={{ fontSize: 11, color: "var(--cw-text-3)", flexShrink: 0, fontWeight: 500 }}>{dateStr}</span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--cw-text-3)", paddingLeft: 50 }}>
+                            {message.to && <div><b style={{ color: "var(--cw-text-2)" }}>To:</b> {message.to}</div>}
+                            {message.cc && <div><b style={{ color: "var(--cw-text-2)" }}>Cc:</b> {message.cc}</div>}
+                        </div>
+                    </div>
+                    {/* Body */}
+                    <div className="cw-mailbody" style={{ padding: "20px", fontSize: 13.5, lineHeight: 1.68, color: "var(--cw-text)" }}
+                        dangerouslySetInnerHTML={{ __html: message.body || `<p style="color:var(--cw-text-3)">${message.snippet || "(no content)"}</p>` }} />
+                    {/* Attachments */}
+                    {message.attachments?.length > 0 && (
+                        <div style={{ padding: "12px 20px", borderTop: "1px solid var(--cw-border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {message.attachments.map((a, i) => (
+                                <div key={i} className="cw-chip" style={{ cursor: "default" }}>
+                                    <Icon name="paperclip" size={11} strokeWidth={2} />
+                                    {a.filename}
+                                    <span style={{ color: "var(--cw-text-3)", fontSize: 10 }}>
+                                        {a.size ? ` (${Math.round(a.size / 1024)}KB)` : ""}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function GmailView({ userEmail, isMobile }) {
+    const [emails, setEmails] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [selected, setSelected] = useState(null);
+    const [search, setSearch] = useState("");
+    const [mobilePanel, setGmailMobilePanel] = useState("list");
+
+    useEffect(() => {
+        if (!userEmail) return;
+        setLoading(true);
+        setError(null);
+        fetchMyGmail(userEmail, 40)
+            .then(res => { setEmails(res.data || []); setLoading(false); })
+            .catch(err => { setError(err.message); setLoading(false); });
+    }, [userEmail]);
+
+    const unreadCount = emails.filter(e => e.isUnread).length;
+    const filtered = emails.filter(e => !search ||
+        [e.subject, e.from, e.snippet].join(" ").toLowerCase().includes(search.toLowerCase()));
+
+    const handleSelect = (email) => {
+        setSelected(email);
+        if (isMobile) setGmailMobilePanel("detail");
+        // Fetch full body if needed
+        if (!email.body || email.body.length < 50) {
+            fetchGmailMessage(email.id).then(res => {
+                const full = res.data;
+                setSelected(full);
+                setEmails(prev => prev.map(e => e.id === full.id ? { ...e, ...full } : e));
+            }).catch(() => { });
+        }
+    };
+
+    return (
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            {/* List panel */}
+            {(!isMobile || mobilePanel === "list") && (
+                <section style={{ width: isMobile ? "100%" : 340, display: "flex", flexDirection: "column", flexShrink: 0, background: "var(--cw-panel-2)", borderRight: "1px solid var(--cw-border)" }}>
+                    {/* Header */}
+                    <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--cw-border)" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ width: 22, height: 22, borderRadius: 5, background: "#ea4335", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <Icon name="mail" size={12} strokeWidth={2.2} style={{ color: "#fff" }} />
+                                </div>
+                                <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--cw-text)", letterSpacing: "-0.015em" }}>My Gmail</h2>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                {unreadCount > 0 && <span className="cw-gmail-badge">{unreadCount}</span>}
+                                {filtered.length > 0 && <span className="cw-count-pill cw-tnum" style={{ fontSize: 11 }}>{filtered.length}</span>}
+                            </div>
+                        </div>
+                        <div style={{ position: "relative" }}>
+                            <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--cw-text-3)", display: "flex", pointerEvents: "none" }}>
+                                <Icon name="search" size={13} strokeWidth={2} />
+                            </span>
+                            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search Gmail…" className="cw-input" />
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--cw-text-3)", marginTop: 6, fontWeight: 500 }}>
+                            Showing mail for: <span style={{ color: "var(--cw-accent)" }}>{userEmail}</span>
+                        </div>
+                    </div>
+                    {/* Rows */}
+                    <div style={{ flex: 1, overflowY: "auto" }}>
+                        {loading ? (
+                            <div style={{ padding: "48px 20px", textAlign: "center", color: "var(--cw-text-3)", fontSize: 12 }}>
+                                <div style={{ width: 18, height: 18, borderRadius: "50%", border: "1.5px solid var(--cw-border-2)", borderTopColor: "#ea4335", animation: "cw-spin 0.7s linear infinite", margin: "0 auto 10px" }} />
+                                Fetching Gmail…
+                            </div>
+                        ) : error ? (
+                            <div style={{ padding: "40px 20px", textAlign: "center" }}>
+                                <div style={{ fontSize: 13, color: "var(--cw-danger)", fontWeight: 500, marginBottom: 8 }}>Gmail connection error</div>
+                                <div style={{ fontSize: 11.5, color: "var(--cw-text-3)", lineHeight: 1.5, maxWidth: 260, margin: "0 auto" }}>
+                                    {error.includes("refresh_token") || error.includes("credentials")
+                                        ? "Google OAuth not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN to your backend .env"
+                                        : error}
+                                </div>
+                                <div style={{ fontSize: 10.5, color: "var(--cw-text-3)", marginTop: 12, padding: "8px 12px", background: "var(--cw-panel-1)", borderRadius: 6, border: "1px solid var(--cw-border)", textAlign: "left" }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Required .env keys:</div>
+                                    <code style={{ fontSize: 10 }}>GOOGLE_CLIENT_ID<br />GOOGLE_CLIENT_SECRET<br />GOOGLE_REFRESH_TOKEN<br />GOOGLE_REDIRECT_URI</code>
+                                </div>
+                            </div>
+                        ) : filtered.length === 0 ? (
+                            <div style={{ padding: "60px 24px", textAlign: "center" }}>
+                                <div className="cw-empty-icon" style={{ margin: "0 auto 12px", background: "rgba(234,67,53,0.08)", border: "1px solid rgba(234,67,53,0.15)", color: "#ea4335" }}>
+                                    <Icon name="inbox" size={18} />
+                                </div>
+                                <div style={{ fontSize: 13, color: "var(--cw-text-2)", fontWeight: 500, marginBottom: 2 }}>
+                                    {search ? "No results" : "No Gmail messages found"}
+                                </div>
+                                <div style={{ fontSize: 11.5, color: "var(--cw-text-3)" }}>
+                                    {search ? "Try different keywords" : `No emails found for ${userEmail}`}
+                                </div>
+                            </div>
+                        ) : (
+                            filtered.map(email => (
+                                <GmailRow key={email.id} email={email} active={selected?.id === email.id}
+                                    onSelect={() => handleSelect(email)} />
+                            ))
+                        )}
+                    </div>
+                </section>
+            )}
+            {/* Detail panel */}
+            {(!isMobile || mobilePanel === "detail") && (
+                selected
+                    ? <GmailMessagePanel message={selected} onBack={() => { setSelected(null); if (isMobile) setGmailMobilePanel("list"); }} />
+                    : <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 40, textAlign: "center", background: "var(--cw-panel-3)" }}>
+                        <div className="cw-empty-icon" style={{ background: "rgba(234,67,53,0.07)", border: "1px solid rgba(234,67,53,0.15)", color: "#ea4335" }}>
+                            <Icon name="envelope" size={22} strokeWidth={1.5} />
+                        </div>
+                        <div>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--cw-text)", marginBottom: 4, letterSpacing: "-0.015em" }}>No email selected</div>
+                            <div style={{ fontSize: 13, color: "var(--cw-text-3)", maxWidth: 280, lineHeight: 1.55 }}>Select a message from your Gmail inbox.</div>
+                        </div>
+                    </div>
+            )}
+        </div>
+    );
+}
+
+function GmailRow({ email, active, onSelect }) {
+    const [hov, setHov] = useState(false);
+    const from = email.from || "";
+    const fromName = from.includes("<") ? from.split("<")[0].trim().replace(/"/g, "") : from;
+    const dateStr = email.dateMs
+        ? (() => {
+            const d = new Date(email.dateMs);
+            const now = new Date();
+            return d.toDateString() === now.toDateString()
+                ? d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+        })()
+        : "";
+
+    return (
+        <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} onClick={onSelect}
+            className={`cw-gmail-row ${active ? "active" : ""} ${email.isUnread ? "unread" : ""}`}>
+            {email.isUnread && <div className="cw-gmail-unread-dot" />}
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#ea4335", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                {(fromName || "?")[0].toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span className="cw-row-name cw-truncate" style={{ fontSize: 13, fontWeight: email.isUnread ? 600 : 500, color: "var(--cw-text-2)" }}>
+                        {fromName || from || "(Unknown)"}
+                    </span>
+                    <span className="cw-tnum" style={{ fontSize: 11, color: "var(--cw-text-3)", flexShrink: 0, fontWeight: 500 }}>{dateStr}</span>
+                </div>
+                <div className="cw-row-subj cw-truncate" style={{ fontSize: 12.5, color: "var(--cw-text-2)", marginBottom: 1 }}>{email.subject || "(no subject)"}</div>
+                <div className="cw-truncate" style={{ fontSize: 11.5, color: "var(--cw-text-3)" }}>{email.snippet || ""}</div>
+            </div>
+            {email.isStarred && !hov && (
+                <div style={{ color: "#f59e0b", flexShrink: 0 }}><Icon name="star" size={12} fill={true} strokeWidth={1.5} /></div>
+            )}
+        </div>
+    );
+}
+
 /* ─── Mail row ─── */
 function MailRow({ mail, active, myId, myPic, folder, empMap, onSelect, onStar, onDelete }) {
     const [hov, setHov] = useState(false);
@@ -827,6 +1092,9 @@ export default function MailPage() {
     const [mobilePanel, setMobilePanel] = useState("list");
     const [theme, setTheme] = useState("light");
     const [isMobile, setIsMobile] = useState(false);
+    const [myEmail, setMyEmail] = useState("");
+    const [showGmail, setShowGmail] = useState(false);  // true = show Gmail view
+    const [gmailOpen, setGmailOpen] = useState(true);   // sidebar section expanded
 
     useEffect(() => {
         const unsub = firebaseAuth.onAuthStateChanged(async u => {
@@ -836,6 +1104,8 @@ export default function MailPage() {
                 setMyId(me.employeeId);
                 setMyName(me.name || "");
                 setMyPic(me.profilePicUrl || u.photoURL || null);
+                // Capture email for Gmail — use Firebase user email (same as registered email)
+                setMyEmail(u.email || "");
                 // list-members works for ALL roles (employee/TL/CEO)
                 const token = await tok();
                 const empRes = await fetch(`${BASE}/cowork/employee/list-members`, { headers: { Authorization: `Bearer ${token}` } });
@@ -966,7 +1236,7 @@ export default function MailPage() {
                             const active = folder === f.id;
                             const count = ucounts[f.id] || 0;
                             return (
-                                <button key={f.id} onClick={() => { setFolder(f.id); setSelected(null); setMobilePanel("list"); }}
+                                <button key={f.id} onClick={() => { setFolder(f.id); setSelected(null); setMobilePanel("list"); setShowGmail(false); }}
                                     className={`cw-folder ${active ? "active" : ""}`}
                                     style={{ justifyContent: isMobile ? "center" : "flex-start", padding: isMobile ? "8px" : "6px 10px" }}
                                     title={f.label}>
@@ -978,6 +1248,39 @@ export default function MailPage() {
                             );
                         })}
                     </div>
+
+                    {/* ── My Gmail section ── */}
+                    {!isMobile && (
+                        <>
+                            <div style={{ height: 1, background: "var(--cw-border)", margin: "10px 0" }} />
+                            <button
+                                onClick={() => setGmailOpen(o => !o)}
+                                className="cw-section-header"
+                                style={{ marginBottom: 2 }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform .15s", transform: gmailOpen ? "rotate(90deg)" : "rotate(0deg)" }}>
+                                    <path d="m9 18 6-6-6-6" />
+                                </svg>
+                                <span>My Gmail</span>
+                            </button>
+                            {gmailOpen && (
+                                <button
+                                    onClick={() => { setShowGmail(true); setSelected(null); setMobilePanel("list"); }}
+                                    className={`cw-folder ${showGmail ? "active" : ""}`}
+                                    style={{ justifyContent: "flex-start", padding: "6px 10px" }}>
+                                    <span className="cw-folder-icon" style={{ color: showGmail ? "#ea4335" : undefined }}>
+                                        {/* Gmail G icon */}
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style={{ display: "block" }}>
+                                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                                        </svg>
+                                    </span>
+                                    <span>My Gmail</span>
+                                </button>
+                            )}
+                        </>
+                    )}
 
                     {/* Footer */}
                     <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--cw-border)", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1004,8 +1307,11 @@ export default function MailPage() {
                     </div>
                 </aside>
 
-                {/* ── Mail list ── */}
-                {(!isMobile || mobilePanel === "list") && (
+                {/* ── Gmail View (replaces list+thread when active) ── */}
+                {showGmail && <GmailView userEmail={myEmail} isMobile={isMobile} />}
+
+                {/* ── CoWork Mail list ── */}
+                {!showGmail && (!isMobile || mobilePanel === "list") && (
                     <section style={{ width: isMobile ? "100%" : 340, display: "flex", flexDirection: "column", flexShrink: 0, background: "var(--cw-panel-2)", borderRight: "1px solid var(--cw-border)" }}>
 
                         {/* Header */}
@@ -1048,8 +1354,8 @@ export default function MailPage() {
                     </section>
                 )}
 
-                {/* ── Thread / empty ── */}
-                {(!isMobile || mobilePanel === "thread") && (
+                {/* ── CoWork Thread / empty ── */}
+                {!showGmail && (!isMobile || mobilePanel === "thread") && (
                     <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--cw-panel-3)" }}>
                         {selected
                             ? <ThreadView threadId={selected} myId={myId} myName={myName} myPic={myPic} employees={employees} empMap={empMap}
