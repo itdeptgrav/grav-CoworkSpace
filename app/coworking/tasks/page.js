@@ -6131,22 +6131,10 @@ em-emoji-picker,
                 ];
                 return (
                   <div className="gv-img2-pillrow">
-                    {pills.map(p => {
-                      const active = viewFilter === p.key;
-                      return (
-                        <button type="button" key={p.key || "all"}
-                          className={`gv-img2-pill ${active ? "active" : ""}`}
-                          onClick={() => setViewFilter(p.key)}
-                          style={!active && p.color ? { color: p.color } : undefined}>
-                          {p.label}
-                          {p.count != null && p.count > 0 && <span className="gv-img2-pill-count">{p.count}</span>}
-                        </button>
-                      );
-                    })}
                     <div style={{ flex: 1 }} />
-                    <button type="button" className="gv-img2-pill gv-img2-filters-btn" onClick={() => setFilterOpen(o => !o)}>
+                    <button type="button" className={`gv-img2-pill gv-img2-filters-btn ${filterOpen ? "active" : ""}`} onClick={() => setFilterOpen(o => !o)}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-                      Filters
+                      Filters {filterOpen ? "▴" : "▾"}
                     </button>
                   </div>
                 );
@@ -6199,6 +6187,40 @@ em-emoji-picker,
                 };
                 return (
                   <div className="gv-legacy-filterbar" style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, display: filterOpen ? "block" : "none" }}>
+                    {/* Quick filter pills row — All / Due Today / Due This Week / Overdue / Completed */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px", flexWrap: "wrap", borderBottom: "1px dashed var(--border)" }}>
+                      {(() => {
+                        const baseTasks2 = allTasks.filter(t => !t.parentTaskId);
+                        const now2 = Date.now();
+                        const todayS2 = new Date(); todayS2.setHours(0, 0, 0, 0);
+                        const todayE2 = new Date(); todayE2.setHours(23, 59, 59, 999);
+                        const weekE2 = new Date(); weekE2.setDate(weekE2.getDate() + 7); weekE2.setHours(23, 59, 59, 999);
+                        const c1 = baseTasks2.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS2.getTime() && m <= todayE2.getTime(); }).length;
+                        const c2 = baseTasks2.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS2.getTime() && m <= weekE2.getTime(); }).length;
+                        const c3 = baseTasks2.filter(t => { if (t.status === "done") return false; const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m < now2; }).length;
+                        const c4 = baseTasks2.filter(t => t.status === "done").length;
+                        const pills2 = [
+                          { key: "", label: "All", count: null, color: null },
+                          { key: "today", label: "Due Today", count: c1, color: "#5B5EF4" },
+                          { key: "week", label: "Due This Week", count: c2, color: "#5B5EF4" },
+                          { key: "overdue", label: "Overdue", count: c3, color: "#EF4444" },
+                          { key: "completed", label: "Completed", count: c4, color: "#16A34A" },
+                        ];
+                        return pills2.map(p => {
+                          const active = viewFilter === p.key;
+                          return (
+                            <button type="button" key={p.key || "all"}
+                              className={`gv-img2-pill ${active ? "active" : ""}`}
+                              onClick={() => setViewFilter(p.key)}
+                              style={!active && p.color ? { color: p.color } : undefined}>
+                              {p.label}
+                              {p.count != null && p.count > 0 && <span className="gv-img2-pill-count">{p.count}</span>}
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+
                     {/* Single filter bar: Dept pills | Person | Deadline | Export */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", flexWrap: "wrap" }}>
 

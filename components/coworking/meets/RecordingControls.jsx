@@ -66,6 +66,19 @@ export default function RecordingControls({
 
     return (
         <>
+            <style>{`
+                /* Default: count-only span hidden, label visible */
+                .tb-rec-count-only { display: none; }
+                /* Tablet & narrow: hide label text on rec buttons (icon-only), keep count-only as compact label */
+                @media (max-width: 900px) {
+                    .tb-rec-label { display: none !important; }
+                    .tb-rec-status .tb-rec-count-only { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; padding: 0 4px; border-radius: 99px; background: rgba(96,165,250,0.18); color: #60A5FA; font-size: 10px; font-weight: 800; line-height: 1.4; }
+                    .tb-rec-btn { padding: 6px 9px !important; gap: 4px !important; }
+                }
+                @media (max-width: 420px) {
+                    .tb-rec-btn { padding: 6px 7px !important; gap: 3px !important; }
+                }
+            `}</style>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
 
                 {isRecording && (
@@ -76,14 +89,14 @@ export default function RecordingControls({
                 )}
 
                 {!isRecording && !isUploading && !uploadDone ? (
-                    <button onClick={onStart} style={S.startBtn} title="Start audio recording for all participants">
+                    <button onClick={onStart} className="tb-rec-btn tb-rec-start" style={S.startBtn} title="Start audio recording for all participants">
                         <MicIcon />
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>Record</span>
+                        <span className="tb-rec-label" style={{ fontSize: 11, fontWeight: 600 }}>Record</span>
                     </button>
                 ) : isRecording ? (
-                    <button onClick={handleStopClick} style={S.stopBtn} title="Stop recording">
+                    <button onClick={handleStopClick} className="tb-rec-btn tb-rec-stop" style={S.stopBtn} title="Stop recording">
                         <StopIcon />
-                        <span style={{ fontSize: 11, fontWeight: 600 }}>Stop Rec</span>
+                        <span className="tb-rec-label" style={{ fontSize: 11, fontWeight: 600 }}>Stop Rec</span>
                     </button>
                 ) : null}
 
@@ -94,12 +107,16 @@ export default function RecordingControls({
                     <div style={{ position: "relative" }}>
                         <button
                             onClick={() => setShowStatus(v => !v)}
+                            className="tb-rec-btn tb-rec-status"
                             style={S.statusTriggerBtn}
                             title="Per-participant recording status"
                         >
                             <ListIcon />
-                            <span style={{ fontSize: 11, fontWeight: 600 }}>
+                            <span className="tb-rec-label" style={{ fontSize: 11, fontWeight: 600 }}>
                                 Rec Status · {statusEntries.length}
+                            </span>
+                            <span className="tb-rec-count-only" style={{ fontSize: 11, fontWeight: 700 }}>
+                                {statusEntries.length}
                             </span>
                         </button>
                         {showStatus && (

@@ -617,6 +617,7 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
     const [showPeople, setShowPeople] = useState(false);
     const [showShare, setShowShare] = useState(false);
     const [showAudioMonitor, setShowAudioMonitor] = useState(false);
+    const [showMore, setShowMore] = useState(false);
     const [copied, setCopied] = useState(false);
     const [elapsed, setElapsed] = useState(0); // seconds since meeting started
     const participants = useParticipants();
@@ -672,9 +673,10 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
             <div className="tb-left">
                 {onMinimize && (
                     <button onClick={handleBack} title="Back to dashboard — meeting continues in mini view"
+                        className="tb-back-btn"
                         style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.08)", color: "#E8EAED", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: 6, flexShrink: 0 }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-                        Back
+                        <span className="tb-back-label">Back</span>
                     </button>
                 )}
                 <div style={S.livePill}><span style={S.liveDot} />LIVE</div>
@@ -721,9 +723,9 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
                     )}
                 </div>
 
-                {/* Audio Monitor — Host only */}
+                {/* Audio Monitor — Host only — desktop/tablet only (mobile uses More menu) */}
                 {isHost && (
-                    <div style={{ position: "relative" }}>
+                    <div className="tb-btn-extra" style={{ position: "relative" }}>
                         <button className={`tb-btn${showAudioMonitor ? " tb-btn-active" : ""}`}
                             onClick={() => { setShowAudioMonitor(p => !p); setShowPeople(false); setShowCode(false); setShowShare(false); }}
                             title="Audio Monitor — see who has audio issues">
@@ -733,125 +735,131 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
                             </svg>
                             <span className="tb-btn-label">Audio</span>
                         </button>
-                        {showAudioMonitor && (() => {
-                            // Build audio status for every participant including local
-                            const allP = [...participants];
-                            const audioStatus = allP.map(p => {
-                                const pubs = [...p.audioTrackPublications.values()];
-                                const hasTrack = pubs.length > 0;
-                                const track = pubs[0];
-                                const isPublished = hasTrack && !!track.track;
-                                const isMuted = hasTrack ? (track.isMuted || !track.isEnabled) : true;
-                                const micEnabled = p.isMicrophoneEnabled;
-                                // Diagnosis
-                                let status, statusColor, statusBg, reason;
-                                if (!hasTrack || !isPublished) {
-                                    status = "No Track"; statusColor = "#EF4444"; statusBg = "#FEF2F2";
-                                    reason = "Audio track not published — likely mic permission denied or device error";
-                                } else if (!micEnabled || isMuted) {
-                                    status = "Muted"; statusColor = "#F59E0B"; statusBg = "#FFFBEB";
-                                    reason = "Track published but microphone is muted";
-                                } else {
-                                    status = "✓ OK"; statusColor = "#10B981"; statusBg = "#ECFDF5";
-                                    reason = "Audio publishing normally";
-                                }
-                                return { p, name: p.name || p.identity || "?", isMe: p.isLocal, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason };
-                            });
-                            const issueCount = audioStatus.filter(a => a.status !== "✓ OK").length;
-                            return (
-                                <div style={{ ...S.dropdown, width: 340, maxHeight: 420, overflowY: "auto" }} onClick={e => e.stopPropagation()}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: "#E8EAED", flex: 1 }}>Audio Monitor</div>
-                                        {issueCount > 0
-                                            ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#FEF2F2", color: "#EF4444" }}>⚠ {issueCount} issue{issueCount > 1 ? "s" : ""}</span>
-                                            : <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#ECFDF5", color: "#10B981" }}>✓ All clear</span>
-                                        }
-                                    </div>
-                                    {/* Column headers */}
-                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, padding: "4px 6px", marginBottom: 4 }}>
-                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em" }}>Participant</span>
-                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Track</span>
-                                        <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Status</span>
-                                    </div>
-                                    {audioStatus.map(({ p, name, isMe, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason }, i) => (
-                                        <div key={p.identity || i} style={{ marginBottom: 6, background: "#1E1E1E", borderRadius: 9, padding: "8px 10px", border: `1px solid ${status !== "✓ OK" ? "#3C2020" : "#2A2A2A"}` }}>
-                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, alignItems: "center" }}>
-                                                {/* Name */}
-                                                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8EAED", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                                    {name}{isMe && <span style={{ fontSize: 9, color: "#9AA0A6", marginLeft: 4 }}>(you)</span>}
-                                                </div>
-                                                {/* Track published */}
-                                                <div style={{ textAlign: "center" }}>
-                                                    {isPublished
-                                                        ? <span style={{ fontSize: 10, color: "#10B981", fontWeight: 600 }}>✓ Live</span>
-                                                        : <span style={{ fontSize: 10, color: "#EF4444", fontWeight: 600 }}>✗ None</span>
-                                                    }
-                                                </div>
-                                                {/* Status badge */}
-                                                <div style={{ textAlign: "center" }}>
-                                                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: statusBg, color: statusColor, display: "inline-block" }}>
-                                                        {status}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {/* Reason — only for issues */}
-                                            {status !== "✓ OK" && (
-                                                <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 5, lineHeight: 1.4, borderTop: "1px solid #2A2A2A", paddingTop: 5 }}>
-                                                    💡 {reason}
-                                                </div>
-                                            )}
-                                            {/* Mic / Cam detail row */}
-                                            <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
-                                                <span style={{ fontSize: 10, color: micEnabled ? "#10B981" : "#EF4444" }}>
-                                                    {micEnabled ? "🎙️ Mic on" : "🔇 Mic off"}
-                                                </span>
-                                                <span style={{ fontSize: 10, color: "#9AA0A6" }}>
-                                                    {p.audioTrackPublications.size} audio track{p.audioTrackPublications.size !== 1 ? "s" : ""}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {/* Tip for host */}
-                                    <div style={{ marginTop: 8, padding: "8px 10px", background: "#1A1A2E", borderRadius: 8, fontSize: 10, color: "#9AA0A6", lineHeight: 1.5 }}>
-                                        💡 If someone shows "No Track" — ask them to check browser mic permissions and rejoin. If "Muted" — ask them to unmute.
-                                    </div>
-                                    <button onClick={() => setShowAudioMonitor(false)} style={{ marginTop: 8, width: "100%", background: "#2A2A2A", border: "none", borderRadius: 6, color: "#9AA0A6", fontSize: 12, padding: "6px 0", cursor: "pointer" }}>Close</button>
-                                </div>
-                            );
-                        })()}
                     </div>
                 )}
+                {/* Audio Monitor dropdown — rendered outside tb-btn-extra so it works
+                    even when the button is hidden on mobile (triggered via More menu) */}
+                {isHost && showAudioMonitor && (() => {
+                    // Build audio status for every participant including local
+                    const allP = [...participants];
+                    const audioStatus = allP.map(p => {
+                        const pubs = [...p.audioTrackPublications.values()];
+                        const hasTrack = pubs.length > 0;
+                        const track = pubs[0];
+                        const isPublished = hasTrack && !!track.track;
+                        const isMuted = hasTrack ? (track.isMuted || !track.isEnabled) : true;
+                        const micEnabled = p.isMicrophoneEnabled;
+                        // Diagnosis
+                        let status, statusColor, statusBg, reason;
+                        if (!hasTrack || !isPublished) {
+                            status = "No Track"; statusColor = "#EF4444"; statusBg = "#FEF2F2";
+                            reason = "Audio track not published — likely mic permission denied or device error";
+                        } else if (!micEnabled || isMuted) {
+                            status = "Muted"; statusColor = "#F59E0B"; statusBg = "#FFFBEB";
+                            reason = "Track published but microphone is muted";
+                        } else {
+                            status = "✓ OK"; statusColor = "#10B981"; statusBg = "#ECFDF5";
+                            reason = "Audio publishing normally";
+                        }
+                        return { p, name: p.name || p.identity || "?", isMe: p.isLocal, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason };
+                    });
+                    const issueCount = audioStatus.filter(a => a.status !== "✓ OK").length;
+                    return (
+                        <div style={{ ...S.dropdown, width: 340, maxHeight: 420, overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#E8EAED", flex: 1 }}>Audio Monitor</div>
+                                {issueCount > 0
+                                    ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#FEF2F2", color: "#EF4444" }}>⚠ {issueCount} issue{issueCount > 1 ? "s" : ""}</span>
+                                    : <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "#ECFDF5", color: "#10B981" }}>✓ All clear</span>
+                                }
+                            </div>
+                            {/* Column headers */}
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, padding: "4px 6px", marginBottom: 4 }}>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em" }}>Participant</span>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Track</span>
+                                <span style={{ fontSize: 9, fontWeight: 700, color: "#5F6368", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Status</span>
+                            </div>
+                            {audioStatus.map(({ p, name, isMe, hasTrack, isPublished, micEnabled, isMuted, status, statusColor, statusBg, reason }, i) => (
+                                <div key={p.identity || i} style={{ marginBottom: 6, background: "#1E1E1E", borderRadius: 9, padding: "8px 10px", border: `1px solid ${status !== "✓ OK" ? "#3C2020" : "#2A2A2A"}` }}>
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px", gap: 4, alignItems: "center" }}>
+                                        {/* Name */}
+                                        <div style={{ fontSize: 12, fontWeight: 600, color: "#E8EAED", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {name}{isMe && <span style={{ fontSize: 9, color: "#9AA0A6", marginLeft: 4 }}>(you)</span>}
+                                        </div>
+                                        {/* Track published */}
+                                        <div style={{ textAlign: "center" }}>
+                                            {isPublished
+                                                ? <span style={{ fontSize: 10, color: "#10B981", fontWeight: 600 }}>✓ Live</span>
+                                                : <span style={{ fontSize: 10, color: "#EF4444", fontWeight: 600 }}>✗ None</span>
+                                            }
+                                        </div>
+                                        {/* Status badge */}
+                                        <div style={{ textAlign: "center" }}>
+                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: statusBg, color: statusColor, display: "inline-block" }}>
+                                                {status}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {/* Reason — only for issues */}
+                                    {status !== "✓ OK" && (
+                                        <div style={{ fontSize: 10, color: "#9AA0A6", marginTop: 5, lineHeight: 1.4, borderTop: "1px solid #2A2A2A", paddingTop: 5 }}>
+                                            💡 {reason}
+                                        </div>
+                                    )}
+                                    {/* Mic / Cam detail row */}
+                                    <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
+                                        <span style={{ fontSize: 10, color: micEnabled ? "#10B981" : "#EF4444" }}>
+                                            {micEnabled ? "🎙️ Mic on" : "🔇 Mic off"}
+                                        </span>
+                                        <span style={{ fontSize: 10, color: "#9AA0A6" }}>
+                                            {p.audioTrackPublications.size} audio track{p.audioTrackPublications.size !== 1 ? "s" : ""}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                            {/* Tip for host */}
+                            <div style={{ marginTop: 8, padding: "8px 10px", background: "#1A1A2E", borderRadius: 8, fontSize: 10, color: "#9AA0A6", lineHeight: 1.5 }}>
+                                💡 If someone shows "No Track" — ask them to check browser mic permissions and rejoin. If "Muted" — ask them to unmute.
+                            </div>
+                            <button onClick={() => setShowAudioMonitor(false)} style={{ marginTop: 8, width: "100%", background: "#2A2A2A", border: "none", borderRadius: 6, color: "#9AA0A6", fontSize: 12, padding: "6px 0", cursor: "pointer" }}>Close</button>
+                        </div>
+                    );
+                })()}
 
-                {/* Invite — CEO/TL only */}
-                {isHost && (<>
-                    <button className={`tb-btn${showShare ? " tb-btn-active" : ""}`}
-                        onClick={() => { setShowShare(p => !p); setShowCode(false); setShowPeople(false); }} title="Share Invite">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-                            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-                        </svg>
-                        <span className="tb-btn-label">Invite</span>
-                    </button>
-                    {showShare && (
-                        <ShareMeetingModal meet={meet} joinCode={joinCode} senderId={employeeId} senderName={employeeName} onClose={() => setShowShare(false)} />
-                    )}
-                </>)}
+                {/* Invite — CEO/TL only — desktop/tablet only (mobile uses More menu) */}
+                {isHost && (
+                    <div className="tb-btn-extra" style={{ position: "relative" }}>
+                        <button className={`tb-btn${showShare ? " tb-btn-active" : ""}`}
+                            onClick={() => { setShowShare(p => !p); setShowCode(false); setShowPeople(false); }} title="Share Invite">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                            </svg>
+                            <span className="tb-btn-label">Invite</span>
+                        </button>
+                    </div>
+                )}
+                {/* Share modal — outside the hidden parent so it renders on mobile too */}
+                {isHost && showShare && (
+                    <ShareMeetingModal meet={meet} joinCode={joinCode} senderId={employeeId} senderName={employeeName} onClose={() => setShowShare(false)} />
+                )}
 
-                {/* Code — CEO/TL only */}
+                {/* Code — CEO/TL only — desktop/tablet only (mobile uses More menu) */}
                 {isHost && joinCode && (
-                    <div style={{ position: "relative" }}>
+                    <div className="tb-btn-extra" style={{ position: "relative" }}>
                         <button className={`tb-btn${showCode ? " tb-btn-active" : ""}`}
                             onClick={() => { setShowCode(p => !p); setShowPeople(false); setShowShare(false); }} title="Meeting Code">
                             <LockIcon />
                             <span className="tb-btn-label">Code</span>
                         </button>
-                        {showCode && (
-                            <div style={{ ...S.dropdown, minWidth: 210, right: 0 }}>
-                                <div style={{ fontSize: 11, color: "#9AA0A6", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Share this code</div>
-                                <div style={S.codeBig}>{joinCode}</div>
-                                <button onClick={copyCode} style={S.copyBtn}>{copied ? "✓ Copied!" : "Copy Code"}</button>
-                            </div>
-                        )}
+                    </div>
+                )}
+                {/* Code dropdown — rendered outside the hidden parent so it works on mobile */}
+                {isHost && joinCode && showCode && (
+                    <div style={{ ...S.dropdown, minWidth: 210, right: 0 }}>
+                        <div style={{ fontSize: 11, color: "#9AA0A6", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Share this code</div>
+                        <div style={S.codeBig}>{joinCode}</div>
+                        <button onClick={copyCode} style={S.copyBtn}>{copied ? "✓ Copied!" : "Copy Code"}</button>
                     </div>
                 )}
 
@@ -870,9 +878,58 @@ function TopBar({ meet, isHost, joinCode, recording, onEnd, onLeave, onMinimize,
                     />
                 )}
 
+                {/* More menu — mobile only — host only (Audio Monitor, Invite, Code) */}
+                {isHost && (
+                    <div className="tb-btn-more-wrap" style={{ position: "relative" }}>
+                        <button
+                            className={`tb-btn tb-btn-more${showMore ? " tb-btn-active" : ""}`}
+                            onClick={() => { setShowMore(p => !p); setShowPeople(false); setShowShare(false); setShowCode(false); setShowAudioMonitor(false); }}
+                            title="More"
+                            aria-label="More options"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+                            </svg>
+                        </button>
+                        {showMore && (
+                            <div style={{ ...S.dropdown, right: 0, minWidth: 200, padding: 6 }} onClick={e => e.stopPropagation()}>
+                                <button onClick={() => { setShowMore(false); setShowAudioMonitor(true); }}
+                                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", background: "transparent", border: "none", color: "#E8EAED", fontSize: 13, fontWeight: 500, fontFamily: "inherit", cursor: "pointer", borderRadius: 8, textAlign: "left" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "#2A2A2A"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
+                                    </svg>
+                                    Audio Monitor
+                                </button>
+                                <button onClick={() => { setShowMore(false); setShowShare(true); }}
+                                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", background: "transparent", border: "none", color: "#E8EAED", fontSize: 13, fontWeight: 500, fontFamily: "inherit", cursor: "pointer", borderRadius: 8, textAlign: "left" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "#2A2A2A"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+                                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                                    </svg>
+                                    Share Invite
+                                </button>
+                                {joinCode && (
+                                    <button onClick={() => { setShowMore(false); setShowCode(true); }}
+                                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", background: "transparent", border: "none", color: "#E8EAED", fontSize: 13, fontWeight: 500, fontFamily: "inherit", cursor: "pointer", borderRadius: 8, textAlign: "left" }}
+                                        onMouseEnter={e => e.currentTarget.style.background = "#2A2A2A"}
+                                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                        <LockIcon />
+                                        Meeting Code
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* End / Leave */}
                 {isHost
-                    ? <button onClick={onEnd} className="tb-end-btn">End for All</button>
+                    ? <button onClick={onEnd} className="tb-end-btn"><span className="tb-end-full">End for All</span><span className="tb-end-short">End</span></button>
                     : <button onClick={onLeave} className="tb-leave-btn">Leave</button>
                 }
             </div>
@@ -1535,33 +1592,63 @@ function GlobalCSS() {
 
             /* ── TopBar responsive ── */
             .tb-root { height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; background:#202124; border-bottom:1px solid #2a2a2a; flex-shrink:0; z-index:10; gap:8px; font-family:'Google Sans','Roboto',sans-serif; }
-            .tb-left  { display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
+            .tb-left  { display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 0%; overflow:hidden; }
             .tb-right { display:flex; align-items:center; gap:5px; flex-shrink:0; position:relative; }
-            .tb-meet-name { font-size:13px; font-weight:500; color:#E8EAED; white-space:normal; word-break:break-word; line-height:1.35; max-width:280px; }
+            /* Title: never wrap, always truncate with ellipsis so "Pramod..." beats "PPP" stacked */
+            .tb-meet-name { font-size:13px; font-weight:500; color:#E8EAED; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1 1 auto; max-width:280px; }
             .tb-elapsed   { font-size:11px; color:#9AA0A6; font-family:monospace; flex-shrink:0; background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:99px; }
-            .tb-btn   { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; background:#2A2A2A; border:1px solid #3C4043; border-radius:8px; color:#BDC1C6; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; transition:all 0.12s; white-space:nowrap; }
+            .tb-btn   { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; background:#2A2A2A; border:1px solid #3C4043; border-radius:8px; color:#BDC1C6; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; transition:all 0.12s; white-space:nowrap; flex-shrink:0; }
             .tb-btn:hover { background:#3C4043; }
             .tb-btn-active { background:#1e3a5f !important; color:#60A5FA !important; border-color:#3B82F6 !important; }
             .tb-btn-label { /* shown on desktop */ }
-            .tb-end-btn   { display:inline-flex; align-items:center; gap:5px; padding:7px 14px; background:#EA4335; border:none; border-radius:8px; color:#fff; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap; }
-            .tb-leave-btn { display:inline-flex; align-items:center; gap:5px; padding:7px 14px; background:transparent; border:1.5px solid #EA4335; border-radius:8px; color:#EA4335; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap; }
+            .tb-end-btn   { display:inline-flex; align-items:center; gap:5px; padding:7px 14px; background:#EA4335; border:none; border-radius:8px; color:#fff; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap; flex-shrink:0; }
+            .tb-leave-btn { display:inline-flex; align-items:center; gap:5px; padding:7px 14px; background:transparent; border:1.5px solid #EA4335; border-radius:8px; color:#EA4335; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; white-space:nowrap; flex-shrink:0; }
+            .tb-back-label { /* "Back" word, hidden on small screens */ }
+            .tb-end-full { display:inline; }
+            .tb-end-short { display:none; }
+            /* Default (desktop): extras visible, More button hidden */
+            .tb-btn-extra { display:inline-block; }
+            .tb-btn-more-wrap { display:none; }
+            .tb-btn-more { padding:6px 9px !important; }
 
-            /* Mobile < 600px: hide labels from middle buttons, keep end/leave text */
-            @media (max-width:600px) {
-                .tb-root  { padding:0 8px; gap:4px; height:48px; }
-                .tb-btn   { padding:6px 9px; gap:0; }
+            /* Tablet & narrow desktop < 900px: hide labels on middle buttons (icon-only) */
+            @media (max-width:900px) {
                 .tb-btn-label { display:none; }
-                .tb-meet-name { max-width:160px; font-size:12px; }
-                .tb-time  { display:none; }
-                .tb-end-btn   { padding:7px 10px; font-size:12px; }
-                .tb-leave-btn { padding:7px 10px; font-size:12px; }
+                .tb-btn { padding:6px 10px; gap:0; }
+                .tb-meet-name { max-width:200px; }
             }
 
-            /* Very small < 380px */
-            @media (max-width:380px) {
-                .tb-meet-name { max-width:80px; font-size:12px; }
-                .tb-end-btn   { padding:6px 8px; font-size:11px; }
-                .tb-leave-btn { padding:6px 8px; font-size:11px; }
+            /* Mobile < 600px: tighter paddings, hide elapsed timer.
+               Audio Monitor, Invite, Code move into the More menu. */
+            @media (max-width:600px) {
+                .tb-root  { padding:0 8px; gap:5px; height:48px; }
+                .tb-elapsed { display:none; }
+                .tb-meet-name { font-size:12px; max-width:none; }
+                .tb-end-btn   { padding:7px 11px; font-size:12px; }
+                .tb-leave-btn { padding:7px 11px; font-size:12px; }
+                /* Title shrinks first to make room for buttons, never overlaps them */
+                .tb-left { flex:1 1 0%; min-width:0; }
+                /* Hide extra buttons (they're in the More menu now) */
+                .tb-btn-extra { display:none !important; }
+                /* Show the More menu trigger */
+                .tb-btn-more-wrap { display:inline-block; }
+            }
+
+            /* Small phones < 420px: even tighter, hide Back label, shorten end-for-all */
+            @media (max-width:420px) {
+                .tb-root  { padding:0 6px; gap:4px; }
+                .tb-back-label { display:none; }
+                .tb-btn { padding:6px 8px; }
+                .tb-end-btn   { padding:6px 10px; font-size:11px; gap:0; }
+                .tb-leave-btn { padding:6px 10px; font-size:11px; gap:0; }
+                .tb-end-full { display:none; }
+                .tb-end-short { display:inline; }
+                .tb-meet-name { font-size:11.5px; }
+            }
+
+            /* Ultra-small < 360px: scale further, hide LIVE pill text (keep dot indicator via topbar style) */
+            @media (max-width:360px) {
+                .tb-root { padding:0 4px; gap:3px; }
                 .tb-btn { padding:5px 7px; }
             }
         `}</style>

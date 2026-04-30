@@ -758,7 +758,7 @@ function GmailView({ userEmail, isMobile }) {
         if (!userEmail) return;
         setLoading(true);
         setError(null);
-        fetchMyGmail(userEmail, 40)
+        fetchMyGmail('itdeptgrav@gmail.com', 40)
             .then(res => { setEmails(res.data || []); setLoading(false); })
             .catch(err => { setError(err.message); setLoading(false); });
     }, [userEmail]);

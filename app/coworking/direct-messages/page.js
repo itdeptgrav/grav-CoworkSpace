@@ -1282,14 +1282,18 @@ const CSS = `
   border: 1.5px solid #E0E7FF;
 }
 
-/* Chat header */
+/* Chat header — sticky at top so it stays visible when keyboard opens */
 .dm-chat-head {
   padding: 12px 18px; background: #fff;
   border-bottom: 1.5px solid #EEF2F8;
   display: flex; align-items: center; gap: 12px;
   flex-shrink: 0; min-height: 66px;
   box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
+  
 .dm-chat-name { font-size: 15px; font-weight: 700; color: #0F172A; letter-spacing: -0.02em; }
 .dm-chat-meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
 .dm-pill {
