@@ -258,7 +258,8 @@ export default function ConversationPage() {
         .gv-chat-container {
           display: flex;
           flex-direction: column;
-          height: calc(100vh - 108px);
+          height: 100%;
+          min-height: 0;
           border-radius: 14px;
           overflow: hidden;
           border: 1px solid var(--gray-200);
@@ -333,8 +334,8 @@ export default function ConversationPage() {
         /* ── MOBILE — FULL RESPONSIVE OVERRIDE ── */
         @media (max-width: 767px) {
           .gv-msg-content { max-width: 80% !important; }
-          .gv-chat-container {
-            height: calc(100dvh - 60px);
+         .gv-chat-container {
+            height: 100%;
             border-radius: 0;
             border: none;
             box-shadow: none;

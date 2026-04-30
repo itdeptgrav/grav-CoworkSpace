@@ -598,41 +598,48 @@ export default function DirectMessagesPage() {
   }, [selectedPerson, employeeId]);
 
 
-  // Lock chat panel height to visual viewport when keyboard opens (Android fix)
+  // Lock the page when keyboard opens — prevents header from being pushed up.
+  // Uses Visual Viewport API: when keyboard appears, viewport.height shrinks.
+  // We force every scrollable ancestor back to top so the chat header stays visible.
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
-    const vv = window.visualViewport;
 
-    const apply = () => {
-      const chat = document.querySelector(".dm-chat");
-      const left = document.querySelector(".dm-left");
-      if (!chat) return;
-      // Use visual viewport height so the chat panel literally shrinks
-      // to the visible area when the keyboard appears.
-      chat.style.height = vv.height + "px";
-      chat.style.maxHeight = vv.height + "px";
-      if (left) {
-        left.style.height = vv.height + "px";
-        left.style.maxHeight = vv.height + "px";
+    const lockToTop = () => {
+      // Reset every scroll offset on the way up to body
+      let el = document.activeElement;
+      while (el && el !== document.body) {
+        if (el.scrollTop > 0) el.scrollTop = 0;
+        el = el.parentElement;
       }
-      // Force window scroll to top so nothing above the chat is hidden.
+      // Also reset window scroll
       window.scrollTo(0, 0);
     };
 
-    apply();
-    vv.addEventListener("resize", apply);
-    vv.addEventListener("scroll", apply);
+    const onResize = () => {
+      // Run after the browser settles the keyboard animation
+      requestAnimationFrame(() => {
+        requestAnimationFrame(lockToTop);
+      });
+    };
+
+    // Fires whenever keyboard opens/closes on Android & iOS
+    window.visualViewport.addEventListener("resize", onResize);
+
+    // Also lock when an input gets focused (catches the moment keyboard begins to open)
+    const onFocusIn = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) {
+        // Wait for keyboard animation to start, then lock
+        setTimeout(lockToTop, 50);
+        setTimeout(lockToTop, 300);
+      }
+    };
+    document.addEventListener("focusin", onFocusIn);
 
     return () => {
-      vv.removeEventListener("resize", apply);
-      vv.removeEventListener("scroll", apply);
-      const chat = document.querySelector(".dm-chat");
-      const left = document.querySelector(".dm-left");
-      if (chat) { chat.style.height = ""; chat.style.maxHeight = ""; }
-      if (left) { left.style.height = ""; left.style.maxHeight = ""; }
+      window.visualViewport.removeEventListener("resize", onResize);
+      document.removeEventListener("focusin", onFocusIn);
     };
   }, []);
-
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
