@@ -2707,11 +2707,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           cursor: pointer;
         }
 
-        .cw-content {
+       .cw-content {
           flex: 1;
           overflow-y: auto;
           overflow-x: hidden;
           padding: 0;
+          min-height: 0;
         }
 
         /* ── Mobile Overlay ── */
