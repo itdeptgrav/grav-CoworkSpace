@@ -21,6 +21,8 @@ export const WebSocketProvider = ({ children }) => {
     webSocketService.connect();
   }, []);
 
+  
+
   const disconnect = useCallback(() => {
     webSocketService.disconnect();
     setIsConnected(false);
