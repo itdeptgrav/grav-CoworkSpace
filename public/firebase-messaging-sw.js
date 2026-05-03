@@ -1,5 +1,4 @@
 // public/firebase-messaging-sw.js
-// ⚠️ FILL IN your actual values from cowork frontend/.env below
 
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
@@ -14,10 +13,9 @@ firebase.initializeApp({
     databaseURL: "https://grav-cms-38f45-default-rtdb.firebaseio.com",
 });
 
-
 const messaging = firebase.messaging();
 
-// Fires when app is CLOSED or in background tab
+// ── Background/Closed: FCM push from backend ─────────────────────────────────
 messaging.onBackgroundMessage((payload) => {
     const title = payload.notification?.title || payload.data?.title || 'CoWork';
     const body = payload.notification?.body || payload.data?.body || '';
@@ -36,15 +34,31 @@ messaging.onBackgroundMessage((payload) => {
 
     self.registration.showNotification(title, {
         body,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/badge-72x72.png',
         tag: type || 'cowork',
         data: { url: urlMap[type] || '/coworking', ...payload.data },
         vibrate: [200, 100, 200],
     });
 });
 
-// When user clicks the notification — open the right page
+// ── Foreground: postMessage from usePushNotifications.js ─────────────────────
+// Handles SHOW_NOTIFICATION sent by the app when it's open
+self.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'SHOW_NOTIFICATION') return;
+    const { title, body, icon, tag, data } = event.data;
+    self.registration.showNotification(title, {
+        body: body || '',
+        icon: icon || '/icons/icon-192x192.png',
+        badge: '/icons/badge-72x72.png',
+        tag: tag || 'cowork-' + Date.now(),
+        data: data || { url: '/coworking' },
+        vibrate: [200, 100, 200],
+        requireInteraction: false,
+    });
+});
+
+// ── Click handler ─────────────────────────────────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     const url = event.notification.data?.url || '/coworking';
@@ -52,15 +66,10 @@ self.addEventListener('notificationclick', (event) => {
 
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-            // If a tab with this exact URL already exists, focus it
             const exactMatch = list.find(c => c.url === fullUrl);
             if (exactMatch) { exactMatch.focus(); return; }
-
-            // If any tab of our app is open, navigate it to the right page
             const anyTab = list.find(c => c.url.startsWith(self.location.origin));
             if (anyTab) { anyTab.navigate(fullUrl); anyTab.focus(); return; }
-
-            // No tab open — open a new one
             if (clients.openWindow) return clients.openWindow(fullUrl);
         })
     );

@@ -5861,8 +5861,8 @@ em-emoji-picker,
                       const timerBlocked = !["deadline_approved", "confirmed", "in_progress", "done"].includes(t.status) && !isRunning;
                       return (
                         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          {/* Button only for assignees */}
-                          {canControl && (
+                          {/* Button only for assignees — only show after task is confirmed/in_progress */}
+                          {canControl && (["confirmed", "in_progress", "deadline_approved", "done"].includes(t.status) || isRunning || (sess?.totalSeconds || 0) > 0) && (
                             <button
                               disabled={timerBlocked}
                               onClick={e => {
@@ -5915,7 +5915,7 @@ em-emoji-picker,
                               </div>
                             );
                           })()}
-                          {canControl && (
+                          {canControl && (isRunning || ["in_progress", "done", "confirmed", "deadline_approved"].includes(t.status)) && (
                             <span style={{
                               fontSize: 9, fontFamily: "monospace", fontWeight: 700,
                               color: isRunning ? "#16A34A" : "#94A3B8",
@@ -7029,19 +7029,24 @@ em-emoji-picker,
               {task && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
                 <div style={{
                   flexShrink: 0, padding: "10px 14px 8px",
-                  background: "linear-gradient(135deg,#EEF2FF,#F0FDF4)",
+                  background: (task.hasTimer === true) ? "linear-gradient(135deg,#F0FDF4,#EFF6FF)" : "linear-gradient(135deg,#EEF2FF,#F0FDF4)",
                   borderBottom: "1px solid #E5E7EB",
                 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
                     How this task works
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto" }}>
-                    {[
+                    {(task.hasTimer === true ? [
+                      { emoji: "⏱", label: "Start Timer", active: true },
+                      { emoji: "✅", label: "Confirm Task", active: false },
+                      { emoji: "▶", label: "Start Work", active: false },
+                      { emoji: "🏁", label: "Submit", active: false },
+                    ] : [
                       { emoji: "📅", label: "Set Deadline", active: true },
                       { emoji: "⏳", label: "TL Approves", active: false },
                       { emoji: "✅", label: "Confirm Task", active: false },
                       { emoji: "▶", label: "Start Work", active: false },
-                    ].map((step, i, arr) => (
+                    ]).map((step, i, arr) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
                         <div style={{
                           display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
@@ -7156,8 +7161,26 @@ em-emoji-picker,
                       </div>
                     )}
 
-                    {/* Step 1: propose deadline */}
-                    {!hasDueDate && status === "open" && (
+                    {/* Step 1a: Timer task — skip deadline, show Confirm directly */}
+                    {!hasDueDate && status === "open" && task.hasTimer === true && (
+                      <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "10px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                          <span style={{ fontSize: 16 }}>⏱</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Timer Task — Confirm to Begin</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#64748B", marginBottom: 10, lineHeight: 1.5 }}>
+                          This task uses a timer instead of a fixed deadline. Confirm the task to start tracking your time.
+                        </div>
+                        <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
+                          style={{ width: "100%", marginBottom: 0 }}>
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          ✓ Confirm &amp; Accept Task
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Step 1b: propose deadline — only for non-timer tasks */}
+                    {!hasDueDate && status === "open" && task.hasTimer !== true && (
                       <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                           <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>

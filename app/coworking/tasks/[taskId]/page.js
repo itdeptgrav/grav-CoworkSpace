@@ -534,8 +534,25 @@ export default function TaskDetailPage() {
                                     </div>
                                 );
 
-                                // Step 1: no dueDate yet — propose
-                                if (task.status === "open" || task.status === "deadline_rejected") return (
+                                // Step 1a: Timer task — skip deadline, confirm directly
+                                if (task.hasTimer === true && (task.status === "open" || task.status === "deadline_rejected")) return (
+                                    <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                            <span style={{ fontSize: 16 }}>⏱</span>
+                                            <span style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>Timer Task — Confirm to Begin</span>
+                                        </div>
+                                        <div style={{ fontSize: 12, color: "#64748B", marginBottom: 10, lineHeight: 1.5 }}>
+                                            This task uses a timer instead of a fixed deadline. Confirm the task to start tracking your time.
+                                        </div>
+                                        <button disabled={actionBusy} onClick={() => handleAction("confirm")}
+                                            style={{ ...s.actionBtn("confirm"), display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                                            ✓ Confirm &amp; Accept Task
+                                        </button>
+                                    </div>
+                                );
+
+                                // Step 1b: no dueDate yet — propose deadline (non-timer tasks only)
+                                if (task.hasTimer !== true && (task.status === "open" || task.status === "deadline_rejected")) return (
                                     <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
                                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                                             <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>

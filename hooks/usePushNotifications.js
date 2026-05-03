@@ -67,8 +67,9 @@ export function usePushNotifications(employeeId) {
             /* Register SW */
             if ("serviceWorker" in navigator) {
                 try {
-                    const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+                    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
                     swRef.current = reg;
+                    console.log("[PushNotif] SW registered:", reg.scope);
                     // Wait for SW to be active
                     await navigator.serviceWorker.ready;
                 } catch (e) {

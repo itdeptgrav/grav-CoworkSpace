@@ -54,7 +54,7 @@ export default function CreateTaskModal({
 }) {
     const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
-    const [form, setForm] = useState({ title: "", description: "", notes: "" });
+    const [form, setForm] = useState({ title: "", description: "", notes: "", hasTimer: true, deadline: "", deadlineTime: "" });
     const [isFolder, setIsFolder] = useState(false);
 
     // ── Repeat Task state ─────────────────────────────────────────────────────
@@ -284,7 +284,8 @@ export default function CreateTaskModal({
                         description: row.description,
                         notes: row.notes,
                         assigneeIds: row.assigneeIds,
-                        dueDate: null,
+                        dueDate: (!isFolder && !isRepeat && !isThirdParty && !isGoal && !form.hasTimer && form.deadline) ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null,
+                        hasTimer: (!isFolder && !isRepeat && !isThirdParty && !isGoal) ? form.hasTimer : undefined,
                         priority: row.priority || 5,
                         parentTaskId: parentTask?.taskId || null,
                         createdByRole: currentRole,
@@ -305,7 +306,7 @@ export default function CreateTaskModal({
                     description: form.description,
                     notes: isFolder ? "" : form.notes,
                     assigneeIds: isFolder ? [] : selectedIds,
-                    dueDate: null,
+                    dueDate: (!isFolder && !isRepeat && !isThirdParty && !isGoal && !form.hasTimer && form.deadline) ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null,
                     priority: isFolder ? 5 : (form.priority || 5),
                     parentTaskId: parentTask?.taskId || null,
                     createdByRole: currentRole,
@@ -314,6 +315,7 @@ export default function CreateTaskModal({
                     createdByTl: currentRole === "tl",
                     status: "open",
                     isFolder: isFolder || false,
+                    hasTimer: (!isFolder && !isRepeat && !isThirdParty && !isGoal) ? form.hasTimer : undefined,
                     isRepeat: isRepeat || false,
                     repeatConfig: isRepeat ? repeatConfig : null,
                     isThirdParty: isThirdParty || false,
@@ -906,6 +908,70 @@ export default function CreateTaskModal({
                                     placeholder="Specific requirements, deliverables, acceptance criteria" />
                             </div>}
 
+                            {/* ── Timer / Deadline toggle — normal tasks only, step 1 ── */}
+                            {!isFolder && !isRepeat && !isThirdParty && !isGoal && (
+                                <div style={s.field}>
+                                    <label style={s.label}>
+                                        ⏱ Time Tracking
+                                    </label>
+                                    {/* Timer checkbox */}
+                                    <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer", padding: "12px 14px", borderRadius: 10, background: form.hasTimer ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${form.hasTimer ? "#93C5FD" : "#E2E8F0"}`, transition: "all 0.15s", marginBottom: 10 }}>
+                                        <div style={{ marginTop: 2 }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={form.hasTimer}
+                                                onChange={e => set("hasTimer", e.target.checked)}
+                                                style={{ width: 16, height: 16, accentColor: "#2563EB", cursor: "pointer" }}
+                                            />
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                                <span style={{ fontSize: 13, fontWeight: 700, color: form.hasTimer ? "#1D4ED8" : "#374151" }}>
+                                                    {form.hasTimer ? "⏱ Timer enabled — Start / Pause" : "📅 No timer — use deadline instead"}
+                                                </span>
+                                                {form.hasTimer && (
+                                                    <span style={{ fontSize: 10, fontWeight: 600, background: "#DBEAFE", color: "#1D4ED8", borderRadius: 99, padding: "1px 8px" }}>
+                                                        ON
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p style={{ fontSize: 11.5, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.5 }}>
+                                                {form.hasTimer
+                                                    ? "Employee can start, pause and resume time tracking on this task."
+                                                    : "Timer off — set a deadline date and time for this task."}
+                                            </p>
+                                        </div>
+                                    </label>
+
+                                    {/* Deadline fields — show only when timer is OFF */}
+                                    {!form.hasTimer && (
+                                        <div style={{ display: "flex", gap: 10 }}>
+                                            <div style={{ flex: 2 }}>
+                                                <label style={{ ...s.label, marginBottom: 4 }}>Deadline Date <span style={s.req}>*</span></label>
+                                                <input
+                                                    className="ctm-input"
+                                                    style={s.input}
+                                                    type="date"
+                                                    value={form.deadline}
+                                                    min={new Date().toISOString().split("T")[0]}
+                                                    onChange={e => set("deadline", e.target.value)}
+                                                />
+                                            </div>
+                                            <div style={{ flex: 1 }}>
+                                                <label style={{ ...s.label, marginBottom: 4 }}>Time <span style={s.req}>*</span></label>
+                                                <input
+                                                    className="ctm-input"
+                                                    style={s.input}
+                                                    type="time"
+                                                    value={form.deadlineTime}
+                                                    onChange={e => set("deadlineTime", e.target.value)}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Assignees — hidden for folder tasks, required for normal tasks, shown on step 2 */}
                             {!isFolder && step === 2 && <div style={s.field}>
                                 <label style={s.label}>
@@ -1058,6 +1124,9 @@ export default function CreateTaskModal({
                                     </div>
                                 )}
                             </div>}
+
+                            {/* Timer toggle moved to Step 1 */}
+
                         </div>
                     )}
 
@@ -1082,6 +1151,10 @@ export default function CreateTaskModal({
                                 style={s.submitBtn}
                                 onClick={() => {
                                     if (!form.title.trim()) { setError("Title is required."); return; }
+                                    if (!isFolder && !isRepeat && !isThirdParty && !isGoal && !form.hasTimer) {
+                                        if (!form.deadline) { setError("Deadline date is required when timer is off."); return; }
+                                        if (!form.deadlineTime) { setError("Deadline time is required when timer is off."); return; }
+                                    }
                                     if (isRepeat && (!repeatConfig.deadlineTimes?.length || !repeatConfig.deadlineTimes[0])) { setError("At least one deadline time is required."); return; }
                                     if (isRepeat && !repeatConfig.startDate) { setError("Start date is required for repeat tasks."); return; }
                                     setError("");
