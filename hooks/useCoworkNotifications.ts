@@ -172,7 +172,7 @@ async function initPush(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator)) return null;
 
   try {
-    const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
     await navigator.serviceWorker.ready;
     return reg;
   } catch (e) {
