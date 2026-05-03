@@ -1,4 +1,8 @@
 // public/firebase-messaging-sw.js
+// ONE unified service worker for ALL push notifications:
+// 1. FCM background push (app closed/background) via onBackgroundMessage
+// 2. Foreground push (app open) via postMessage SHOW_NOTIFICATION from usePushNotifications
+// 3. Click routing — opens correct page
 
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
@@ -15,50 +19,72 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// ── Background/Closed: FCM push from backend ─────────────────────────────────
+// ── URL routing map ───────────────────────────────────────────────────────────
+const URL_MAP = {
+    direct_message: '/coworking/direct-messages',
+    group_message: '/coworking/create-group',
+    group_added: '/coworking/create-group',
+    group_removed: '/coworking/create-group',
+    task_assigned: '/coworking/tasks',
+    task_update: '/coworking/tasks',
+    task_chat: '/coworking/tasks',
+    task_confirmed: '/coworking/tasks',
+    task_started: '/coworking/tasks',
+    task_deleted: '/coworking/tasks',
+    completion_submitted: '/coworking/tasks',
+    completion_tl_approved: '/coworking/tasks',
+    completion_ceo_approved: '/coworking/tasks',
+    completion_rejected: '/coworking/tasks',
+    completion_ceo_rejected: '/coworking/tasks',
+    meet_scheduled: '/coworking/schedule-meet',
+    meet_cancelled: '/coworking/schedule-meet',
+    meet_updated: '/coworking/schedule-meet',
+    meet_reminder: '/coworking/schedule-meet',
+    role_changed: '/coworking/settings',
+};
+
+function getUrl(type) {
+    return URL_MAP[type] || '/coworking';
+}
+
+// ── 1. FCM Background/Closed push ────────────────────────────────────────────
 messaging.onBackgroundMessage((payload) => {
     const title = payload.notification?.title || payload.data?.title || 'CoWork';
     const body = payload.notification?.body || payload.data?.body || '';
     const type = payload.data?.type || '';
 
-    const urlMap = {
-        task_assigned: '/coworking/tasks',
-        task_update: '/coworking/tasks',
-        task_chat: '/coworking/tasks',
-        direct_message: '/coworking/direct-messages',
-        group_message: '/coworking/create-group',
-        meet_scheduled: '/coworking/schedule-meet',
-        meet_cancelled: '/coworking/schedule-meet',
-        meet_updated: '/coworking/schedule-meet',
-    };
-
     self.registration.showNotification(title, {
         body,
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/badge-72x72.png',
-        tag: type || 'cowork',
-        data: { url: urlMap[type] || '/coworking', ...payload.data },
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'cowork-' + (type || 'notif') + '-' + Date.now(),
+        renotify: true,
+        data: { url: getUrl(type), ...payload.data },
         vibrate: [200, 100, 200],
     });
 });
 
-// ── Foreground: postMessage from usePushNotifications.js ─────────────────────
-// Handles SHOW_NOTIFICATION sent by the app when it's open
+// ── 2. Foreground push — from usePushNotifications postMessage ────────────────
 self.addEventListener('message', (event) => {
-    if (!event.data || event.data.type !== 'SHOW_NOTIFICATION') return;
-    const { title, body, icon, tag, data } = event.data;
-    self.registration.showNotification(title, {
+    const payload = event.data || {};
+    if (payload.type !== 'SHOW_NOTIFICATION') return;
+
+    const { title, body, tag, data } = payload;
+    const type = data?.type || '';
+
+    self.registration.showNotification(title || 'CoWork', {
         body: body || '',
-        icon: icon || '/icons/icon-192x192.png',
-        badge: '/icons/badge-72x72.png',
-        tag: tag || 'cowork-' + Date.now(),
-        data: data || { url: '/coworking' },
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: tag || 'cowork-' + (type || 'notif') + '-' + Date.now(),
+        renotify: true,
+        data: { url: data?.url || getUrl(type), ...data },
         vibrate: [200, 100, 200],
         requireInteraction: false,
     });
 });
 
-// ── Click handler ─────────────────────────────────────────────────────────────
+// ── 3. Notification click — open correct page ─────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     const url = event.notification.data?.url || '/coworking';
