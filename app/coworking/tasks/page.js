@@ -12,6 +12,7 @@ import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
 
 import CreateTaskModal from "../../../components/coworking/tasks/CreateTaskModal";
+import SelfAssignTaskModal from "../../../components/coworking/tasks/SelfAssignTaskModal";
 import ForwardTaskModal from "../../../components/coworking/tasks/ForwardTaskModal";
 import DailyReportModal from "../../../components/coworking/tasks/DailyReportModal";
 import EditDeadlineModal from "../../../components/coworking/tasks/EditDeadlineModal";
@@ -1164,7 +1165,7 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
 
               {/* ── NON-TIMER TASK: confirm directly (no deadline proposal) ── */}
               {/* Only for plain normal tasks — goal/third-party/repeat have their own confirm buttons */}
-              {!task.isRepeat && !task.isThirdParty && !task.isGoal && task.hasTimer === false && isAssignee && !isConfirmed && !task.isFolder && (
+              {!task.isRepeat && !task.isThirdParty && !task.isGoal && task.hasTimer === false && isAssignee && !isConfirmed && !task.isFolder && !task.isSelfAssigned && (
                 <div style={{ background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", marginBottom: 6 }}>✅ Confirm Task</div>
                   <div style={{ fontSize: 11, color: "#14532D", lineHeight: 1.55, marginBottom: 10 }}>
@@ -1428,43 +1429,13 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
                 const effectiveStatus = status;
 
                 if (effectiveStatus === "open") return (
-                  <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B" }}>Set Your Deadline</span>
+                  <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 16 }}>📅</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1D4ED8" }}>Propose Your Deadline</span>
                     </div>
-                    {task.deadlineProposalRejected && (
-                      <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7, padding: "8px 10px", marginBottom: 10, fontSize: 11, color: "#991B1B" }}>
-                        ❌ <strong>Rejected:</strong> {task.deadlineRejectionReason || "Please propose a new deadline."}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8, lineHeight: 1.5 }}>
-                      Propose a deadline. Your {task.assignedByRole === "ceo" ? "CEO" : "Team Lead"} will approve it before you can confirm.
-                    </div>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-end" }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>How long will it take?</label>
-                        <input type="number" min="1" max="999" placeholder="e.g. 4"
-                          value={df.proposedDurationVal || ""}
-                          onChange={e => df.setDurationVal?.(e.target.value)}
-                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                      </div>
-                      <div style={{ width: 80, flexShrink: 0 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "#374151", display: "block", marginBottom: 3 }}>Unit</label>
-                        <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
-                          style={{ width: "100%", padding: "7px 6px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", background: "#F9FAFB", cursor: "pointer" }}>
-                          <option value="minutes">min</option>
-                          <option value="hours">hrs</option>
-                          <option value="days">days</option>
-                        </select>
-                      </div>
-                    </div>
-                    <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
-                      className="gv-wf-btn gv-wf-confirm" style={{ opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
-                      {df.proposing ? "Submitting…" : "⏱ Submit Deadline for Approval"}
-                    </button>
-                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 5, display: "flex", alignItems: "center", gap: 4 }}>
-                      💬 Use Draft Chat to discuss with your {task.assignedByRole === "ceo" ? "CEO" : "TL"}
+                    <div style={{ fontSize: 11, color: "#1E40AF", lineHeight: 1.55, marginBottom: 6 }}>
+                      This task uses a timer. Propose how long you need — your manager will approve it before you begin.
                     </div>
                   </div>
                 );
@@ -2973,15 +2944,20 @@ export default function TasksPage() {
     try {
       let tasks = await listTasks();
 
+      // ── Dedup by taskId (backend may return duplicates from multiple queries) ──
+      const seenIds = new Set();
+      tasks = tasks.filter(t => { if (seenIds.has(t.taskId)) return false; seenIds.add(t.taskId); return true; });
+
       // ── Visibility filter: applied for all roles as final safety net ──────────
       // The backend already filters correctly, but we re-apply here as defence-in-depth
       // to prevent any flash of wrong tasks if the backend fallback (/task/list) is used.
       if (role === "ceo") {
-        // CEO sees tasks they created OR tasks assigned to them (e.g. by a TL)
+        // CEO sees tasks they created OR assigned to them OR self-assign tasks where CEO is approver
         tasks = tasks.filter(t => {
           const assignedToMe = (t.assigneeIds || []).includes(employeeId);
           const createdByMe = t.assignedBy === employeeId || t.createdByCeo === true || t.assignedByRole === "ceo";
-          return assignedToMe || createdByMe;
+          const isMyApproval = t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
+          return assignedToMe || createdByMe || isMyApproval;
         });
       } else if (role === "employee") {
         // Employee sees:
@@ -3905,17 +3881,27 @@ export default function TasksPage() {
           return [...map.values()];
         });
       }, () => { });
+
+      // Also listen to self-assign tasks where CEO is the approver
+      const qApprover = query(tasksRef, where("approverId", "==", employeeId), orderBy("updatedAt", "desc"), limit(100));
+      onSnapshot(qApprover, snap => {
+        if (snap.empty) return;
+        setAllTasks(prev => {
+          const map = new Map(prev.map(t => [t.taskId, t]));
+          snap.docs.forEach(d => { map.set(d.id, { ...d.data(), taskId: d.id }); });
+          return [...map.values()];
+        });
+      }, () => { });
     }
 
     // Helper: apply the same visibility filter used in loadAllTasks
     const applyVisibilityFilter = (taskData) => {
       if (role === "ceo") {
-        // CEO sees tasks they created OR tasks assigned to them
         const assignedToMe = (taskData.assigneeIds || []).includes(employeeId);
         const createdByMe = taskData.assignedBy === employeeId || taskData.createdByCeo === true || taskData.assignedByRole === "ceo";
-        return assignedToMe || createdByMe;
+        const isMyApproval = taskData.approverId === employeeId || (Array.isArray(taskData.visibleTo) && taskData.visibleTo.includes(employeeId));
+        return assignedToMe || createdByMe || isMyApproval;
       }
-      // TL and Employee: the Firestore query already scopes correctly
       return true;
     };
 
@@ -5795,7 +5781,10 @@ em-emoji-picker,
                   </div>
                   <div className="col-name" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2, overflow: "hidden", minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, width: "100%", minWidth: 0, overflow: "hidden" }}>
-                      <span className={`gv-task-name${t.status === "done" ? " done-line" : ""}`}>{t.title}</span>
+                      <span className={`gv-task-name${t.status === "done" ? " done-line" : ""}`} style={t.isSelfAssigned ? { color: "#7C3AED" } : {}}>{t.title}</span>
+                      {t.isSelfAssigned && (
+                        <span style={{ fontSize: 8, fontWeight: 700, background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", borderRadius: 4, padding: "1px 5px", flexShrink: 0, letterSpacing: "0.03em", whiteSpace: "nowrap" }}>SELF</span>
+                      )}
                       {unread > 0 && <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#16A34A", padding: "1px 5px", borderRadius: 99, flexShrink: 0 }}>{unread > 99 ? "99+" : unread}</span>}
                       {dl.status === "overdue" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, display: "inline-block", marginLeft: 3 }} />}
                     </div>
@@ -6098,6 +6087,17 @@ em-emoji-picker,
                       <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search tasks..." />
                     </div>
                     {(isCEO || isTL) && <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Task</button>}
+                    <button
+                      className="gv-new-btn"
+                      onClick={() => setActiveModal({ type: "self_assign" })}
+                      style={{ background: "#7C3AED", marginLeft: 6 }}
+                      title="Create a task assigned to yourself"
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
+                      </svg>
+                      Assign to Self
+                    </button>
                   </>
                 )}
               </div>
@@ -6108,6 +6108,7 @@ em-emoji-picker,
                   <button type="button" className={`gv-img2-toptab ${topTab === "my" ? "active" : ""}`} onClick={() => setTopTab("my")}>My Tasks</button>
                   <button type="button" className={`gv-img2-toptab ${topTab === "timeline" ? "active" : ""}`} onClick={() => setTopTab("timeline")}>Timeline</button>
                   <button type="button" className={`gv-img2-toptab ${topTab === "kanban" ? "active" : ""}`} onClick={() => setTopTab("kanban")}>Kanban</button>
+                  <button type="button" className={`gv-img2-toptab ${topTab === "selftasks" ? "active" : ""}`} onClick={() => setTopTab("selftasks")} style={{ color: topTab === "selftasks" ? "#7C3AED" : undefined, borderColor: topTab === "selftasks" ? "#7C3AED" : undefined }}>👤 Self Tasks</button>
                 </div>
               )}
 
@@ -6481,8 +6482,111 @@ em-emoji-picker,
                         );
                       })}
                     </div>
+
                   </div>
                 )}
+
+
+                {/* ── Self Tasks Tab View ── */}
+                {topTab === "selftasks" && (() => {
+                  console.log("[SelfTasks] allTasks count:", allTasks.length, "employeeId:", employeeId, "role:", role);
+                  console.log("[SelfTasks] tasks with approverId==me:", allTasks.filter(t => t.approverId === employeeId).map(t => t.title));
+                  // Tasks I need to approve (X role)
+                  // X (approver): tasks where I am the approver, not yet approved
+                  const needsMyApproval = allTasks.filter(t =>
+                    t.status !== "cancelled" &&
+                    t.status !== "done" &&
+                    t.selfAssignApproved !== true &&
+                    (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
+                  );
+                  // Y (creator): tasks I self-assigned to myself
+                  const myOwnTasks = allTasks.filter(t =>
+                    t.status !== "cancelled" &&
+                    t.isSelfAssigned === true &&
+                    (t.assigneeIds || []).includes(employeeId) &&
+                    t.approverId !== employeeId
+                  );
+
+                  const TaskCard = ({ t, accentColor, showParent }) => {
+                    const isApproved = t.selfAssignApproved === true;
+                    const parent = showParent ? allTasks.find(p => p.taskId === t.parentTaskId) : null;
+                    return (
+                      <div onClick={() => handleSelectNode(t)} style={{ background: "#fff", border: `1.5px solid ${selectedTask?.taskId === t.taskId ? accentColor : "#E5E7EB"}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer", borderLeft: `4px solid ${isApproved ? "#16A34A" : accentColor}`, transition: "all 0.1s" }}>
+                        {parent && <div style={{ fontSize: 9, color: "#94A3B8", marginBottom: 3 }}>↳ <strong style={{ color: "#64748B" }}>{parent.title}</strong></div>}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, flexShrink: 0, background: isApproved ? "#DCFCE7" : "#F5F3FF", color: isApproved ? "#15803D" : accentColor, border: `1px solid ${isApproved ? "#86EFAC" : "#E9D5FF"}` }}>
+                            {isApproved ? "✓ Approved" : "⏳ Pending"}
+                          </span>
+                        </div>
+                        {t.notes && <div style={{ fontSize: 11, color: "#64748B", marginBottom: 5, lineHeight: 1.4 }}>{t.notes.slice(0, 80)}{t.notes.length > 80 ? "…" : ""}</div>}
+                        <div style={{ display: "flex", gap: 8, fontSize: 10, color: "#94A3B8", flexWrap: "wrap" }}>
+                          {t.assignedByName && <span>By: <strong style={{ color: "#374151" }}>{t.assignedByName}</strong></span>}
+                          {t.approverName && <span>Approver: <strong style={{ color: accentColor }}>{t.approverName}</strong></span>}
+                          {t.fixedDeadline && <span>📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>}
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: 16, overflowY: "auto", flex: 1 }}>
+
+                      {needsMyApproval.length === 0 && myOwnTasks.length === 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
+                          <div style={{ fontSize: 28, marginBottom: 8 }}>👤</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#64748B" }}>No self-assigned tasks</div>
+                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>Use "Assign to Self" to create one</div>
+                        </div>
+                      )}
+
+                      {/* ── SECTION 1: Needs Your Approval (X sees this) ── */}
+                      {needsMyApproval.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#DC2626", display: "inline-block" }} />
+                            Needs Your Approval
+                            <span style={{ fontSize: 10, background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 99, padding: "0 6px", fontWeight: 700 }}>{needsMyApproval.length}</span>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {needsMyApproval.map(t => (
+                              <div key={t.taskId}>
+                                <TaskCard t={t} accentColor="#DC2626" showParent={!!t.parentTaskId} />
+                                <div style={{ display: "flex", gap: 6, marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                                  <button onClick={async () => { try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                    style={{ flex: 1, padding: "7px 0", background: "#16A34A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                    ✓ Approve Task
+                                  </button>
+                                  <button onClick={async () => { const r = prompt("Rejection reason (optional):"); if (r === null) return; try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                    style={{ padding: "7px 16px", background: "#fff", color: "#DC2626", border: "1.5px solid #FECACA", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                    ✕ Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── SECTION 2: My Self-Assigned Tasks (Y sees this) ── */}
+                      {myOwnTasks.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7C3AED", display: "inline-block" }} />
+                            My Self-Assigned Tasks
+                            <span style={{ fontSize: 10, background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", borderRadius: 99, padding: "0 6px", fontWeight: 700 }}>{myOwnTasks.length}</span>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {myOwnTasks.map(t => (
+                              <TaskCard key={t.taskId} t={t} accentColor="#7C3AED" showParent={!!t.parentTaskId} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })()}
 
                 {topTab === "my" && tasksLoading ? (
                   <div style={{ padding: "14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -7029,23 +7133,29 @@ em-emoji-picker,
               {task && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
                 <div style={{
                   flexShrink: 0, padding: "10px 14px 8px",
-                  background: (task.hasTimer === true) ? "linear-gradient(135deg,#F0FDF4,#EFF6FF)" : "linear-gradient(135deg,#EEF2FF,#F0FDF4)",
+                  background: (task.hasTimer === true) ? "linear-gradient(135deg,#EFF6FF,#F0FDF4)" : "linear-gradient(135deg,#F0FDF4,#EEF2FF)",
                   borderBottom: "1px solid #E5E7EB",
                 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
                     How this task works
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto" }}>
-                    {(task.hasTimer === true ? [
-                      { emoji: "⏱", label: "Start Timer", active: true },
-                      { emoji: "✅", label: "Confirm Task", active: false },
+                    {(task.isSelfAssigned ? [
+                      // Self-assigned: approver approves → work → submit
+                      { emoji: "⏳", label: "Awaiting Approval", active: true },
                       { emoji: "▶", label: "Start Work", active: false },
                       { emoji: "🏁", label: "Submit", active: false },
-                    ] : [
+                    ] : task.hasTimer === true ? [
+                      // Timer ON: employee proposes deadline → TL approves → confirm → start
                       { emoji: "📅", label: "Set Deadline", active: true },
                       { emoji: "⏳", label: "TL Approves", active: false },
                       { emoji: "✅", label: "Confirm Task", active: false },
                       { emoji: "▶", label: "Start Work", active: false },
+                    ] : [
+                      // Timer OFF: fixed deadline set → confirm → work → submit
+                      { emoji: "✅", label: "Confirm Task", active: true },
+                      { emoji: "▶", label: "Start Work", active: false },
+                      { emoji: "🏁", label: "Submit", active: false },
                     ]).map((step, i, arr) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
                         <div style={{
@@ -7161,15 +7271,15 @@ em-emoji-picker,
                       </div>
                     )}
 
-                    {/* Step 1a: Timer task — skip deadline, show Confirm directly */}
-                    {!hasDueDate && status === "open" && task.hasTimer === true && (
+                    {/* Step 1a: No-timer task — fixed deadline set by CEO/TL, confirm directly */}
+                    {!hasDueDate && status === "open" && task.hasTimer === false && !task.isSelfAssigned && (
                       <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ fontSize: 16 }}>⏱</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Timer Task — Confirm to Begin</span>
+                          <span style={{ fontSize: 16 }}>📅</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Deadline Task — Confirm to Begin</span>
                         </div>
                         <div style={{ fontSize: 11, color: "#64748B", marginBottom: 10, lineHeight: 1.5 }}>
-                          This task uses a timer instead of a fixed deadline. Confirm the task to start tracking your time.
+                          This task has a fixed deadline set by your manager. Confirm the task to begin working.
                         </div>
                         <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
                           style={{ width: "100%", marginBottom: 0 }}>
@@ -7179,8 +7289,21 @@ em-emoji-picker,
                       </div>
                     )}
 
-                    {/* Step 1b: propose deadline — only for non-timer tasks */}
-                    {!hasDueDate && status === "open" && task.hasTimer !== true && (
+                    {/* Self-assigned task: waiting for approver */}
+                    {task.isSelfAssigned && status === "open" && task.selfAssignApproved !== true && (
+                      <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                          <span style={{ fontSize: 16 }}>⏳</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>Waiting for Approval</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#6D28D9", lineHeight: 1.5 }}>
+                          This is a self-assigned task. <strong>{task.approverName || "Your approver"}</strong> needs to approve it before you can begin work.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 1b: Timer task — employee proposes deadline → TL approves */}
+                    {!hasDueDate && status === "open" && task.hasTimer === true && (
                       <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                           <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
@@ -8342,6 +8465,19 @@ em-emoji-picker,
           parentTask={activeModal.task}
         />
       }
+      {activeModal?.type === "self_assign" && (
+        <SelfAssignTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async (newTask) => {
+            setActiveModal(null);
+            await loadAllTasks();
+            if (newTask?.taskId) loadDetail(newTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+        />
+      )}
       {activeModal?.type === "forward" && <ForwardTaskModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); if (selectedTask) loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "report" && <DailyReportModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); setActiveDetailTab("reports"); }} />}
       {activeModal?.type === "deadline" && task && <EditDeadlineModal task={task} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(task.taskId); loadAllTasks(); }} />}

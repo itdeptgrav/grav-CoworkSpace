@@ -279,13 +279,19 @@ export default function CreateTaskModal({
                 const validRows = subtaskRows.filter(r => r.title.trim() && r.assigneeIds.length > 0);
                 if (!validRows.length) { setError("Add at least one subtask with title and assignee."); setSubmitting(false); return; }
                 for (const row of validRows) {
+                    // hasTimer=false → CEO/TL set fixed deadline; no start/pause
+                    const _timerOn = form.hasTimer;
+                    const _fixedDL = (!_timerOn && form.deadline)
+                        ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString()
+                        : null;
                     const newTask = await createTask({
                         title: row.title.trim(),
                         description: row.description,
                         notes: row.notes,
                         assigneeIds: row.assigneeIds,
-                        dueDate: (!isFolder && !isRepeat && !isThirdParty && !isGoal && !form.hasTimer && form.deadline) ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null,
-                        hasTimer: (!isFolder && !isRepeat && !isThirdParty && !isGoal) ? form.hasTimer : undefined,
+                        dueDate: null,
+                        hasTimer: _timerOn,
+                        fixedDeadline: _fixedDL,
                         priority: row.priority || 5,
                         parentTaskId: parentTask?.taskId || null,
                         createdByRole: currentRole,
@@ -301,12 +307,21 @@ export default function CreateTaskModal({
             } else {
                 if (!form.title.trim()) { setError("Title is required."); setSubmitting(false); return; }
                 if (!isFolder && !selectedIds.length) { setError("Assign to at least one person."); setSubmitting(false); return; }
+                // ── Compute timer/deadline fields ──────────────────────────
+                // hasTimer=true  → employee proposes deadline via timer flow
+                // hasTimer=false → CEO/TL set a fixed deadline at creation; no start/pause
+                const isSpecialType = isFolder || isRepeat || isThirdParty || isGoal;
+                const timerOn = isSpecialType ? undefined : form.hasTimer;
+                const fixedDeadlineISO = (!isSpecialType && !form.hasTimer && form.deadline)
+                    ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString()
+                    : null;
+
                 const newTask = await createTask({
                     title: form.title.trim(),
                     description: form.description,
                     notes: isFolder ? "" : form.notes,
                     assigneeIds: isFolder ? [] : selectedIds,
-                    dueDate: (!isFolder && !isRepeat && !isThirdParty && !isGoal && !form.hasTimer && form.deadline) ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null,
+                    dueDate: null, // always null; fixedDeadline used for no-timer tasks
                     priority: isFolder ? 5 : (form.priority || 5),
                     parentTaskId: parentTask?.taskId || null,
                     createdByRole: currentRole,
@@ -315,7 +330,8 @@ export default function CreateTaskModal({
                     createdByTl: currentRole === "tl",
                     status: "open",
                     isFolder: isFolder || false,
-                    hasTimer: (!isFolder && !isRepeat && !isThirdParty && !isGoal) ? form.hasTimer : undefined,
+                    hasTimer: timerOn,
+                    fixedDeadline: fixedDeadlineISO,
                     isRepeat: isRepeat || false,
                     repeatConfig: isRepeat ? repeatConfig : null,
                     isThirdParty: isThirdParty || false,
