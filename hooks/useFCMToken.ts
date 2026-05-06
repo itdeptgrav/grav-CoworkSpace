@@ -37,33 +37,63 @@ export function useFCMToken(employeeId: string | null) {
                 await navigator.serviceWorker.ready;
                 console.log("[FCM] Service worker registered:", swReg.scope);
 
-                // 3. Get FCM token
-                const messaging = getMessaging(firebaseAuth.app);
-                const token = await getToken(messaging, {
-                    vapidKey: VAPID_KEY,
-                    serviceWorkerRegistration: swReg,
-                });
+                // 3. Detect iOS Safari — Firebase Messaging getToken does NOT work on iOS
+                const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+                    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+                const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+                const isIOSSafari = isIOS || isSafari;
 
-                if (!token) {
-                    console.warn("[FCM] No token received — check VAPID key");
-                    return;
+                let token: string | null = null;
+
+                if (isIOSSafari) {
+                    // iOS Safari: use Web Push API directly with VAPID key
+                    // Firebase getToken() does not work on iOS — use pushManager.subscribe instead
+                    console.log("[FCM] iOS/Safari detected — using Web Push API directly");
+                    try {
+                        // Convert VAPID key to Uint8Array
+                        const vapidBytes = urlBase64ToUint8Array(VAPID_KEY);
+                        const existing = await swReg.pushManager.getSubscription();
+                        const sub = existing || await swReg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: vapidBytes,
+                        });
+                        // Use endpoint as token identifier for iOS
+                        token = JSON.stringify(sub.toJSON());
+                        console.log("[FCM] iOS Web Push subscription obtained ✅");
+                    } catch (e: any) {
+                        console.warn("[FCM] iOS push subscribe failed:", e?.message);
+                        return;
+                    }
+                } else {
+                    // Android/Chrome/Desktop: use Firebase Messaging getToken
+                    const messaging = getMessaging(firebaseAuth.app);
+                    const fcmToken = await getToken(messaging, {
+                        vapidKey: VAPID_KEY,
+                        serviceWorkerRegistration: swReg,
+                    });
+                    if (!fcmToken) {
+                        console.warn("[FCM] No token received — check VAPID key");
+                        return;
+                    }
+                    token = fcmToken;
+                    console.log("[FCM] FCM token obtained:", token.slice(0, 20) + "...");
+
+                    // Foreground message handler (Android/Chrome only)
+                    onMessage(messaging, (payload) => {
+                        console.log("[FCM] Foreground message:", payload.notification?.title);
+                    });
                 }
 
-                console.log("[FCM] Token obtained:", token.slice(0, 20) + "...");
-
-                // 4. Save token to Firestore — use arrayUnion so multiple devices/browsers
-                //    all get notifications (laptop + Android phone = 2 tokens, both fire)
+                // 4. Save token to Firestore
                 const { arrayUnion } = await import("firebase/firestore");
                 await setDoc(
                     doc(firebaseDb, "cowork_fcm_tokens", employeeId),
                     {
                         employeeId,
-                        // Store array of tokens — one per device/browser
                         tokens: arrayUnion(token),
-                        // Keep latest token for quick single-device lookup
                         latestToken: token,
                         updatedAt: serverTimestamp(),
-                        platform: "web",
+                        platform: isIOSSafari ? "ios-web" : "web",
                         userAgent: navigator.userAgent.slice(0, 100),
                     },
                     { merge: true }
@@ -72,22 +102,18 @@ export function useFCMToken(employeeId: string | null) {
                 tokenSavedRef.current = true;
                 console.log("[FCM] Token saved to Firestore ✅");
 
-                // 5. Foreground message handler
-                // When app IS open, FCM delivers here via onMessage.
-                // We log it but do NOT call new Notification() manually —
-                // the in-app badge/bell system (useCoworkNotifications) already
-                // shows alerts via Firestore. Showing a browser popup on top
-                // would double-notify the user.
-                onMessage(messaging, (payload) => {
-                    console.log("[FCM] Foreground message received (app is open):", payload.notification?.title);
-                    // In-app notification bell handles this automatically via Firestore.
-                    // No manual browser Notification needed here.
-                });
-
             } catch (err: any) {
                 console.error("[FCM] Setup error:", err?.message || err);
             }
         };
+
+        // Helper: convert VAPID base64 key to Uint8Array for Web Push API
+        function urlBase64ToUint8Array(base64String: string): Uint8Array {
+            const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+            const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+            const rawData = atob(base64);
+            return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+        }
 
         setup();
     }, [employeeId]);
