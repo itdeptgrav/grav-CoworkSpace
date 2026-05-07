@@ -51,7 +51,7 @@ export function useFCMToken(employeeId: string | null) {
                     console.log("[FCM] iOS/Safari detected — using Web Push API directly");
                     try {
                         // Convert VAPID key to Uint8Array
-                        const vapidBytes = urlBase64ToUint8Array(VAPID_KEY);
+                        const vapidBytes = urlBase64ToUint8Array(VAPID_KEY).buffer as ArrayBuffer;
                         const existing = await swReg.pushManager.getSubscription();
                         const sub = existing || await swReg.pushManager.subscribe({
                             userVisibleOnly: true,
@@ -107,14 +107,14 @@ export function useFCMToken(employeeId: string | null) {
             }
         };
 
-        // Helper: convert VAPID base64 key to Uint8Array for Web Push API
-        function urlBase64ToUint8Array(base64String: string): Uint8Array {
-            const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-            const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-            const rawData = atob(base64);
-            return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
-        }
-
         setup();
     }, [employeeId]);
+}
+
+// Helper: convert VAPID base64 key to Uint8Array for Web Push API
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }

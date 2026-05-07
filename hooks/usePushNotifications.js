@@ -30,19 +30,36 @@ function showViaServiceWorker(sw, { title, body, icon, tag, url }) {
 }
 
 /* ── Fallback: use the Notification API directly (no SW required) ── */
-function showDirect({ title, body, icon, tag, url }) {
+async function showDirect({ title, body, icon, tag, url }) {
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    const n = new Notification(title, {
-        body,
-        icon: icon || "/icons/icon-192x192.png",
-        tag: tag || "cowork-" + Date.now(),
-        requireInteraction: false,
-    });
-    n.onclick = () => {
-        window.focus();
-        window.location.href = url || "/coworking";
-        n.close();
-    };
+    // On iOS Safari PWA, new Notification() is blocked — must use SW showNotification
+    if ("serviceWorker" in navigator) {
+        try {
+            const reg = await navigator.serviceWorker.ready;
+            await reg.showNotification(title, {
+                body,
+                icon: icon || "/icon-192.png",
+                badge: "/icon-192.png",
+                tag: tag || "cowork-" + Date.now(),
+                renotify: true,
+                requireInteraction: false,
+                data: { url: url || "/coworking" },
+                vibrate: [200, 100, 200],
+            });
+            return;
+        } catch (e) {
+            // fall through to direct Notification below
+        }
+    }
+    try {
+        const n = new Notification(title, {
+            body,
+            icon: icon || "/icon-192.png",
+            tag: tag || "cowork-" + Date.now(),
+            requireInteraction: false,
+        });
+        n.onclick = () => { window.focus(); window.location.href = url || "/coworking"; n.close(); };
+    } catch (e) { /* Notification blocked */ }
 }
 
 export function usePushNotifications(employeeId) {
@@ -131,11 +148,13 @@ export function usePushNotifications(employeeId) {
                     : "/coworking";
                 const tag = data.type + "-" + change.doc.id;
 
-                if (swRef.current?.active) {
-                    showViaServiceWorker(swRef.current, { title, body, tag, url });
-                } else {
-                    showDirect({ title, body, tag, url });
+                // Always try service worker first, fall back to direct Notification API
+                const sw = swRef.current || (await navigator.serviceWorker?.ready.catch(() => null));
+                if (sw?.active) {
+                    showViaServiceWorker(sw, { title, body, tag, url });
                 }
+                // ALSO show direct notification as fallback (covers iPhone + cases where SW postMessage fails)
+                showDirect({ title, body, tag, url });
             });
         }, () => { });
 
