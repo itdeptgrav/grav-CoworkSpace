@@ -148,13 +148,12 @@ export function usePushNotifications(employeeId) {
                     : "/coworking";
                 const tag = data.type + "-" + change.doc.id;
 
-                // Always try service worker first, fall back to direct Notification API
-                const sw = swRef.current || (await navigator.serviceWorker?.ready.catch(() => null));
-                if (sw?.active) {
-                    showViaServiceWorker(sw, { title, body, tag, url });
-                }
-                // ALSO show direct notification as fallback (covers iPhone + cases where SW postMessage fails)
+                // Always show via showDirect (handles both SW and direct Notification API)
                 showDirect({ title, body, tag, url });
+                // Also try SW postMessage if available
+                if (swRef.current?.active) {
+                    showViaServiceWorker(swRef.current, { title, body, tag, url });
+                }
             });
         }, () => { });
 
