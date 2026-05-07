@@ -85,12 +85,14 @@ export function useFCMToken(employeeId: string | null) {
                 }
 
                 // 4. Save token to Firestore
-                const { arrayUnion } = await import("firebase/firestore");
+                // Use SET (not merge) to replace old/stale tokens on reinstall
+                const deviceKey = `${isIOSSafari ? "ios" : "web"}_${navigator.userAgent.slice(0, 40).replace(/\s/g, "_")}`;
                 await setDoc(
                     doc(firebaseDb, "cowork_fcm_tokens", employeeId),
                     {
                         employeeId,
-                        tokens: arrayUnion(token),
+                        // Store as map keyed by device — replaces stale token for same device
+                        [`device_${deviceKey}`]: token,
                         latestToken: token,
                         updatedAt: serverTimestamp(),
                         platform: isIOSSafari ? "ios-web" : "web",
