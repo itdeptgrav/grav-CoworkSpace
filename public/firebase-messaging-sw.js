@@ -64,40 +64,7 @@ messaging.onBackgroundMessage((payload) => {
     });
 });
 
-// ── 1b. Raw push event — iOS Safari 16.4+ PWA uses this instead of FCM ───────
-self.addEventListener('push', (event) => {
-    if (!event.data) return;
-    let payload = {};
-    try {
-        const raw = event.data.json();
-        // Handle all FCM payload formats
-        if (raw.data?.title) {
-            payload = { title: raw.data.title, body: raw.data.body || '', type: raw.data.type || '', data: raw.data };
-        } else if (raw.notification?.title) {
-            payload = { title: raw.notification.title, body: raw.notification.body || '', type: raw.data?.type || '', data: raw.data || {} };
-        } else {
-            payload = raw;
-        }
-    } catch (e) {
-        try { payload = { title: event.data.text() || 'CoWork', body: '', type: '', data: {} }; } catch { return; }
-    }
-
-    const title = payload.title || 'CoWork';
-    const body = payload.body || '';
-    const type = payload.type || payload.data?.type || '';
-
-    event.waitUntil(
-        self.registration.showNotification(title, {
-            body,
-            icon: '/icon-192.png',
-            badge: '/icon-192.png',
-            tag: 'cowork-' + (type || 'notif') + '-' + Date.now(),
-            renotify: true,
-            data: { url: getUrl(type), ...(payload.data || {}) },
-            vibrate: [200, 100, 200],
-        })
-    );
-});
+// iOS push handled by onBackgroundMessage above
 
 // ── 2. Foreground push — from usePushNotifications postMessage ────────────────
 self.addEventListener('message', (event) => {
