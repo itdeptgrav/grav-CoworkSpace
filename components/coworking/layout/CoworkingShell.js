@@ -1756,6 +1756,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const router = useRouter();
   const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
 
+  // ── In-app notification toast — shows when app is open ───────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      const { title, body, url, type } = e.detail || {};
+      setNotifToast({ title, body, url, type });
+      setTimeout(() => setNotifToast(null), 4500);
+    };
+    window.addEventListener("cowork:notification", handler);
+    return () => window.removeEventListener("cowork:notification", handler);
+  }, []);
+
   // ── Push notifications — FCM token registration + foreground/background push ──
   // useFCMToken:         registers this device with FCM so backend can push when app is closed
   // usePushNotifications: listens to cowork_notifications and fires native OS alerts
@@ -1972,6 +1983,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   // ── Auth toasts (login success) ──────────────────────────────────────────
   const [authToast, setAuthToast] = useState(null); // { type: "login"|"logout", name }
+  const [notifToast, setNotifToast] = useState(null); // { title, body, url, type }
   useEffect(() => {
     const name = sessionStorage.getItem("cowork_login_toast");
     if (name !== null) {
@@ -2266,6 +2278,33 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
+      {/* ── In-app notification toast — bottom right ── */}
+      {notifToast && (
+        <div
+          onClick={() => { if (notifToast.url) { window.location.href = notifToast.url; } setNotifToast(null); }}
+          style={{
+            position: "fixed", bottom: "env(safe-area-inset-bottom, 24px)", right: 16, zIndex: 9999,
+            background: "#1E293B", color: "#fff", borderRadius: 12,
+            padding: "12px 16px", maxWidth: "min(320px, calc(100vw - 32px))", minWidth: 260,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.35)",
+            cursor: notifToast.url ? "pointer" : "default",
+            display: "flex", alignItems: "flex-start", gap: 10,
+            animation: "slideInRight 0.25s ease",
+            borderLeft: "4px solid #7C3AED",
+          }}
+        >
+          <style>{`@keyframes slideInRight { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }`}</style>
+          <div style={{ fontSize: 20, flexShrink: 0 }}>
+            {notifToast.type === "direct_message" ? "💬" : notifToast.type === "task_assigned" ? "📋" : notifToast.type === "group_message" ? "👥" : "🔔"}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{notifToast.title}</div>
+            <div style={{ fontSize: 12, color: "#CBD5E1", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{notifToast.body}</div>
+          </div>
+          <button onClick={e => { e.stopPropagation(); setNotifToast(null); }} style={{ background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 16, padding: 0, flexShrink: 0 }}>✕</button>
+        </div>
+      )}
+
       {/* ── Login success toast — top right ── */}
       {authToast && (
         <div style={{

@@ -194,6 +194,7 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
   // Only notifications NEWER than this value trigger a native push.
   const baselineMs = useRef<number>(0);
   const swReady = useRef<boolean>(false);
+  const existingIds = useRef<Set<string>>(new Set());
 
   // ── 1. Initialise push permission + service worker once ──────────────────
   useEffect(() => {
@@ -241,14 +242,8 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
         // ── Seed baseline on first load; fire push on subsequent changes ─
         if (firstLoad) {
           firstLoad = false;
-          // Set baseline to the timestamp of the newest existing notification
-          // so we never replay stale ones on refresh.
-          if (snap.docs.length > 0) {
-            const ts = snap.docs[0].data().createdAt;
-            baselineMs.current = ts?.seconds ? ts.seconds * 1000 : Date.now();
-          } else {
-            baselineMs.current = Date.now();
-          }
+          // Record the IDs of all existing notifications so we never replay them
+          existingIds.current = new Set(snap.docs.map(d => d.id));
           return;
         }
 
@@ -257,13 +252,9 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
           if (change.type !== "added") return;
           const data = change.doc.data();
 
-          const createdMs: number = data.createdAt?.seconds
-            ? data.createdAt.seconds * 1000
-            : Date.now();
-
-          // Skip anything that arrived before or at our baseline
-          if (createdMs <= baselineMs.current) return;
-          baselineMs.current = Math.max(baselineMs.current, createdMs);
+          // Skip if this doc existed before we started listening
+          if (existingIds.current.has(change.doc.id)) return;
+          existingIds.current.add(change.doc.id);
 
           // Make title and body richer: show sender name prominently
           const fromName = data.data?.fromName || data.data?.senderName || "";
@@ -300,10 +291,22 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
             data: { taskId, requestId, conversationId: convId, type: notifType },
           };
 
-          if (swRef.current?.active) {
-            showViaServiceWorker(swRef.current, opts);
-          } else {
-            showDirect(opts);
+          const isVisible = typeof document !== "undefined" && document.visibilityState === "visible";
+
+          // ALWAYS fire in-app toast — works on all devices when app is open
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("cowork:notification", {
+              detail: { title, body, url, type: notifType, tag }
+            }));
+          }
+
+          // Also fire OS push notification (for background/minimized)
+          if (!isVisible) {
+            if (swRef.current?.active) {
+              showViaServiceWorker(swRef.current, opts);
+            } else {
+              showDirect(opts);
+            }
           }
         });
       },

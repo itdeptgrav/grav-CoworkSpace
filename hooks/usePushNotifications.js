@@ -63,6 +63,11 @@ async function showDirect({ title, body, icon, tag, url }) {
 }
 
 export function usePushNotifications(employeeId) {
+    // NOTE: useCoworkNotifications.ts already handles all foreground + background
+    // notifications including in-app toast and OS push. This hook is disabled
+    // to prevent duplicate listeners and conflicts.
+    return;
+    // eslint-disable-next-line no-unreachable
     const swRef = useRef(null);
     const seenRef = useRef(Date.now()); // initialize immediately to avoid replaying old notifications
     const initialised = useRef(false);
