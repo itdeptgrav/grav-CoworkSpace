@@ -293,20 +293,18 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
 
           const isVisible = typeof document !== "undefined" && document.visibilityState === "visible";
 
-          // ALWAYS fire in-app toast — works on all devices when app is open
-          if (typeof window !== "undefined") {
+          if (isVisible) {
+            // App is open — show in-app toast
             window.dispatchEvent(new CustomEvent("cowork:notification", {
               detail: { title, body, url, type: notifType, tag }
             }));
           }
 
-          // Also fire OS push notification (for background/minimized)
-          if (!isVisible) {
-            if (swRef.current?.active) {
-              showViaServiceWorker(swRef.current, opts);
-            } else {
-              showDirect(opts);
-            }
+          // Always try OS push (works in background, browsers suppress when app focused)
+          if (swRef.current?.active) {
+            showViaServiceWorker(swRef.current, opts);
+          } else {
+            showDirect(opts);
           }
         });
       },
