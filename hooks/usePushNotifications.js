@@ -64,7 +64,7 @@ async function showDirect({ title, body, icon, tag, url }) {
 
 export function usePushNotifications(employeeId) {
     const swRef = useRef(null);
-    const seenRef = useRef(null); // timestamp of last seen notification
+    const seenRef = useRef(Date.now()); // initialize immediately to avoid replaying old notifications
     const initialised = useRef(false);
 
     /* ── 1. Register service worker + request permission ── */
@@ -147,10 +147,18 @@ export function usePushNotifications(employeeId) {
                     ? `/coworking/tasks`
                     : "/coworking";
                 const tag = data.type + "-" + change.doc.id;
+                const type = data.type || "";
 
-                // Always show via showDirect (handles both SW and direct Notification API)
+                // If app is open and visible → show in-app toast (works on ALL devices)
+                if (document.visibilityState === "visible") {
+                    window.dispatchEvent(new CustomEvent("cowork:notification", {
+                        detail: { title, body, url, type }
+                    }));
+                    return; // don't show OS push when app is open
+                }
+
+                // App is in background → show OS push notification
                 showDirect({ title, body, tag, url });
-                // Also try SW postMessage if available
                 if (swRef.current?.active) {
                     showViaServiceWorker(swRef.current, { title, body, tag, url });
                 }
