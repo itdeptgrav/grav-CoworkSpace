@@ -15,7 +15,7 @@ export function useFCMToken(employeeId: string | null) {
     const tokenSavedRef = useRef(false);
 
     useEffect(() => {
-        if (!employeeId || tokenSavedRef.current) return;
+        if (!employeeId) return;
         if (typeof window === "undefined") return;
         if (!("Notification" in window)) return;
         if (!("serviceWorker" in navigator)) return;
@@ -84,14 +84,21 @@ export function useFCMToken(employeeId: string | null) {
                     });
                 }
 
-                // 4. Save token to Firestore
-                // Use SET (not merge) to replace old/stale tokens on reinstall
-                const deviceKey = `${isIOSSafari ? "ios" : "web"}_${navigator.userAgent.slice(0, 40).replace(/\s/g, "_")}`;
+                // 4. Check if token changed vs what's stored
+                const deviceKey = `${isIOSSafari ? "ios" : "web"}_${navigator.userAgent.slice(0, 40).replace(/[^a-zA-Z0-9]/g, "_")}`;
+                const existingDoc = await import("firebase/firestore").then(({ getDoc }) =>
+                    getDoc(doc(firebaseDb, "cowork_fcm_tokens", employeeId))
+                );
+                const existingToken = existingDoc.exists()
+                    ? (existingDoc.data()[`device_${deviceKey}`] || existingDoc.data().latestToken)
+                    : null;
+                const tokenChanged = existingToken && existingToken !== token;
+
+                // Save new token to Firestore
                 await setDoc(
                     doc(firebaseDb, "cowork_fcm_tokens", employeeId),
                     {
                         employeeId,
-                        // Store as map keyed by device — replaces stale token for same device
                         [`device_${deviceKey}`]: token,
                         latestToken: token,
                         updatedAt: serverTimestamp(),
@@ -101,8 +108,12 @@ export function useFCMToken(employeeId: string | null) {
                     { merge: true }
                 );
 
-                tokenSavedRef.current = true;
-                console.log("[FCM] Token saved to Firestore ✅");
+                // If token changed → show update banner so user knows notifications are refreshed
+                if (tokenChanged && typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("cowork:fcm-token-updated"));
+                }
+
+                console.log("[FCM] Token saved/refreshed to Firestore ✅", tokenChanged ? "(token changed)" : "(same token)");
 
             } catch (err: any) {
                 console.error("[FCM] Setup error:", err?.message || err);
