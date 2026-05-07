@@ -13,18 +13,19 @@ import { firebaseAuth, firebaseDb } from "../lib/coworkFirebase";
 const VAPID_KEY = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "";
 
 // Stable device key — same device always gets same key
+// Uses only alphanumeric chars safe for Firestore field names
 function getDeviceKey(): string {
     const ua = navigator.userAgent;
     const screen = `${window.screen.width}x${window.screen.height}`;
     const lang = navigator.language;
     const raw = `${ua}_${screen}_${lang}`;
-    // Simple hash
+    // Hash to safe alphanumeric string — no special chars
     let hash = 0;
     for (let i = 0; i < raw.length; i++) {
         hash = ((hash << 5) - hash) + raw.charCodeAt(i);
         hash |= 0;
     }
-    return `device_${Math.abs(hash).toString(36)}`;
+    return `dev${Math.abs(hash).toString(36)}`;
 }
 
 async function saveToken(employeeId: string, token: string): Promise<void> {

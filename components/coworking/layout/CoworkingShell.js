@@ -1984,6 +1984,17 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   // ── Auth toasts (login success) ──────────────────────────────────────────
   const [authToast, setAuthToast] = useState(null); // { type: "login"|"logout", name }
   const [notifToast, setNotifToast] = useState(null); // { title, body, url, type }
+  const [fcmUpdateBanner, setFcmUpdateBanner] = useState(false);
+
+  // Listen for FCM token update event
+  useEffect(() => {
+    const handler = () => {
+      setFcmUpdateBanner(true);
+      setTimeout(() => setFcmUpdateBanner(false), 5000);
+    };
+    window.addEventListener("cowork:fcm-token-updated", handler);
+    return () => window.removeEventListener("cowork:fcm-token-updated", handler);
+  }, []);
   useEffect(() => {
     const name = sessionStorage.getItem("cowork_login_toast");
     if (name !== null) {
@@ -2278,6 +2289,26 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   return (
     <>
+      {/* ── FCM Token Update Banner ── */}
+      {fcmUpdateBanner && (
+        <div style={{
+          position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)",
+          zIndex: 99999, background: "#7C3AED", color: "#fff",
+          borderRadius: 10, padding: "10px 20px",
+          fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+          display: "flex", alignItems: "center", gap: 10,
+          animation: "slideDown 0.3s ease",
+        }}>
+          <span>🔔</span>
+          <span>Notifications updated — you&apos;re all set!</span>
+          <button onClick={() => setFcmUpdateBanner(false)} style={{
+            background: "rgba(255,255,255,0.2)", border: "none", color: "#fff",
+            borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 12,
+          }}>✕</button>
+        </div>
+      )}
+
       {/* ── In-app notification toast — bottom right ── */}
       {notifToast && (
         <div
