@@ -980,7 +980,7 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                                                 : summary.actionItems.map((a, i) => (
                                                     <div key={i} className="M-action">
                                                         <span className="M-action-n">{i + 1}</span>
-                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65, paddingTop: 1 }}>{a}</div>
+                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65, paddingTop: 1 }}>{typeof a === "string" ? a : a?.item || ""}{a?.owner && <span style={{ fontSize: 11, color: "#6B7280", marginLeft: 8 }}>— {a.owner}</span>}</div>
                                                     </div>
                                                 ))
                                             }
