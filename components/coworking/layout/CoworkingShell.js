@@ -1747,6 +1747,7 @@ function NavIcon({ name, size = 20 }) {
     logout: <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
     bell: <><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></>,
     search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+    sop: <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" /></>,
   };
   return <svg {...s}>{icons[name]}</svg>;
 }
@@ -1783,6 +1784,27 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   const MEET_NOTIF_TYPES = new Set(["meet_scheduled", "meet_cancelled", "meet_updated"]);
   const meetingUnreadCount = notifications.filter(n => !n.read && MEET_NOTIF_TYPES.has(n.type)).length;
+
+  // ── SOP Pending Recheck count (TL/CEO only) ───────────────────────────────
+  const [pendingRecheckCount, setPendingRecheckCount] = React.useState(0);
+  useEffect(() => {
+    if (!employeeId || !["ceo", "tl"].includes(role)) return;
+    const load = async () => {
+      try {
+        const token = await firebaseAuth.currentUser?.getIdToken();
+        const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const res = await fetch(`${BASE}/cowork/sop/recheck/pending-count`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.success) setPendingRecheckCount(data.count || 0);
+      } catch (e) { console.error("recheck count:", e); }
+    };
+    load();
+    // Refresh every 60 seconds
+    const interval = setInterval(load, 60000);
+    return () => clearInterval(interval);
+  }, [employeeId, role]);
 
   // ── Tasks: per-task chat onSnapshot ──────────────────────────────────────
   const [taskChatUnreadCount, setTaskChatUnreadCount] = useState(0);
@@ -2119,10 +2141,38 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   };
   const [reqPanelInitialTab, setReqPanelInitialTab] = useState("received");
   const [notesPanelOpen, setNotesPanelOpen] = useState(false);
-  const [reqPanelContext, setReqPanelContext] = useState(null); // { taskId, taskTitle }
-  const [reqPanelThreadContext, setReqPanelThreadContext] = useState(null); // { type, threadId, recipientId, recipientName }
+  const [reqPanelContext, setReqPanelContext] = useState(null);
+  const [reqPanelThreadContext, setReqPanelThreadContext] = useState(null);
   const [reqPanelOpenRespondId, setReqPanelOpenRespondId] = useState(null);
   const [highlightReqId, setHighlightReqId] = useState(null);
+
+  // ── SOP / My Managers panel state ────────────────────────────────────────
+  const [sopPanelOpen, setSopPanelOpen] = useState(false);
+  const [managersData, setManagersData] = useState(null);   // { primaryManager, secondaryManager }
+  const [managersLoading, setManagersLoading] = useState(false);
+  const [managersError, setManagersError] = useState("");
+
+  const openSopPanel = async () => {
+    setSopPanelOpen(true);
+    if (managersData) return; // already loaded
+    setManagersLoading(true);
+    setManagersError("");
+    try {
+      const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const res = await fetch(`${BASE}/cowork/employee/my-managers/${employeeId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) setManagersData({ primaryManager: data.primaryManager, secondaryManager: data.secondaryManager });
+      else setManagersError(data.message || "Failed to load manager info");
+    } catch (e) {
+      setManagersError("Could not fetch manager details.");
+    } finally {
+      setManagersLoading(false);
+    }
+  };
 
   // Allow any page to open the request panel via custom event
   useEffect(() => {
@@ -2244,6 +2294,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),
     { id: "calendar", label: "Calendar", icon: "calendar", path: "/coworking/calendar" },
+    { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
     { id: "settings", label: "Settings", icon: "settings", path: "/coworking/settings" },
   ];
 
@@ -3022,11 +3073,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                     // All badges use real-time readBy-based counts so they decrement
                     // as messages are actually read — 3 → 2 → 1 → 0
                     const cnt =
-                      item.id === "messages" ? dmUnreadCount        // per-message readBy live
-                        : item.id === "groups" ? groupUnreadCount     // per-message readBy live
-                          : item.id === "tasks" ? taskChatUnreadCount  // per-message readBy live
-                            : item.id === "meetings" ? meetingUnreadCount   // notification-based
-                              : 0;
+                      item.id === "messages" ? dmUnreadCount
+                        : item.id === "groups" ? groupUnreadCount
+                          : item.id === "tasks" ? taskChatUnreadCount
+                            : item.id === "meetings" ? meetingUnreadCount
+                              : item.id === "sop" ? pendingRecheckCount
+                                : 0;
 
                     // NEW badge on Settings — only when no profile pic uploaded yet
                     if (item.id === "settings" && !ownProfilePicUrl) return (
@@ -3191,6 +3243,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </span>
                 )}
               </button>
+
+              {/* SOP button removed from topbar — accessible via sidebar only */}
 
               <div style={{ position: "relative" }}>
                 <button className="cw-topbar-icon-btn" title="Notifications" onClick={() => setNotifOpen(!notifOpen)} style={{ position: "relative" }}>
@@ -3444,6 +3498,187 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             </div>
           );
         })()}
+      </div>
+
+      {/* ── SOP / My Managers Sidebar Panel ── */}
+      <div
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 499, display: sopPanelOpen ? "block" : "none" }}
+        onClick={() => setSopPanelOpen(false)}
+      />
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 380, maxWidth: "100vw",
+        background: "#fff", borderLeft: "1px solid #E4E7EC",
+        boxShadow: "-8px 0 32px rgba(0,0,0,0.12)", zIndex: 500,
+        display: "flex", flexDirection: "column",
+        transform: sopPanelOpen ? "translateX(0)" : "translateX(100%)",
+        transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+        fontFamily: "inherit",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: "1px solid #E4E7EC", background: "#EBF3FE", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "#1A73E8", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1A1D21" }}>My Managers</div>
+              <div style={{ fontSize: 10, color: "#6B7280", marginTop: 1 }}>Primary &amp; Secondary reporting managers</div>
+            </div>
+          </div>
+          <button onClick={() => setSopPanelOpen(false)}
+            style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #D0D5DD", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#667085" }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {managersLoading && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "48px 0", color: "#9AA0A6" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+              <span style={{ fontSize: 13 }}>Fetching manager details…</span>
+            </div>
+          )}
+
+          {managersError && (
+            <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, fontSize: 12, color: "#DC2626" }}>
+              {managersError}
+            </div>
+          )}
+
+          {!managersLoading && !managersError && managersData && (
+            <>
+              {/* Primary Manager Card */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+                  Primary Manager
+                </div>
+                {managersData.primaryManager ? (
+                  <div style={{ border: "1px solid #BFDBFE", borderRadius: 10, overflow: "hidden", background: "#F0F7FF" }}>
+                    <div style={{ background: "#1A73E8", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                      {managersData.primaryManager.profilePhotoUrl ? (
+                        <img src={managersData.primaryManager.profilePhotoUrl} alt={managersData.primaryManager.name}
+                          style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(255,255,255,0.4)", flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                          {managersData.primaryManager.name?.[0]?.toUpperCase() || "?"}
+                        </div>
+                      )}
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{managersData.primaryManager.name}</div>
+                        {managersData.primaryManager.designation && (
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>{managersData.primaryManager.designation}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {managersData.primaryManager.department && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#374151" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Department</span>
+                          <span style={{ fontWeight: 600 }}>{managersData.primaryManager.department}</span>
+                        </div>
+                      )}
+                      {managersData.primaryManager.phone && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#374151" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.06 1.2 2 2 0 012.03 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Phone</span>
+                          <a href={`tel:${managersData.primaryManager.phone}`} style={{ fontWeight: 600, color: "#1A73E8", textDecoration: "none" }}>{managersData.primaryManager.phone}</a>
+                        </div>
+                      )}
+                      {managersData.primaryManager.email && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#374151" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Email</span>
+                          <a href={`mailto:${managersData.primaryManager.email}`} style={{ fontWeight: 600, color: "#1A73E8", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{managersData.primaryManager.email}</a>
+                        </div>
+                      )}
+                      {managersData.primaryManager.biometricId && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Employee ID</span>
+                          <code style={{ fontFamily: "monospace", fontWeight: 700, color: "#374151", background: "#E5E7EB", padding: "1px 6px", borderRadius: 4 }}>{managersData.primaryManager.biometricId}</code>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 12, color: "#9AA0A6", textAlign: "center" }}>
+                    No primary manager assigned
+                  </div>
+                )}
+              </div>
+
+              {/* Secondary Manager Card */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+                  Secondary Manager
+                </div>
+                {managersData.secondaryManager ? (
+                  <div style={{ border: "1px solid #C4B5FD", borderRadius: 10, overflow: "hidden", background: "#FAF5FF" }}>
+                    <div style={{ background: "#7C3AED", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                      {managersData.secondaryManager.profilePhotoUrl ? (
+                        <img src={managersData.secondaryManager.profilePhotoUrl} alt={managersData.secondaryManager.name}
+                          style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(255,255,255,0.4)", flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(255,255,255,0.2)", border: "2px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                          {managersData.secondaryManager.name?.[0]?.toUpperCase() || "?"}
+                        </div>
+                      )}
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{managersData.secondaryManager.name}</div>
+                        {managersData.secondaryManager.designation && (
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>{managersData.secondaryManager.designation}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {managersData.secondaryManager.department && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#374151" }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Department</span>
+                          <span style={{ fontWeight: 600 }}>{managersData.secondaryManager.department}</span>
+                        </div>
+                      )}
+                      {managersData.secondaryManager.phone && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.06 1.2 2 2 0 012.03 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Phone</span>
+                          <a href={`tel:${managersData.secondaryManager.phone}`} style={{ fontWeight: 600, color: "#7C3AED", textDecoration: "none" }}>{managersData.secondaryManager.phone}</a>
+                        </div>
+                      )}
+                      {managersData.secondaryManager.email && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Email</span>
+                          <a href={`mailto:${managersData.secondaryManager.email}`} style={{ fontWeight: 600, color: "#7C3AED", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{managersData.secondaryManager.email}</a>
+                        </div>
+                      )}
+                      {managersData.secondaryManager.biometricId && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" /></svg>
+                          <span style={{ color: "#6B7280", minWidth: 72 }}>Employee ID</span>
+                          <code style={{ fontFamily: "monospace", fontWeight: 700, color: "#374151", background: "#EDE9FE", padding: "1px 6px", borderRadius: 4 }}>{managersData.secondaryManager.biometricId}</code>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 12, color: "#9AA0A6", textAlign: "center" }}>
+                    No secondary manager assigned
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {!managersLoading && !managersError && !managersData && (
+            <div style={{ textAlign: "center", padding: "48px 0", color: "#9AA0A6", fontSize: 13 }}>No data loaded yet.</div>
+          )}
+        </div>
       </div>
 
       {/* ── Notes Sidebar Panel ── */}

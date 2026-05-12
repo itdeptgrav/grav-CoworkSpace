@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
-import { createEmployee, listEmployees, deleteEmployee } from "../../../lib/coworkApi";
+import { createEmployee, listEmployees, deleteEmployee, updateEmployeeId } from "../../../lib/coworkApi";
 import { GwAvatar } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseAuth } from "../../../lib/coworkFirebase";
 
@@ -44,6 +44,13 @@ export default function CreateEmployeePage() {
   const [tab, setTab] = useState("create");
   const [customDept, setCustomDept] = useState(false);
 
+  // ── Biometric ID picker state ───────────────────────────────────────────
+  const [availableIds, setAvailableIds] = useState([]);  // { biometricId, hrName }
+  const [usedIds, setUsedIds] = useState([]);            // { biometricId, hrName, coworkName }
+  const [selectedId, setSelectedId] = useState("");
+  const [idSearch, setIdSearch] = useState("");
+  const [idsLoading, setIdsLoading] = useState(false);
+
   // ── Reset password modal state ──────────────────────────────────────────
   const [resetModal, setResetModal] = useState(null);  // { employeeId, name }
   const [deleteModal, setDeleteModal] = useState(null); // { employeeId, name, email }
@@ -60,6 +67,14 @@ export default function CreateEmployeePage() {
   const [roleBusy, setRoleBusy] = useState(false);
   const [roleError, setRoleError] = useState("");
 
+  // ── Edit Employee ID modal state ────────────────────────────────────────
+  const [editIdModal, setEditIdModal] = useState(null); // { employeeId, name }
+  const [editIdSelected, setEditIdSelected] = useState("");
+  const [editIdSearch, setEditIdSearch] = useState("");
+  const [editIdBusy, setEditIdBusy] = useState(false);
+  const [editIdError, setEditIdError] = useState("");
+  const [editIdSuccess, setEditIdSuccess] = useState("");
+
   useEffect(() => {
     if (!loading && (!user || role !== "ceo")) {
       router.push(user ? "/coworking" : "/");
@@ -67,8 +82,30 @@ export default function CreateEmployeePage() {
   }, [user, role, loading, router]);
 
   useEffect(() => {
-    if (user && role === "ceo") loadEmployees();
+    if (user && role === "ceo") {
+      loadEmployees();
+      loadBiometricIds();
+    }
   }, [user, role]);
+
+  const loadBiometricIds = async () => {
+    setIdsLoading(true);
+    try {
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${BASE}/cowork/employee/biometric-ids`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAvailableIds(data.available || []);
+        setUsedIds(data.used || []);
+      }
+    } catch (e) {
+      console.error("Failed to load biometric IDs:", e);
+    } finally {
+      setIdsLoading(false);
+    }
+  };
 
   const loadEmployees = async () => {
     try {
@@ -83,13 +120,17 @@ export default function CreateEmployeePage() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    if (!selectedId) { setError("Please select an Employee ID from the list."); return; }
     setError(""); setResult(null); setBusy(true);
     try {
-      const d = await createEmployee({ ...form, role: empRole });
+      const d = await createEmployee({ ...form, role: empRole, employeeId: selectedId });
       setResult({ ...d, role: empRole });
       setForm({ name: "", email: "", mobile: "", city: "", department: "" });
       setEmpRole("employee");
+      setSelectedId("");
+      setIdSearch("");
       await loadEmployees();
+      await loadBiometricIds(); // refresh used/available list
     } catch (e) {
       setError(e.message || "Failed to create employee");
     } finally {
@@ -150,6 +191,28 @@ export default function CreateEmployeePage() {
       setRoleError(e.message || "Role change failed.");
     } finally {
       setRoleBusy(false);
+    }
+  };
+
+  // ── Edit Employee ID ──────────────────────────────────────────────────────
+  const openEditId = (emp) => {
+    setEditIdModal({ employeeId: emp.employeeId, name: emp.name });
+    setEditIdSelected(""); setEditIdSearch(""); setEditIdError(""); setEditIdSuccess("");
+    loadBiometricIds(); // always fresh when modal opens
+  };
+  const closeEditId = () => { if (editIdBusy) return; setEditIdModal(null); };
+  const handleEditId = async () => {
+    if (!editIdSelected || !editIdModal || editIdBusy) return;
+    setEditIdBusy(true); setEditIdError(""); setEditIdSuccess("");
+    try {
+      await updateEmployeeId(editIdModal.employeeId, editIdSelected);
+      setEditIdSuccess(`ID updated to ${editIdSelected} successfully.`);
+      await loadEmployees();
+      await loadBiometricIds();
+    } catch (e) {
+      setEditIdError(e.message || "Update failed.");
+    } finally {
+      setEditIdBusy(false);
     }
   };
 
@@ -245,6 +308,84 @@ export default function CreateEmployeePage() {
                 <div style={{ fontSize: 12, color: "#2563eb", marginTop: 4, background: "#eff6ff", padding: "5px 10px", borderRadius: 3, border: "1px solid #bfdbfe" }}>
                   Team Leads can create subtasks and approve tasks assigned to them.
                 </div>
+              )}
+            </div>
+
+            {/* ── Employee ID Picker (from HR MongoDB biometricIds) ─────────── */}
+            <div style={s.field}>
+              <label style={s.label}>Employee ID</label>
+              {idsLoading ? (
+                <div style={{ fontSize: 12, color: "#9ca3af", padding: "8px 0" }}>Loading available IDs…</div>
+              ) : (
+                <>
+                  {/* Selected ID display */}
+                  {selectedId ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 4 }}>
+                      <code style={{ fontSize: 13, fontWeight: 700, color: "#15803d", fontFamily: "monospace" }}>{selectedId}</code>
+                      <span style={{ fontSize: 12, color: "#374151" }}>
+                        {availableIds.find(a => a.biometricId === selectedId)?.hrName}
+                      </span>
+                      <button type="button" onClick={() => setSelectedId("")}
+                        style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#6b7280", textDecoration: "underline", padding: 0 }}>
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Search box */}
+                      <input
+                        type="text"
+                        style={{ ...s.input, marginBottom: 6 }}
+                        placeholder="Search ID or name…"
+                        value={idSearch}
+                        onChange={e => setIdSearch(e.target.value)}
+                      />
+
+                      {/* Available IDs */}
+                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 4, maxHeight: 180, overflowY: "auto" }}>
+                        <div style={{ padding: "5px 10px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Available — select one
+                        </div>
+                        {availableIds
+                          .filter(a => !idSearch || a.biometricId.toLowerCase().includes(idSearch.toLowerCase()) || a.hrName.toLowerCase().includes(idSearch.toLowerCase()))
+                          .map(a => (
+                            <div key={a.biometricId}
+                              onClick={() => { setSelectedId(a.biometricId); setIdSearch(""); }}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", transition: "background 0.1s" }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#f0fdf4"}
+                              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                            >
+                              <code style={{ fontSize: 12, fontWeight: 600, color: "#15803d", fontFamily: "monospace", minWidth: 60 }}>{a.biometricId}</code>
+                              <span style={{ fontSize: 12, color: "#374151" }}>{a.hrName}</span>
+                            </div>
+                          ))}
+                        {availableIds.filter(a => !idSearch || a.biometricId.toLowerCase().includes(idSearch.toLowerCase()) || a.hrName.toLowerCase().includes(idSearch.toLowerCase())).length === 0 && (
+                          <div style={{ padding: "12px 10px", fontSize: 12, color: "#9ca3af", textAlign: "center" }}>No available IDs found</div>
+                        )}
+                      </div>
+
+                      {/* Used IDs — greyed, not selectable */}
+                      {usedIds.length > 0 && (
+                        <div style={{ border: "1px solid #e5e7eb", borderRadius: 4, maxHeight: 120, overflowY: "auto", marginTop: 6 }}>
+                          <div style={{ padding: "5px 10px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Already Assigned — cannot select
+                          </div>
+                          {usedIds
+                            .filter(u => !idSearch || u.biometricId.toLowerCase().includes(idSearch.toLowerCase()) || u.hrName.toLowerCase().includes(idSearch.toLowerCase()))
+                            .map(u => (
+                              <div key={u.biometricId}
+                                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderBottom: "1px solid #f3f4f6", opacity: 0.5, cursor: "not-allowed" }}
+                              >
+                                <code style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", fontFamily: "monospace", minWidth: 60 }}>{u.biometricId}</code>
+                                <span style={{ fontSize: 12, color: "#6b7280" }}>{u.hrName}</span>
+                                <span style={{ marginLeft: "auto", fontSize: 10, color: "#9ca3af", fontStyle: "italic" }}>→ {u.coworkName}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
               )}
             </div>
 
@@ -383,6 +524,14 @@ export default function CreateEmployeePage() {
                             onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; }}
                           >
                             Reset Password
+                          </button>
+                          <button
+                            onClick={() => openEditId(emp)}
+                            style={{ padding: "5px 12px", border: "1px solid #a5b4fc", borderRadius: 4, background: "#eef2ff", color: "#3730a3", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#e0e7ff"; e.currentTarget.style.borderColor = "#818cf8"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#eef2ff"; e.currentTarget.style.borderColor = "#a5b4fc"; }}
+                          >
+                            Edit ID
                           </button>
                           <button
                             onClick={() => openRole(emp)}
@@ -658,6 +807,135 @@ export default function CreateEmployeePage() {
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT EMPLOYEE ID MODAL ────────────────────────────────── */}
+      {editIdModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget) closeEditId(); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 480, boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "sans-serif", overflow: "hidden" }}>
+
+            {/* Header */}
+            <div style={{ background: "#eef2ff", borderBottom: "1px solid #c7d2fe", padding: "18px 24px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#3730a3" }}>Edit Employee ID</div>
+                <div style={{ fontSize: 12, color: "#6366f1", marginTop: 2 }}>
+                  {editIdModal.name} &nbsp;·&nbsp; Current ID: <code style={{ fontFamily: "monospace", fontWeight: 700 }}>{editIdModal.employeeId}</code>
+                </div>
+              </div>
+              <button onClick={closeEditId} disabled={editIdBusy}
+                style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#9ca3af", lineHeight: 1 }}>×</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {editIdError && <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, fontSize: 12, color: "#dc2626" }}>{editIdError}</div>}
+              {editIdSuccess && (
+                <div style={{ padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 4, fontSize: 12, color: "#15803d" }}>
+                  {editIdSuccess}
+                </div>
+              )}
+
+              {!editIdSuccess && (
+                <>
+                  {/* Selected display */}
+                  {editIdSelected ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 4 }}>
+                      <code style={{ fontSize: 13, fontWeight: 700, color: "#15803d", fontFamily: "monospace" }}>{editIdSelected}</code>
+                      <span style={{ fontSize: 12, color: "#374151" }}>
+                        {availableIds.find(a => a.biometricId === editIdSelected)?.hrName}
+                      </span>
+                      <button type="button" onClick={() => setEditIdSelected("")}
+                        style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#6b7280", textDecoration: "underline", padding: 0 }}>
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        style={{ ...s.input, width: "100%", boxSizing: "border-box" }}
+                        placeholder="Search ID or name…"
+                        value={editIdSearch}
+                        onChange={e => setEditIdSearch(e.target.value)}
+                        autoFocus
+                      />
+
+                      {/* Available */}
+                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 4, maxHeight: 200, overflowY: "auto" }}>
+                        <div style={{ padding: "5px 10px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Available — select one
+                        </div>
+                        {idsLoading ? (
+                          <div style={{ padding: "12px 10px", fontSize: 12, color: "#9ca3af", textAlign: "center" }}>Loading…</div>
+                        ) : availableIds
+                          .filter(a => !editIdSearch || a.biometricId.toLowerCase().includes(editIdSearch.toLowerCase()) || a.hrName.toLowerCase().includes(editIdSearch.toLowerCase()))
+                          .map(a => (
+                            <div key={a.biometricId}
+                              onClick={() => setEditIdSelected(a.biometricId)}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6" }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#f0fdf4"}
+                              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                            >
+                              <code style={{ fontSize: 12, fontWeight: 600, color: "#15803d", fontFamily: "monospace", minWidth: 64 }}>{a.biometricId}</code>
+                              <span style={{ fontSize: 12, color: "#374151" }}>{a.hrName}</span>
+                            </div>
+                          ))}
+                        {!idsLoading && availableIds.filter(a => !editIdSearch || a.biometricId.toLowerCase().includes(editIdSearch.toLowerCase()) || a.hrName.toLowerCase().includes(editIdSearch.toLowerCase())).length === 0 && (
+                          <div style={{ padding: "12px 10px", fontSize: 12, color: "#9ca3af", textAlign: "center" }}>No available IDs</div>
+                        )}
+                      </div>
+
+                      {/* Used — greyed, not clickable */}
+                      {usedIds.length > 0 && (
+                        <div style={{ border: "1px solid #e5e7eb", borderRadius: 4, maxHeight: 120, overflowY: "auto" }}>
+                          <div style={{ padding: "5px 10px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Already Assigned — cannot select
+                          </div>
+                          {usedIds
+                            .filter(u => !editIdSearch || u.biometricId.toLowerCase().includes(editIdSearch.toLowerCase()) || u.hrName.toLowerCase().includes(editIdSearch.toLowerCase()))
+                            .map(u => (
+                              <div key={u.biometricId}
+                                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", borderBottom: "1px solid #f3f4f6", opacity: 0.45, cursor: "not-allowed" }}>
+                                <code style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", fontFamily: "monospace", minWidth: 64 }}>{u.biometricId}</code>
+                                <span style={{ fontSize: 12, color: "#6b7280" }}>{u.hrName}</span>
+                                <span style={{ marginLeft: "auto", fontSize: 10, color: "#9ca3af", fontStyle: "italic" }}>→ {u.coworkName}</span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Footer buttons */}
+                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+                    <button type="button" onClick={closeEditId} disabled={editIdBusy}
+                      style={{ padding: "8px 18px", border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif" }}>
+                      Cancel
+                    </button>
+                    <button type="button" onClick={handleEditId}
+                      disabled={editIdBusy || !editIdSelected}
+                      style={{ padding: "8px 18px", border: "none", borderRadius: 4, fontSize: 13, fontWeight: 600, fontFamily: "sans-serif", cursor: editIdBusy || !editIdSelected ? "not-allowed" : "pointer", background: editIdBusy || !editIdSelected ? "#a5b4fc" : "#4f46e5", color: "#fff" }}>
+                      {editIdBusy ? "Saving…" : "Save ID"}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {editIdSuccess && (
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button type="button" onClick={closeEditId}
+                    style={{ padding: "8px 18px", border: "none", borderRadius: 4, background: "#4f46e5", color: "#fff", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif" }}>
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
