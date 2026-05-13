@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
-import { changePassword, changeEmail } from "../../../lib/coworkApi";
+import { changePassword, changeEmail, fetchBleachHistory } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 
@@ -23,7 +23,19 @@ export default function SettingsPage() {
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailMsg, setGmailMsg] = useState(""); // success/error message
 
-  // ── Profile picture ──
+  // ── SOP Compliance ──
+  const [sopData, setSopData] = useState(null);
+  const [sopLoading, setSopLoading] = useState(false);
+  const [sopPanelOpen, setSopPanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (!employeeId) return;
+    setSopLoading(true);
+    fetchBleachHistory(employeeId)
+      .then(d => setSopData(d))
+      .catch(console.error)
+      .finally(() => setSopLoading(false));
+  }, [employeeId]);
   const [profilePicUrl, setProfilePicUrl] = useState("");
   const [picUploading, setPicUploading] = useState(false);
   const [picSuccess, setPicSuccess] = useState(false);
@@ -1019,8 +1031,139 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* ── SOP Compliance Card ── */}
+          <div className="stg-card" style={{ maxWidth: 480 }}>
+            <div className="stg-card-head">
+              <div className="stg-card-icon" style={{ background: "#FEF2F2" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+                  <rect x="9" y="3" width="6" height="4" rx="1" />
+                  <line x1="9" y1="12" x2="15" y2="12" />
+                  <line x1="9" y1="16" x2="13" y2="16" />
+                </svg>
+              </div>
+              <div>
+                <p className="stg-card-title">SOP Compliance</p>
+                <p className="stg-card-sub">Your point deduction history</p>
+              </div>
+            </div>
+            <div className="stg-card-body">
+              {sopLoading ? (
+                <div style={{ fontSize: 13, color: "#9AA0A6", padding: "8px 0" }}>Loading…</div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    {/* Total all time */}
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Total Deducted</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "#DC2626", lineHeight: 1 }}>
+                      {(sopData?.sopPoints || []).reduce((s, y) => s + (y.totalDeducted || 0), 0).toFixed(1)} pts
+                    </div>
+                    {/* Per year */}
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+                      {(sopData?.sopPoints || []).sort((a, b) => b.year - a.year).map(y => (
+                        <div key={y.year} style={{ fontSize: 12 }}>
+                          <span style={{ color: "#9AA0A6" }}>{y.year}: </span>
+                          <span style={{ fontWeight: 700, color: "#DC2626" }}>{(y.totalDeducted || 0).toFixed(1)} pts</span>
+                        </div>
+                      ))}
+                      {(sopData?.sopPoints || []).length === 0 && (
+                        <div style={{ fontSize: 13, color: "#15803D", fontWeight: 600 }}>✅ Clean record — no deductions</div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSopPanelOpen(true)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 8, background: "#DC2626", border: "none", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                    View History
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
       </div>
+
+      {/* ── SOP History Panel ── */}
+      {sopPanelOpen && (
+        <>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 999 }} onClick={() => setSopPanelOpen(false)} />
+          <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(420px,100vw)", background: "#fff", borderLeft: "1px solid #E4E7EC", boxShadow: "-8px 0 32px rgba(0,0,0,0.15)", zIndex: 1000, display: "flex", flexDirection: "column", fontFamily: "inherit" }}>
+
+            {/* Panel header */}
+            <div style={{ background: "#DC2626", padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>SOP Bleach History</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>All point deductions on your account</div>
+              </div>
+              <button onClick={() => setSopPanelOpen(false)} style={{ width: 28, height: 28, borderRadius: 7, border: "none", background: "rgba(255,255,255,0.2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+
+            {/* Panel body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+              {sopLoading ? (
+                <div style={{ textAlign: "center", padding: "40px 0", color: "#9AA0A6", fontSize: 13 }}>Loading…</div>
+              ) : (sopData?.sopPoints || []).length === 0 ? (
+                <div style={{ textAlign: "center", padding: "60px 0" }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>✅</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#1A1D21" }}>Clean record</div>
+                  <div style={{ fontSize: 13, color: "#9AA0A6", marginTop: 4 }}>No deductions on your account.</div>
+                </div>
+              ) : (
+                [...(sopData?.sopPoints || [])].sort((a, b) => b.year - a.year).map(yp => {
+                  const allB = [...(yp.bleaches || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+                  const grp = allB.reduce((acc, b) => { const d = b.date || "?"; if (!acc[d]) acc[d] = []; acc[d].push(b); return acc; }, {});
+                  const dates = Object.keys(grp).sort((a, b) => b.localeCompare(a));
+                  return (
+                    <div key={yp.year} style={{ marginBottom: 24 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, display: "flex", justifyContent: "space-between" }}>
+                        <span>{yp.year}</span>
+                        <span style={{ color: "#DC2626" }}>{(yp.totalDeducted || 0).toFixed(1)} pts deducted</span>
+                      </div>
+                      {dates.map(date => (
+                        <div key={date} style={{ border: "1px solid #E4E7EC", borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
+                          <div style={{ padding: "8px 14px", background: "#F8FAFC", borderBottom: "1px solid #E4E7EC", display: "flex", alignItems: "center" }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21" }}>📅 {date}</span>
+                            <span style={{ marginLeft: "auto", fontSize: 11, color: "#DC2626", fontWeight: 700 }}>
+                              -{grp[date].filter(b => b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0).toFixed(1)} pts
+                            </span>
+                          </div>
+                          {grp[date].map((b, i) => {
+                            const rs = b.recheck?.status || "none";
+                            const removed = rs === "confirmed";
+                            return (
+                              <div key={i} style={{ padding: "10px 14px", borderBottom: i < grp[date].length - 1 ? "1px solid #FEF2F2" : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: removed ? 0.5 : 1 }}>
+                                <span style={{ fontSize: 14, flexShrink: 0 }}>{removed ? "✅" : "❌"}</span>
+                                <div style={{ flex: 1 }}>
+                                  {b.folderName && b.folderName !== "Uncategorized" && b.folderName !== "Task Event" && (
+                                    <div style={{ fontSize: 10, color: "#9AA0A6", marginBottom: 2 }}>📁 {b.folderName}</div>
+                                  )}
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1D21", textDecoration: removed ? "line-through" : "none" }}>{b.sopName}</div>
+                                  {b.description && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{b.description}</div>}
+                                  {rs === "pending" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "1px 6px", borderRadius: 99 }}>⏳ Recheck Pending</span>}
+                                  {rs === "confirmed" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#15803D", background: "#F0FDF4", border: "1px solid #BBF7D0", padding: "1px 6px", borderRadius: 99 }}>✅ Deduction Removed</span>}
+                                  {rs === "rejected" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", border: "1px solid #FECACA", padding: "1px 6px", borderRadius: 99 }}>❌ Recheck Denied</span>}
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: removed ? "#9AA0A6" : "#DC2626", background: removed ? "#F3F4F6" : "#FEF2F2", padding: "2px 8px", borderRadius: 6, flexShrink: 0, textDecoration: removed ? "line-through" : "none" }}>{b.points} pts</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <style>{`@keyframes stg-spin { to { transform: rotate(360deg); } }`}</style>
     </>

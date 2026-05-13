@@ -3,12 +3,13 @@ import { useEffect, useState, useCallback } from "react";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
 import {
     fetchSops, createSop, updateSop, deleteSop,
     approveSop, rejectSop, applyBleach, fetchBleachHistory,
     fetchFolders, createFolder, deleteFolder,
     requestRecheck, reviewRecheck, fetchRecheckList,
+    fetchTaskSuggestions, dismissTaskSuggestion,
 } from "../../../lib/coworkApi";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -28,11 +29,14 @@ export default function SopPage() {
     const [folders, setFolders] = useState([]);
     const [sopsLoading, setSopsLoading] = useState(false);
     const [allEmployees, setAllEmployees] = useState([]);
-    const [recheckList, setRecheckList] = useState([]); // pending recheck employees
+    const [recheckList, setRecheckList] = useState([]);
+    const [taskSuggestions, setTaskSuggestions] = useState([]);
+    const [suggestBleachModal, setSuggestBleachModal] = useState(null); // task suggestion object // pending recheck employees
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingSop, setEditingSop] = useState(null);
     const [bleachOpen, setBleachOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const [collapsedFolders, setCollapsedFolders] = useState({}); // { folderName: true/false }
 
     const toggleFolder = (name) => setCollapsedFolders(prev => ({ ...prev, [name]: !prev[name] }));
@@ -56,6 +60,8 @@ export default function SopPage() {
             if (role === "ceo" || role === "tl") {
                 const rData = await fetchRecheckList().catch(() => ({ list: [] }));
                 setRecheckList(rData.list || []);
+                const sData = await fetchTaskSuggestions().catch(() => ({ suggestions: [] }));
+                setTaskSuggestions(sData.suggestions || []);
             }
         } catch (e) { console.error(e); }
         finally { setSopsLoading(false); }
@@ -129,162 +135,200 @@ export default function SopPage() {
                 .sop-folder-block{border:1px solid ${T.border};border-radius:12px;overflow:hidden;margin-bottom:16px;}
                 .sop-folder-header{background:${T.surface};border-bottom:1px solid ${T.border};padding:10px 16px;display:flex;align-items:center;gap:8px;}
                 @keyframes recheckPulse{0%,100%{opacity:1}50%{opacity:0.75}}
+                @media(max-width:600px){
+                    .sop-topbar{flex-direction:column!important;align-items:flex-start!important;}
+                    .sop-topbar-btns{flex-wrap:wrap!important;width:100%;}
+                    .sop-topbar-btns button{flex:1;justify-content:center;}
+                }
             `}</style>
 
+            <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title="SOP">
+                <div style={{ padding: "24px", fontFamily: "inherit" }}>
 
-            <div style={{ padding: "24px", fontFamily: "inherit" }}>
-
-                {/* Top bar */}
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
-                    <div>
-                        <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
-                        <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
-                            {role === "ceo" ? "All department SOPs and compliance"
-                                : role === "tl" ? "Your department SOPs and team compliance"
-                                    : "Your compliance history"}
+                    {/* Top bar */}
+                    <div className="sop-topbar" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+                        <div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
+                            <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
+                                {role === "ceo" ? "All department SOPs and compliance"
+                                    : role === "tl" ? "Your department SOPs and team compliance"
+                                        : "Your compliance history"}
+                            </div>
+                        </div>
+                        <div className="sop-topbar-btns" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
+                                View Managers
+                            </TBtn>
+                            {(role === "ceo" || role === "tl") && (
+                                <TBtn red onClick={() => setBleachOpen(true)}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
+                                    SOP Bleach
+                                </TBtn>
+                            )}
+                            {(role === "ceo" || role === "tl") && (
+                                <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
+                            )}
+                            {role === "ceo" && (
+                                <TBtn outline onClick={() => setSettingsOpen(true)}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                                    </svg>
+                                    Settings
+                                </TBtn>
+                            )}
                         </div>
                     </div>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
-                            View Managers
-                        </TBtn>
-                        {(role === "ceo" || role === "tl") && (
-                            <TBtn red onClick={() => setBleachOpen(true)}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
-                                SOP Bleach
-                            </TBtn>
-                        )}
-                        {(role === "ceo" || role === "tl") && (
-                            <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
-                        )}
-                    </div>
-                </div>
 
-                {/* ── Pending Recheck Banner (TL/CEO only) ── */}
-                {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
-                    <div
-                        onClick={() => setBleachOpen(true)}
-                        style={{
-                            display: "flex", alignItems: "center", gap: 12,
-                            padding: "12px 18px", marginBottom: 20,
-                            background: "#FFFBEB", border: "1.5px solid #FCD34D",
-                            borderRadius: 10, cursor: "pointer",
-                            animation: "recheckPulse 2s ease-in-out infinite",
-                            boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
-                        onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
-                    >
-                        {/* Bell icon */}
-                        <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
+                    {/* ── Pending Recheck Banner (TL/CEO only) ── */}
+                    {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
+                        <div
+                            onClick={() => setBleachOpen(true)}
+                            style={{
+                                display: "flex", alignItems: "center", gap: 12,
+                                padding: "12px 18px", marginBottom: 20,
+                                background: "#FFFBEB", border: "1.5px solid #FCD34D",
+                                borderRadius: 10, cursor: "pointer",
+                                animation: "recheckPulse 2s ease-in-out infinite",
+                                boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
+                            onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
+                        >
+                            {/* Bell icon */}
+                            <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
+                                </svg>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
+                                    {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
+                                    {recheckList.map(e => e.name).join(", ")} — click to review
+                                </div>
+                            </div>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
+                                <polyline points="9 18 15 12 9 6" />
                             </svg>
                         </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
-                                {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
-                            </div>
-                            <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
-                                {recheckList.map(e => e.name).join(", ")} — click to review
-                            </div>
-                        </div>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
-                            <polyline points="9 18 15 12 9 6" />
-                        </svg>
-                    </div>
-                )}
+                    )}
 
-                {/* Employee — own bleach history */}
-                {role === "employee" && <OwnHistory employeeId={employeeId} />}
-
-                {/* Admin/TL — folder grouped SOP list */}
-                {(role === "ceo" || role === "tl") && (
-                    sopsLoading ? <Spinner /> : groupedList.length === 0
-                        ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
-                            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
-                            <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
-                        </div>
-                        : groupedList.map(group => (
-                            <div key={group.folderName} className="sop-folder-block">
-                                {/* Folder header */}
-                                <div className="sop-folder-header">
-                                    {/* Toggle button */}
-                                    <button onClick={() => toggleFolder(group.folderName)}
-                                        style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
-                                        {collapsedFolders[group.folderName]
-                                            ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
-                                            : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
-                                        }
-                                    </button>
-                                    <span style={{ fontSize: 16 }}>📁</span>
-                                    <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
-                                    <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
-                                    {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
-                                        <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
-                                            style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                                            Delete Folder
+                    {/* ── Task Bleach Suggestions (TL/CEO only) ── */}
+                    {(role === "ceo" || role === "tl") && taskSuggestions.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>
+                                Task Bleach Suggestions — {taskSuggestions.length} pending
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {taskSuggestions.map((s, i) => (
+                                    <div key={i} style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                        {/* Left: all info */}
+                                        <div style={{ flex: 1, minWidth: 200 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "2px 8px", borderRadius: 99 }}>⚠️ {s.eventLabel}</span>
+                                                <span style={{ fontSize: 12, fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6 }}>{s.suggestedPoints} pts</span>
+                                            </div>
+                                            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{s.taskTitle}</div>
+                                            <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>{s.assigneeName} · {s.department}</div>
+                                        </div>
+                                        {/* Right: button */}
+                                        <button
+                                            onClick={() => setSuggestBleachModal(s)}
+                                            style={{ padding: "8px 18px", borderRadius: 7, border: "none", background: T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}
+                                            onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                                            onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                                        >
+                                            Suggest Bleach
                                         </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Employee — own bleach history */}
+                    {role === "employee" && <OwnHistory employeeId={employeeId} />}
+
+                    {/* Admin/TL — folder grouped SOP list */}
+                    {(role === "ceo" || role === "tl") && (
+                        sopsLoading ? <Spinner /> : groupedList.length === 0
+                            ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
+                                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
+                                <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
+                            </div>
+                            : groupedList.map(group => (
+                                <div key={group.folderName} className="sop-folder-block">
+                                    {/* Folder header */}
+                                    <div className="sop-folder-header">
+                                        {/* Toggle button */}
+                                        <button onClick={() => toggleFolder(group.folderName)}
+                                            style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                                            {collapsedFolders[group.folderName]
+                                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
+                                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
+                                            }
+                                        </button>
+                                        <span style={{ fontSize: 16 }}>📁</span>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
+                                        <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
+                                        {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
+                                            <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
+                                                style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                                Delete Folder
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* SOPs — hidden when collapsed */}
+                                    {!collapsedFolders[group.folderName] && (
+                                        <>
+                                            {group.sops.length === 0
+                                                ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
+                                                : <div style={{ background: "#fff" }}>
+                                                    {group.sops.map((sop, idx) => (
+                                                        <div key={sop._id} style={{ padding: "12px 16px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${T.borderLight}` : "none" }}>
+                                                            {/* Row 1: name + pts + status */}
+                                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                                                                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, flex: 1 }}>{sop.name}</div>
+                                                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                                                    <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
+                                                                    <StatusBadge status={sop.status} />
+                                                                </div>
+                                                            </div>
+                                                            {/* Row 2: dept + created by */}
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                                                                <span style={{ fontSize: 11, color: T.textSub, background: T.surface, padding: "1px 7px", borderRadius: 4, border: `1px solid ${T.border}` }}>{sop.department}</span>
+                                                                <span style={{ fontSize: 11, color: T.textSub }}>{sop.createdByName} · <span style={{ color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</span></span>
+                                                            </div>
+                                                            {/* Row 3: description */}
+                                                            {sop.description && (
+                                                                <div style={{ fontSize: 12, color: T.textSub, marginBottom: 8, lineHeight: 1.4 }}>{sop.description}</div>
+                                                            )}
+                                                            {/* Row 4: action buttons */}
+                                                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                                {role === "ceo" && sop.status === "pending" && (
+                                                                    <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
+                                                                )}
+                                                                {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                    <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
+                                                                )}
+                                                                {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                    <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            }
+                                        </>
                                     )}
                                 </div>
-
-                                {/* SOPs — hidden when collapsed */}
-                                {!collapsedFolders[group.folderName] && (
-                                    <>
-                                        {group.sops.length === 0
-                                            ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
-                                            : <div style={{ overflowX: "auto", width: "100%" }}>
-                                                <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: 13 }}>
-                                                    <thead>
-                                                        <tr style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}>
-                                                            {["SOP Name", "Points", "Dept", "Description", "Created By", "Status", "Actions"].map(h => (
-                                                                <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
-                                                            ))}
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {group.sops.map(sop => (
-                                                            <tr key={sop._id} style={{ borderBottom: `1px solid ${T.borderLight}`, transition: "background 0.1s" }}
-                                                                onMouseEnter={e => e.currentTarget.style.background = T.surface}
-                                                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                                                <td style={{ padding: "10px 14px", fontWeight: 600, color: T.text, whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>{sop.name}</td>
-                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                    <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
-                                                                </td>
-                                                                <td style={{ padding: "10px 14px", color: T.text, whiteSpace: "nowrap" }}>{sop.department}</td>
-                                                                <td style={{ padding: "10px 14px", color: T.textSub, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sop.description}>{sop.description}</td>
-                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                    <div style={{ fontWeight: 600, color: T.text }}>{sop.createdByName}</div>
-                                                                    <div style={{ fontSize: 10, color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</div>
-                                                                </td>
-                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}><StatusBadge status={sop.status} /></td>
-                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                    <div style={{ display: "flex", gap: 6 }}>
-                                                                        {role === "ceo" && sop.status === "pending" && (
-                                                                            <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
-                                                                        )}
-                                                                        {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                            <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
-                                                                        )}
-                                                                        {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                            <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
-                                                                        )}
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        }
-                                    </>
-                                )}
-                            </div>
-                        ))
-                )}
-            </div>
-
+                            ))
+                    )}
+                </div>
+            </CoworkingShell>
 
             {/* Create/Edit SOP Panel */}
             {showCreate && (
@@ -347,6 +391,35 @@ export default function SopPage() {
                         </div>
                     </div>
                 </>
+            )}
+            {/* Suggest Bleach Modal */}
+            {suggestBleachModal && (
+                <SuggestBleachModal
+                    suggestion={suggestBleachModal}
+                    approvedSops={approvedSops}
+                    employeeId={employeeId}
+                    employeeName={employeeName}
+                    onClose={(rejected) => {
+                        if (rejected) {
+                            setTaskSuggestions(prev => prev.filter(s => !(s.taskId === suggestBleachModal.taskId && s.eventKey === suggestBleachModal.eventKey)));
+                            dismissTaskSuggestion({ taskId: suggestBleachModal.taskId, eventKey: suggestBleachModal.eventKey, assigneeId: suggestBleachModal.assigneeId }).catch(console.error);
+                        }
+                        setSuggestBleachModal(null);
+                    }}
+                    onDone={(appliedTaskId, appliedEventKey) => {
+                        setSuggestBleachModal(null);
+                        setTaskSuggestions(prev => prev.filter(s => !(s.taskId === appliedTaskId && s.eventKey === appliedEventKey)));
+                    }}
+                />
+            )}
+
+            {/* Settings Panel */}
+            {settingsOpen && (
+                <SopSettingsPanel
+                    employeeId={employeeId}
+                    employeeName={employeeName}
+                    onClose={() => setSettingsOpen(false)}
+                />
             )}
         </>
     );
@@ -841,6 +914,264 @@ function OwnHistory({ employeeId }) {
                     </div>
                 </>
             )}
+        </>
+    );
+}
+
+// ── SUGGEST BLEACH MODAL ──────────────────────────────────────────────────────
+function SuggestBleachModal({ suggestion, approvedSops, employeeId, employeeName, onClose, onDone }) {
+    const [points, setPoints] = useState(suggestion.suggestedPoints || 0);
+    const [desc, setDesc] = useState(suggestion.description || "");
+    const [note, setNote] = useState("");
+    const [selSopId, setSelSopId] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState("");
+
+    // Filter approved SOPs for this employee's dept
+    const deptSops = approvedSops.filter(s => s.department === suggestion.department);
+
+    const handleApprove = async () => {
+        if (!suggestion.assigneeId) return setErr("No assignee found for this task.");
+        setBusy(true); setErr("");
+        try {
+            const body = {
+                targetEmployeeId: suggestion.assigneeId,
+                sopId: selSopId || undefined,
+                description: `[${suggestion.eventLabel}] ${desc} ${note}`.trim(),
+                manualPoints: selSopId ? undefined : points,
+                manualSopName: selSopId ? undefined : suggestion.eventLabel,
+                taskId: suggestion.taskId,
+                eventKey: suggestion.eventKey,
+            };
+            await applyBleach(body);
+            onDone(suggestion.taskId, suggestion.eventKey);
+        } catch (e) { setErr(e.message); }
+        finally { setBusy(false); }
+    };
+
+    return (
+        <>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1001 }} onClick={onClose} />
+            <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(460px, 95vw)", background: "#fff", borderRadius: 14, boxShadow: "0 8px 40px rgba(0,0,0,0.2)", zIndex: 1002, fontFamily: "inherit", overflow: "hidden" }}>
+
+                {/* Header */}
+                <div style={{ background: T.red, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Suggest Bleach</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>Review and approve or reject this deduction</div>
+                    </div>
+                    <button onClick={() => onClose(false)} style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                </div>
+
+                <div style={{ padding: "18px", display: "flex", flexDirection: "column", gap: 14 }}>
+                    {err && <div style={{ padding: "8px 12px", background: T.redLight, border: `1px solid ${T.redBorder}`, borderRadius: 7, fontSize: 12, color: T.red }}>{err}</div>}
+
+                    {/* Task info */}
+                    <div style={{ background: T.surface, borderRadius: 8, padding: "10px 14px" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Task Details</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{suggestion.taskTitle}</div>
+                        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "2px 7px", borderRadius: 99 }}>⚠️ {suggestion.eventLabel}</span>
+                            <span style={{ fontSize: 11, color: T.textSub }}>{suggestion.assigneeName} · {suggestion.department}</span>
+                        </div>
+                    </div>
+
+                    {/* Select SOP (optional) */}
+                    <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Select SOP (optional)</label>
+                        <select value={selSopId} onChange={e => {
+                            setSelSopId(e.target.value);
+                            const s = deptSops.find(s => s._id === e.target.value);
+                            if (s) { setPoints(s.points); setDesc(s.description); }
+                            else { setPoints(suggestion.suggestedPoints); setDesc(suggestion.description); }
+                        }} style={iStyle}>
+                            <option value="">Use suggested points (no SOP)</option>
+                            {deptSops.map(s => <option key={s._id} value={s._id}>{s.name} ({s.points} pts)</option>)}
+                        </select>
+                    </div>
+
+                    {/* Points */}
+                    <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Deduction Points</label>
+                        <input type="number" value={points} onChange={e => setPoints(Number(e.target.value))} step="0.5" min="0" style={iStyle} />
+                    </div>
+
+                    {/* Description */}
+                    <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Description</label>
+                        <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Violation description…" style={iStyle} />
+                    </div>
+
+                    {/* Note */}
+                    <div>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Additional Note (optional)</label>
+                        <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Any additional note…" rows={2} style={{ ...iStyle, resize: "none" }} />
+                    </div>
+
+                    {/* Approve / Reject buttons */}
+                    <div style={{ display: "flex", gap: 10 }}>
+                        <button onClick={() => onClose(true)} style={{ flex: 1, padding: "10px", border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", color: T.text, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                            ✕ Reject (No Deduction)
+                        </button>
+                        <button onClick={handleApprove} disabled={busy || points <= 0}
+                            style={{ flex: 2, padding: "10px", border: "none", borderRadius: 8, background: busy || points <= 0 ? "#FCA5A5" : T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: busy || points <= 0 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {busy ? "Applying…" : `✓ Approve & Deduct ${points} pts`}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+}
+
+// ── SOP SETTINGS PANEL ───────────────────────────────────────────────────────
+const EVENT_LABELS = {
+    task_overdue: { label: "Task Overdue", desc: "Regular task deadline passed and not completed", hasThreshold: false },
+    task_rejected_tl: { label: "Task Rejected by TL", desc: "TL rejected employee's submitted task", hasThreshold: false },
+    task_rejected_ceo: { label: "Task Rejected by CEO", desc: "CEO rejected employee's submitted task", hasThreshold: false },
+    repeat_missed: { label: "Repeat Task Missed", desc: "Daily repeat task not submitted by deadline", hasThreshold: false },
+    repeat_late: { label: "Repeat Task Late", desc: "Repeat task submitted after deadline time", hasThreshold: false },
+    third_party_overdue: { label: "Third Party Task Overdue", desc: "External/client task deadline missed", hasThreshold: false },
+    third_party_rejected: { label: "Third Party Task Rejected", desc: "Third party task submission rejected", hasThreshold: false },
+    goal_overdue: { label: "Goal Task Overdue", desc: "Long-term goal task deadline missed", hasThreshold: false },
+    self_assigned_overdue: { label: "Self-Assigned Task Overdue", desc: "Employee's own task deadline missed", hasThreshold: false },
+    extension_rejected: { label: "Extension Request Rejected", desc: "TL/CEO rejected deadline extension request", hasThreshold: false },
+    task_not_started: { label: "Task Not Started", desc: "Task assigned but not started after X days", hasThreshold: true },
+};
+
+const DEFAULT_EVENTS = Object.fromEntries(
+    Object.keys(EVENT_LABELS).map(k => [k, { enabled: false, points: 0, description: "", ...(EVENT_LABELS[k].hasThreshold ? { daysThreshold: 0 } : {}) }])
+);
+
+function SopSettingsPanel({ employeeId, employeeName, onClose }) {
+    const [events, setEvents] = useState(DEFAULT_EVENTS);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+    const [err, setErr] = useState("");
+
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const snap = await getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"));
+                if (snap.exists()) {
+                    const data = snap.data();
+                    setEvents({ ...DEFAULT_EVENTS, ...data.events });
+                }
+            } catch (e) { console.error(e); }
+            finally { setLoading(false); }
+        };
+        load();
+    }, []);
+
+    const updateEvent = (key, field, value) => {
+        setEvents(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+    };
+
+    const save = async () => {
+        setSaving(true); setErr(""); setSaved(false);
+        try {
+            await setDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"), {
+                events,
+                updatedBy: employeeId,
+                updatedByName: employeeName,
+                updatedAt: new Date().toISOString(),
+            });
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
+        } catch (e) { setErr(e.message); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 999 }} onClick={onClose} />
+            <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(480px, 100vw)", background: "#fff", borderLeft: `1px solid ${T.border}`, boxShadow: "-8px 0 32px rgba(0,0,0,0.15)", zIndex: 1000, display: "flex", flexDirection: "column", fontFamily: "inherit" }}>
+
+                {/* Header */}
+                <div style={{ background: T.text, padding: "16px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                    <div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>SOP Task Event Settings</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>Configure which task events suggest a bleach</div>
+                    </div>
+                    <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "none", background: "rgba(255,255,255,0.15)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                </div>
+
+                {/* Info bar */}
+                <div style={{ padding: "10px 18px", background: "#F8FAFC", borderBottom: `1px solid ${T.border}`, fontSize: 12, color: T.textSub, flexShrink: 0 }}>
+                    All events default to <strong>inactive (0 pts)</strong>. Enable and set points to activate suggestions.
+                </div>
+
+                {/* Events list */}
+                <div style={{ flex: 1, overflowY: "auto", padding: "12px 18px", display: "flex", flexDirection: "column", gap: 2 }}>
+                    {loading ? <Spinner /> : Object.entries(EVENT_LABELS).map(([key, meta]) => {
+                        const ev = events[key] || {};
+                        return (
+                            <div key={key} style={{ border: `1px solid ${ev.enabled ? T.blueBorder : T.border}`, borderRadius: 10, padding: "12px 14px", background: ev.enabled ? T.blueLight : "#fff", transition: "all 0.15s", marginBottom: 8 }}>
+                                {/* Toggle + label row */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: ev.enabled ? 10 : 0 }}>
+                                    {/* Toggle switch */}
+                                    <div onClick={() => updateEvent(key, "enabled", !ev.enabled)}
+                                        style={{ width: 38, height: 22, borderRadius: 11, background: ev.enabled ? T.blue : "#D1D5DB", cursor: "pointer", position: "relative", flexShrink: 0, transition: "background 0.2s" }}>
+                                        <div style={{ position: "absolute", top: 3, left: ev.enabled ? 19 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{meta.label}</div>
+                                        <div style={{ fontSize: 11, color: T.textSub, marginTop: 1 }}>{meta.desc}</div>
+                                    </div>
+                                    {ev.enabled && (
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, flexShrink: 0 }}>
+                                            {ev.points || 0} pts
+                                        </span>
+                                    )}
+                                </div>
+
+                                {/* Expanded fields when enabled */}
+                                {ev.enabled && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontSize: 10, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Deduction Points</div>
+                                                <input type="number" value={ev.points} onChange={e => updateEvent(key, "points", Number(e.target.value))}
+                                                    placeholder="e.g. 1.0" step="0.5" min="0"
+                                                    style={{ ...iStyle, fontSize: 12 }} />
+                                            </div>
+                                            {meta.hasThreshold && (
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Days Threshold</div>
+                                                    <input type="number" value={ev.daysThreshold || 0} onChange={e => updateEvent(key, "daysThreshold", Number(e.target.value))}
+                                                        placeholder="e.g. 2" min="1"
+                                                        style={{ ...iStyle, fontSize: 12 }} />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</div>
+                                            <input value={ev.description} onChange={e => updateEvent(key, "description", e.target.value)}
+                                                placeholder="Describe this violation…"
+                                                style={{ ...iStyle, fontSize: 12 }} />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: "14px 18px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 10, flexShrink: 0 }}>
+                    {err && <div style={{ fontSize: 12, color: T.red, flex: 1 }}>{err}</div>}
+                    {saved && <div style={{ fontSize: 12, color: "#15803D", flex: 1 }}>✅ Settings saved!</div>}
+                    <button onClick={onClose} style={{ flex: 1, padding: "10px", border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", color: T.text, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                    <button onClick={save} disabled={saving} style={{ flex: 2, padding: "10px", border: "none", borderRadius: 8, background: saving ? "#93C5FD" : T.blue, color: "#fff", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                        {saving ? "Saving…" : "Save Settings"}
+                    </button>
+                </div>
+            </div>
         </>
     );
 }
