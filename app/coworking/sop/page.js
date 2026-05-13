@@ -131,160 +131,160 @@ export default function SopPage() {
                 @keyframes recheckPulse{0%,100%{opacity:1}50%{opacity:0.75}}
             `}</style>
 
-            <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title="SOP">
-                <div style={{ padding: "24px", fontFamily: "inherit" }}>
 
-                    {/* Top bar */}
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
-                        <div>
-                            <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
-                            <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
-                                {role === "ceo" ? "All department SOPs and compliance"
-                                    : role === "tl" ? "Your department SOPs and team compliance"
-                                        : "Your compliance history"}
-                            </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
-                                View Managers
-                            </TBtn>
-                            {(role === "ceo" || role === "tl") && (
-                                <TBtn red onClick={() => setBleachOpen(true)}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
-                                    SOP Bleach
-                                </TBtn>
-                            )}
-                            {(role === "ceo" || role === "tl") && (
-                                <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
-                            )}
+            <div style={{ padding: "24px", fontFamily: "inherit" }}>
+
+                {/* Top bar */}
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+                    <div>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
+                        <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
+                            {role === "ceo" ? "All department SOPs and compliance"
+                                : role === "tl" ? "Your department SOPs and team compliance"
+                                    : "Your compliance history"}
                         </div>
                     </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
+                            View Managers
+                        </TBtn>
+                        {(role === "ceo" || role === "tl") && (
+                            <TBtn red onClick={() => setBleachOpen(true)}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
+                                SOP Bleach
+                            </TBtn>
+                        )}
+                        {(role === "ceo" || role === "tl") && (
+                            <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
+                        )}
+                    </div>
+                </div>
 
-                    {/* ── Pending Recheck Banner (TL/CEO only) ── */}
-                    {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
-                        <div
-                            onClick={() => setBleachOpen(true)}
-                            style={{
-                                display: "flex", alignItems: "center", gap: 12,
-                                padding: "12px 18px", marginBottom: 20,
-                                background: "#FFFBEB", border: "1.5px solid #FCD34D",
-                                borderRadius: 10, cursor: "pointer",
-                                animation: "recheckPulse 2s ease-in-out infinite",
-                                boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
-                            onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
-                        >
-                            {/* Bell icon */}
-                            <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
-                                </svg>
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
-                                    {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
-                                </div>
-                                <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
-                                    {recheckList.map(e => e.name).join(", ")} — click to review
-                                </div>
-                            </div>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
-                                <polyline points="9 18 15 12 9 6" />
+                {/* ── Pending Recheck Banner (TL/CEO only) ── */}
+                {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
+                    <div
+                        onClick={() => setBleachOpen(true)}
+                        style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "12px 18px", marginBottom: 20,
+                            background: "#FFFBEB", border: "1.5px solid #FCD34D",
+                            borderRadius: 10, cursor: "pointer",
+                            animation: "recheckPulse 2s ease-in-out infinite",
+                            boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
+                        onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
+                    >
+                        {/* Bell icon */}
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
                             </svg>
                         </div>
-                    )}
-
-                    {/* Employee — own bleach history */}
-                    {role === "employee" && <OwnHistory employeeId={employeeId} />}
-
-                    {/* Admin/TL — folder grouped SOP list */}
-                    {(role === "ceo" || role === "tl") && (
-                        sopsLoading ? <Spinner /> : groupedList.length === 0
-                            ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
-                                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
-                                <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
+                                {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
                             </div>
-                            : groupedList.map(group => (
-                                <div key={group.folderName} className="sop-folder-block">
-                                    {/* Folder header */}
-                                    <div className="sop-folder-header">
-                                        {/* Toggle button */}
-                                        <button onClick={() => toggleFolder(group.folderName)}
-                                            style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
-                                            {collapsedFolders[group.folderName]
-                                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
-                                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
-                                            }
-                                        </button>
-                                        <span style={{ fontSize: 16 }}>📁</span>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
-                                        <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
-                                        {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
-                                            <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
-                                                style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                                                Delete Folder
-                                            </button>
-                                        )}
-                                    </div>
+                            <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
+                                {recheckList.map(e => e.name).join(", ")} — click to review
+                            </div>
+                        </div>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
+                            <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                    </div>
+                )}
 
-                                    {/* SOPs — hidden when collapsed */}
-                                    {!collapsedFolders[group.folderName] && (
-                                        <>
-                                            {group.sops.length === 0
-                                                ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
-                                                : <div style={{ overflowX: "auto", width: "100%" }}>
-                                                    <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: 13 }}>
-                                                        <thead>
-                                                            <tr style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}>
-                                                                {["SOP Name", "Points", "Dept", "Description", "Created By", "Status", "Actions"].map(h => (
-                                                                    <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {group.sops.map(sop => (
-                                                                <tr key={sop._id} style={{ borderBottom: `1px solid ${T.borderLight}`, transition: "background 0.1s" }}
-                                                                    onMouseEnter={e => e.currentTarget.style.background = T.surface}
-                                                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                                                    <td style={{ padding: "10px 14px", fontWeight: 600, color: T.text, whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>{sop.name}</td>
-                                                                    <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                        <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
-                                                                    </td>
-                                                                    <td style={{ padding: "10px 14px", color: T.text, whiteSpace: "nowrap" }}>{sop.department}</td>
-                                                                    <td style={{ padding: "10px 14px", color: T.textSub, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sop.description}>{sop.description}</td>
-                                                                    <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                        <div style={{ fontWeight: 600, color: T.text }}>{sop.createdByName}</div>
-                                                                        <div style={{ fontSize: 10, color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</div>
-                                                                    </td>
-                                                                    <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}><StatusBadge status={sop.status} /></td>
-                                                                    <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                                                                        <div style={{ display: "flex", gap: 6 }}>
-                                                                            {role === "ceo" && sop.status === "pending" && (
-                                                                                <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
-                                                                            )}
-                                                                            {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                                <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
-                                                                            )}
-                                                                            {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                                <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
-                                                                            )}
-                                                                        </div>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            }
-                                        </>
+                {/* Employee — own bleach history */}
+                {role === "employee" && <OwnHistory employeeId={employeeId} />}
+
+                {/* Admin/TL — folder grouped SOP list */}
+                {(role === "ceo" || role === "tl") && (
+                    sopsLoading ? <Spinner /> : groupedList.length === 0
+                        ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
+                            <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
+                        </div>
+                        : groupedList.map(group => (
+                            <div key={group.folderName} className="sop-folder-block">
+                                {/* Folder header */}
+                                <div className="sop-folder-header">
+                                    {/* Toggle button */}
+                                    <button onClick={() => toggleFolder(group.folderName)}
+                                        style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                                        {collapsedFolders[group.folderName]
+                                            ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
+                                            : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
+                                        }
+                                    </button>
+                                    <span style={{ fontSize: 16 }}>📁</span>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
+                                    <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
+                                    {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
+                                        <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
+                                            style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                            Delete Folder
+                                        </button>
                                     )}
                                 </div>
-                            ))
-                    )}
-                </div>
-            </CoworkingShell>
+
+                                {/* SOPs — hidden when collapsed */}
+                                {!collapsedFolders[group.folderName] && (
+                                    <>
+                                        {group.sops.length === 0
+                                            ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
+                                            : <div style={{ overflowX: "auto", width: "100%" }}>
+                                                <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: 13 }}>
+                                                    <thead>
+                                                        <tr style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}>
+                                                            {["SOP Name", "Points", "Dept", "Description", "Created By", "Status", "Actions"].map(h => (
+                                                                <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: T.textSub, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {group.sops.map(sop => (
+                                                            <tr key={sop._id} style={{ borderBottom: `1px solid ${T.borderLight}`, transition: "background 0.1s" }}
+                                                                onMouseEnter={e => e.currentTarget.style.background = T.surface}
+                                                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                                                <td style={{ padding: "10px 14px", fontWeight: 600, color: T.text, whiteSpace: "nowrap", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>{sop.name}</td>
+                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
+                                                                    <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
+                                                                </td>
+                                                                <td style={{ padding: "10px 14px", color: T.text, whiteSpace: "nowrap" }}>{sop.department}</td>
+                                                                <td style={{ padding: "10px 14px", color: T.textSub, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={sop.description}>{sop.description}</td>
+                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
+                                                                    <div style={{ fontWeight: 600, color: T.text }}>{sop.createdByName}</div>
+                                                                    <div style={{ fontSize: 10, color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</div>
+                                                                </td>
+                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}><StatusBadge status={sop.status} /></td>
+                                                                <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
+                                                                    <div style={{ display: "flex", gap: 6 }}>
+                                                                        {role === "ceo" && sop.status === "pending" && (
+                                                                            <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
+                                                                        )}
+                                                                        {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                            <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
+                                                                        )}
+                                                                        {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                            <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        }
+                                    </>
+                                )}
+                            </div>
+                        ))
+                )}
+            </div>
+
 
             {/* Create/Edit SOP Panel */}
             {showCreate && (
