@@ -142,193 +142,192 @@ export default function SopPage() {
                 }
             `}</style>
 
-            <CoworkingShell role={role} employeeName={employeeName} employeeId={employeeId} title="SOP">
-                <div style={{ padding: "24px", fontFamily: "inherit" }}>
+            <div style={{ padding: "24px", fontFamily: "inherit" }}>
 
-                    {/* Top bar */}
-                    <div className="sop-topbar" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
-                        <div>
-                            <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
-                            <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
-                                {role === "ceo" ? "All department SOPs and compliance"
-                                    : role === "tl" ? "Your department SOPs and team compliance"
-                                        : "Your compliance history"}
-                            </div>
-                        </div>
-                        <div className="sop-topbar-btns" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
-                                View Managers
-                            </TBtn>
-                            {(role === "ceo" || role === "tl") && (
-                                <TBtn red onClick={() => setBleachOpen(true)}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
-                                    SOP Bleach
-                                </TBtn>
-                            )}
-                            {(role === "ceo" || role === "tl") && (
-                                <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
-                            )}
-                            {role === "ceo" && (
-                                <TBtn outline onClick={() => setSettingsOpen(true)}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-                                    </svg>
-                                    Settings
-                                </TBtn>
-                            )}
+                {/* Top bar */}
+                <div className="sop-topbar" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+                    <div>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: T.text, letterSpacing: "-0.02em" }}>Standard Operating Procedure</div>
+                        <div style={{ fontSize: 13, color: T.textSub, marginTop: 3 }}>
+                            {role === "ceo" ? "All department SOPs and compliance"
+                                : role === "tl" ? "Your department SOPs and team compliance"
+                                    : "Your compliance history"}
                         </div>
                     </div>
-
-                    {/* ── Pending Recheck Banner (TL/CEO only) ── */}
-                    {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
-                        <div
-                            onClick={() => setBleachOpen(true)}
-                            style={{
-                                display: "flex", alignItems: "center", gap: 12,
-                                padding: "12px 18px", marginBottom: 20,
-                                background: "#FFFBEB", border: "1.5px solid #FCD34D",
-                                borderRadius: 10, cursor: "pointer",
-                                animation: "recheckPulse 2s ease-in-out infinite",
-                                boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
-                            onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
-                        >
-                            {/* Bell icon */}
-                            <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
+                    <div className="sop-topbar-btns" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        <TBtn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
+                            View Managers
+                        </TBtn>
+                        {(role === "ceo" || role === "tl") && (
+                            <TBtn red onClick={() => setBleachOpen(true)}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" /></svg>
+                                SOP Bleach
+                            </TBtn>
+                        )}
+                        {(role === "ceo" || role === "tl") && (
+                            <TBtn blue onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</TBtn>
+                        )}
+                        {role === "ceo" && (
+                            <TBtn outline onClick={() => setSettingsOpen(true)}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
                                 </svg>
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
-                                    {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
-                                </div>
-                                <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
-                                    {recheckList.map(e => e.name).join(", ")} — click to review
-                                </div>
-                            </div>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
-                                <polyline points="9 18 15 12 9 6" />
+                                Settings
+                            </TBtn>
+                        )}
+                    </div>
+                </div>
+
+                {/* ── Pending Recheck Banner (TL/CEO only) ── */}
+                {(role === "ceo" || role === "tl") && recheckList.length > 0 && (
+                    <div
+                        onClick={() => setBleachOpen(true)}
+                        style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "12px 18px", marginBottom: 20,
+                            background: "#FFFBEB", border: "1.5px solid #FCD34D",
+                            borderRadius: 10, cursor: "pointer",
+                            animation: "recheckPulse 2s ease-in-out infinite",
+                            boxShadow: "0 2px 12px rgba(251,191,36,0.25)",
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#FEF3C7"}
+                        onMouseLeave={e => e.currentTarget.style.background = "#FFFBEB"}
+                    >
+                        {/* Bell icon */}
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" />
                             </svg>
                         </div>
-                    )}
-
-                    {/* ── Task Bleach Suggestions (TL/CEO only) ── */}
-                    {(role === "ceo" || role === "tl") && taskSuggestions.length > 0 && (
-                        <div style={{ marginBottom: 24 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>
-                                Task Bleach Suggestions — {taskSuggestions.length} pending
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
+                                {recheckList.reduce((s, e) => s + e.pendingCount, 0)} Pending Recheck Request{recheckList.reduce((s, e) => s + e.pendingCount, 0) > 1 ? "s" : ""}
                             </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                {taskSuggestions.map((s, i) => (
-                                    <div key={i} style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                        {/* Left: all info */}
-                                        <div style={{ flex: 1, minWidth: 200 }}>
-                                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "2px 8px", borderRadius: 99 }}>⚠️ {s.eventLabel}</span>
-                                                <span style={{ fontSize: 12, fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6 }}>{s.suggestedPoints} pts</span>
-                                            </div>
-                                            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{s.taskTitle}</div>
-                                            <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>{s.assigneeName} · {s.department}</div>
-                                        </div>
-                                        {/* Right: button */}
-                                        <button
-                                            onClick={() => setSuggestBleachModal(s)}
-                                            style={{ padding: "8px 18px", borderRadius: 7, border: "none", background: T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}
-                                            onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
-                                            onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-                                        >
-                                            Suggest Bleach
-                                        </button>
-                                    </div>
-                                ))}
+                            <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>
+                                {recheckList.map(e => e.name).join(", ")} — click to review
                             </div>
                         </div>
-                    )}
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round">
+                            <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                    </div>
+                )}
 
-                    {/* Employee — own bleach history */}
-                    {role === "employee" && <OwnHistory employeeId={employeeId} />}
-
-                    {/* Admin/TL — folder grouped SOP list */}
-                    {(role === "ceo" || role === "tl") && (
-                        sopsLoading ? <Spinner /> : groupedList.length === 0
-                            ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
-                                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
-                                <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
-                            </div>
-                            : groupedList.map(group => (
-                                <div key={group.folderName} className="sop-folder-block">
-                                    {/* Folder header */}
-                                    <div className="sop-folder-header">
-                                        {/* Toggle button */}
-                                        <button onClick={() => toggleFolder(group.folderName)}
-                                            style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
-                                            {collapsedFolders[group.folderName]
-                                                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
-                                                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
-                                            }
-                                        </button>
-                                        <span style={{ fontSize: 16 }}>📁</span>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
-                                        <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
-                                        {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
-                                            <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
-                                                style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                                                Delete Folder
-                                            </button>
-                                        )}
+                {/* ── Task Bleach Suggestions (TL/CEO only) ── */}
+                {(role === "ceo" || role === "tl") && taskSuggestions.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>
+                            Task Bleach Suggestions — {taskSuggestions.length} pending
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {taskSuggestions.map((s, i) => (
+                                <div key={i} style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                    {/* Left: all info */}
+                                    <div style={{ flex: 1, minWidth: 200 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "2px 8px", borderRadius: 99 }}>⚠️ {s.eventLabel}</span>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6 }}>{s.suggestedPoints} pts</span>
+                                        </div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{s.taskTitle}</div>
+                                        <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>{s.assigneeName} · {s.department}</div>
                                     </div>
+                                    {/* Right: button */}
+                                    <button
+                                        onClick={() => setSuggestBleachModal(s)}
+                                        style={{ padding: "8px 18px", borderRadius: 7, border: "none", background: T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}
+                                        onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                                        onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                                    >
+                                        Suggest Bleach
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
-                                    {/* SOPs — hidden when collapsed */}
-                                    {!collapsedFolders[group.folderName] && (
-                                        <>
-                                            {group.sops.length === 0
-                                                ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
-                                                : <div style={{ background: "#fff" }}>
-                                                    {group.sops.map((sop, idx) => (
-                                                        <div key={sop._id} style={{ padding: "12px 16px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${T.borderLight}` : "none" }}>
-                                                            {/* Row 1: name + pts + status */}
-                                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                                                                <div style={{ fontSize: 14, fontWeight: 700, color: T.text, flex: 1 }}>{sop.name}</div>
-                                                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                                                    <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
-                                                                    <StatusBadge status={sop.status} />
-                                                                </div>
-                                                            </div>
-                                                            {/* Row 2: dept + created by */}
-                                                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-                                                                <span style={{ fontSize: 11, color: T.textSub, background: T.surface, padding: "1px 7px", borderRadius: 4, border: `1px solid ${T.border}` }}>{sop.department}</span>
-                                                                <span style={{ fontSize: 11, color: T.textSub }}>{sop.createdByName} · <span style={{ color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</span></span>
-                                                            </div>
-                                                            {/* Row 3: description */}
-                                                            {sop.description && (
-                                                                <div style={{ fontSize: 12, color: T.textSub, marginBottom: 8, lineHeight: 1.4 }}>{sop.description}</div>
-                                                            )}
-                                                            {/* Row 4: action buttons */}
-                                                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                                {role === "ceo" && sop.status === "pending" && (
-                                                                    <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
-                                                                )}
-                                                                {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                    <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
-                                                                )}
-                                                                {(role === "ceo" || sop.createdBy === employeeId) && (
-                                                                    <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            }
-                                        </>
+                {/* Employee — own bleach history */}
+                {role === "employee" && <OwnHistory employeeId={employeeId} />}
+
+                {/* Admin/TL — folder grouped SOP list */}
+                {(role === "ceo" || role === "tl") && (
+                    sopsLoading ? <Spinner /> : groupedList.length === 0
+                        ? <div style={{ textAlign: "center", padding: "60px 0", color: T.textMuted }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No SOPs yet</div>
+                            <div style={{ fontSize: 13 }}>Click "Create SOP" to add the first one.</div>
+                        </div>
+                        : groupedList.map(group => (
+                            <div key={group.folderName} className="sop-folder-block">
+                                {/* Folder header */}
+                                <div className="sop-folder-header">
+                                    {/* Toggle button */}
+                                    <button onClick={() => toggleFolder(group.folderName)}
+                                        style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                                        {collapsedFolders[group.folderName]
+                                            ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
+                                            : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSub} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15" /></svg>
+                                        }
+                                    </button>
+                                    <span style={{ fontSize: 16 }}>📁</span>
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: T.text, flex: 1 }}>{group.folderName}</span>
+                                    <span style={{ fontSize: 11, color: T.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
+                                    {group.folderName !== "Uncategorized" && group.folderId && (role === "ceo" || folders.find(f => f._id === group.folderId)?.createdBy === employeeId) && (
+                                        <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
+                                            style={{ padding: "3px 8px", border: `1px solid ${T.redBorder}`, borderRadius: 5, background: T.redLight, color: T.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                            Delete Folder
+                                        </button>
                                     )}
                                 </div>
-                            ))
-                    )}
-                </div>
-            </CoworkingShell>
+
+                                {/* SOPs — hidden when collapsed */}
+                                {!collapsedFolders[group.folderName] && (
+                                    <>
+                                        {group.sops.length === 0
+                                            ? <div style={{ padding: "14px 16px", fontSize: 12, color: T.textMuted }}>No SOPs in this folder yet.</div>
+                                            : <div style={{ background: "#fff" }}>
+                                                {group.sops.map((sop, idx) => (
+                                                    <div key={sop._id} style={{ padding: "12px 16px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${T.borderLight}` : "none" }}>
+                                                        {/* Row 1: name + pts + status */}
+                                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                                                            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, flex: 1 }}>{sop.name}</div>
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                                                <span style={{ fontWeight: 700, color: T.red, background: T.redLight, border: `1px solid ${T.redBorder}`, padding: "2px 8px", borderRadius: 6, fontSize: 12 }}>{sop.points} pts</span>
+                                                                <StatusBadge status={sop.status} />
+                                                            </div>
+                                                        </div>
+                                                        {/* Row 2: dept + created by */}
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                                                            <span style={{ fontSize: 11, color: T.textSub, background: T.surface, padding: "1px 7px", borderRadius: 4, border: `1px solid ${T.border}` }}>{sop.department}</span>
+                                                            <span style={{ fontSize: 11, color: T.textSub }}>{sop.createdByName} · <span style={{ color: T.textMuted }}>{sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</span></span>
+                                                        </div>
+                                                        {/* Row 3: description */}
+                                                        {sop.description && (
+                                                            <div style={{ fontSize: 12, color: T.textSub, marginBottom: 8, lineHeight: 1.4 }}>{sop.description}</div>
+                                                        )}
+                                                        {/* Row 4: action buttons */}
+                                                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                                            {role === "ceo" && sop.status === "pending" && (
+                                                                <><ABtn green onClick={() => handleApprove(sop)}>Approve</ABtn><ABtn red onClick={() => handleReject(sop)}>Reject</ABtn></>
+                                                            )}
+                                                            {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                <ABtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</ABtn>
+                                                            )}
+                                                            {(role === "ceo" || sop.createdBy === employeeId) && (
+                                                                <ABtn red onClick={() => handleDelete(sop)}>Delete</ABtn>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        }
+                                    </>
+                                )}
+                            </div>
+                        ))
+                )}
+            </div>
+
 
             {/* Create/Edit SOP Panel */}
             {showCreate && (
@@ -396,7 +395,6 @@ export default function SopPage() {
             {suggestBleachModal && (
                 <SuggestBleachModal
                     suggestion={suggestBleachModal}
-                    approvedSops={approvedSops}
                     employeeId={employeeId}
                     employeeName={employeeName}
                     onClose={(rejected) => {
@@ -716,21 +714,30 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
                                     <div key={date} className="sop-bleach-box">
                                         <div style={{ padding: "8px 14px", background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8 }}>
                                             <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>📅 {date}</span>
-                                            <span style={{ marginLeft: "auto", fontSize: 11, color: T.red, fontWeight: 700 }}>
-                                                -{grouped[date].filter(b => b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0).toFixed(1)} pts
+                                            <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, display: "flex", gap: 8 }}>
+                                                {(() => {
+                                                    const debits = grouped[date].filter(b => !b.isCredit && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0);
+                                                    const credits = grouped[date].filter(b => b.isCredit).reduce((s, b) => s + Number(b.points), 0);
+                                                    return <>
+                                                        {debits > 0 && <span style={{ color: T.red }}>-{debits.toFixed(1)} pts</span>}
+                                                        {credits > 0 && <span style={{ color: "#15803D" }}>+{credits.toFixed(1)} pts</span>}
+                                                    </>;
+                                                })()}
                                             </span>
                                         </div>
                                         {grouped[date].map((b, i) => {
                                             const rs = b.recheck?.status || "none";
                                             const isRemoved = rs === "confirmed";
+                                            const isCredit = b.isCredit;
                                             return (
-                                                <div key={b._id || i} style={{ padding: "9px 14px", borderBottom: i < grouped[date].length - 1 ? `1px solid ${T.redLight}` : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: isRemoved ? 0.55 : 1 }}>
-                                                    <span style={{ fontSize: 14, flexShrink: 0 }}>{isRemoved ? "✅" : "❌"}</span>
+                                                <div key={b._id || i} style={{ padding: "9px 14px", borderBottom: i < grouped[date].length - 1 ? `1px solid ${isCredit ? "#DCFCE7" : T.redLight}` : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: isRemoved ? 0.55 : 1, background: isCredit ? "#F0FDF4" : "transparent" }}>
+                                                    <span style={{ fontSize: 14, flexShrink: 0 }}>{isCredit ? "🟢" : isRemoved ? "✅" : "❌"}</span>
                                                     <div style={{ flex: 1 }}>
                                                         {b.folderName && b.folderName !== "Uncategorized" && (
                                                             <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>📁 {b.folderName}</div>
                                                         )}
-                                                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, textDecoration: isRemoved ? "line-through" : "none" }}>{b.sopName}</div>
+                                                        <div style={{ fontSize: 13, fontWeight: 600, color: isCredit ? "#15803D" : T.text, textDecoration: isRemoved ? "line-through" : "none" }}>{b.sopName}</div>
+                                                        {isCredit && <span style={{ display: "inline-block", marginTop: 2, fontSize: 10, fontWeight: 700, color: "#15803D", background: "#DCFCE7", border: "1px solid #BBF7D0", padding: "1px 6px", borderRadius: 99 }}>🎯 Goal Credit</span>}
                                                         {b.description && <div style={{ fontSize: 11, color: T.textSub, marginTop: 1 }}>{b.description}</div>}
                                                         <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>By {b.cutByName} ({b.cutByRole})</div>
 
@@ -740,8 +747,8 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
                                                         {rs === "rejected" && <RecheckBadge label="❌ Recheck Denied" color={T.red} bg={T.redLight} border={T.redBorder} />}
                                                         {b.recheck?.requestNote && <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>Employee: "{b.recheck.requestNote}"</div>}
 
-                                                        {/* TL/CEO review buttons */}
-                                                        {rs === "pending" && (
+                                                        {/* TL/CEO review buttons — only for deductions */}
+                                                        {!isCredit && rs === "pending" && (
                                                             <RecheckReview
                                                                 bleach={b}
                                                                 employeeId={selectedEmp.employeeId}
@@ -749,7 +756,9 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
                                                             />
                                                         )}
                                                     </div>
-                                                    <span style={{ fontSize: 12, fontWeight: 700, color: isRemoved ? T.textMuted : T.red, background: isRemoved ? T.borderLight : T.redLight, padding: "2px 8px", borderRadius: 6, flexShrink: 0, textDecoration: isRemoved ? "line-through" : "none" }}>{b.points} pts</span>
+                                                    <span style={{ fontSize: 12, fontWeight: 700, color: isCredit ? "#15803D" : isRemoved ? T.textMuted : T.red, background: isCredit ? "#DCFCE7" : isRemoved ? T.borderLight : T.redLight, padding: "2px 8px", borderRadius: 6, flexShrink: 0, textDecoration: isRemoved ? "line-through" : "none" }}>
+                                                        {isCredit ? "+" : ""}{b.points} pts
+                                                    </span>
                                                 </div>
                                             );
                                         })}
@@ -836,33 +845,44 @@ function OwnHistory({ employeeId }) {
                                 <div key={date} style={{ border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
                                     <div style={{ padding: "8px 14px", background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center" }}>
                                         <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>📅 {date}</span>
-                                        <span style={{ marginLeft: "auto", fontSize: 11, color: T.red, fontWeight: 700 }}>
-                                            -{grp[date].filter(b => b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0).toFixed(1)} pts
+                                        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, display: "flex", gap: 6 }}>
+                                            {(() => {
+                                                const debits = grp[date].filter(b => !b.isCredit && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0);
+                                                const credits = grp[date].filter(b => b.isCredit).reduce((s, b) => s + Number(b.points), 0);
+                                                return <>
+                                                    {debits > 0 && <span style={{ color: T.red }}>-{debits.toFixed(1)} pts</span>}
+                                                    {credits > 0 && <span style={{ color: "#15803D" }}>+{credits.toFixed(1)} pts</span>}
+                                                </>;
+                                            })()}
                                         </span>
                                     </div>
                                     {grp[date].map((b, i) => {
                                         const rs = b.recheck?.status || "none";
                                         const isRemoved = rs === "confirmed";
+                                        const isCredit = b.isCredit;
                                         return (
-                                            <div key={b._id || i} style={{ padding: "10px 14px", borderBottom: i < grp[date].length - 1 ? `1px solid ${T.redLight}` : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: isRemoved ? 0.5 : 1 }}>
-                                                <span style={{ fontSize: 14, flexShrink: 0 }}>{isRemoved ? "✅" : "❌"}</span>
+                                            <div key={b._id || i} style={{ padding: "10px 14px", borderBottom: i < grp[date].length - 1 ? `1px solid ${isCredit ? "#DCFCE7" : T.redLight}` : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: isRemoved ? 0.5 : 1, background: isCredit ? "#F0FDF4" : "transparent" }}>
+                                                <span style={{ fontSize: 14, flexShrink: 0 }}>{isCredit ? "🟢" : isRemoved ? "✅" : "❌"}</span>
                                                 <div style={{ flex: 1 }}>
                                                     {b.folderName && b.folderName !== "Uncategorized" && (
                                                         <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 2 }}>📁 {b.folderName}</div>
                                                     )}
-                                                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text, textDecoration: isRemoved ? "line-through" : "none" }}>{b.sopName}</div>
+                                                    <div style={{ fontSize: 13, fontWeight: 600, color: isCredit ? "#15803D" : T.text, textDecoration: isRemoved ? "line-through" : "none" }}>{b.sopName}</div>
+                                                    {isCredit && <span style={{ display: "inline-block", marginTop: 2, fontSize: 10, fontWeight: 700, color: "#15803D", background: "#DCFCE7", border: "1px solid #BBF7D0", padding: "1px 6px", borderRadius: 99 }}>🎯 Goal Credit</span>}
                                                     {b.description && <div style={{ fontSize: 11, color: T.textSub, marginTop: 1 }}>{b.description}</div>}
 
-                                                    {/* Recheck status badge */}
-                                                    {rs === "pending" && <RecheckBadge label="⏳ Recheck Pending" color="#D97706" bg="#FFFBEB" border="#FDE68A" />}
-                                                    {rs === "confirmed" && <RecheckBadge label="✅ Deduction Removed" color="#15803D" bg="#F0FDF4" border="#BBF7D0" />}
-                                                    {rs === "rejected" && <RecheckBadge label="❌ Recheck Denied" color={T.red} bg={T.redLight} border={T.redBorder} />}
+                                                    {/* Recheck status badge — only for deductions */}
+                                                    {!isCredit && rs === "pending" && <RecheckBadge label="⏳ Recheck Pending" color="#D97706" bg="#FFFBEB" border="#FDE68A" />}
+                                                    {!isCredit && rs === "confirmed" && <RecheckBadge label="✅ Deduction Removed" color="#15803D" bg="#F0FDF4" border="#BBF7D0" />}
+                                                    {!isCredit && rs === "rejected" && <RecheckBadge label="❌ Recheck Denied" color={T.red} bg={T.redLight} border={T.redBorder} />}
                                                     {b.recheck?.reviewNote && <div style={{ fontSize: 10, color: T.textMuted, marginTop: 2 }}>Review note: {b.recheck.reviewNote}</div>}
                                                 </div>
                                                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                                                    <span style={{ fontSize: 12, fontWeight: 700, color: isRemoved ? T.textMuted : T.red, background: isRemoved ? T.borderLight : T.redLight, padding: "2px 8px", borderRadius: 6, textDecoration: isRemoved ? "line-through" : "none" }}>{b.points} pts</span>
-                                                    {/* Recheck button — only if not confirmed */}
-                                                    {rs !== "confirmed" && rs !== "pending" && (
+                                                    <span style={{ fontSize: 12, fontWeight: 700, color: isCredit ? "#15803D" : isRemoved ? T.textMuted : T.red, background: isCredit ? "#DCFCE7" : isRemoved ? T.borderLight : T.redLight, padding: "2px 8px", borderRadius: 6, textDecoration: isRemoved ? "line-through" : "none" }}>
+                                                        {isCredit ? "+" : ""}{b.points} pts
+                                                    </span>
+                                                    {/* Recheck button — only for deductions, not credits */}
+                                                    {!isCredit && rs !== "confirmed" && rs !== "pending" && (
                                                         <button onClick={() => { setRecheckModal({ bleachId: b._id, sopName: b.sopName }); setRecheckNote(""); setRecheckErr(""); }}
                                                             style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", border: `1px solid ${T.blueBorder}`, borderRadius: 5, background: T.blueLight, color: T.blue, cursor: "pointer", fontFamily: "inherit" }}>
                                                             Recheck
@@ -919,31 +939,23 @@ function OwnHistory({ employeeId }) {
 }
 
 // ── SUGGEST BLEACH MODAL ──────────────────────────────────────────────────────
-function SuggestBleachModal({ suggestion, approvedSops, employeeId, employeeName, onClose, onDone }) {
-    const [points, setPoints] = useState(suggestion.suggestedPoints || 0);
-    const [desc, setDesc] = useState(suggestion.description || "");
+function SuggestBleachModal({ suggestion, employeeId, employeeName, onClose, onDone }) {
     const [note, setNote] = useState("");
-    const [selSopId, setSelSopId] = useState("");
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState("");
-
-    // Filter approved SOPs for this employee's dept
-    const deptSops = approvedSops.filter(s => s.department === suggestion.department);
 
     const handleApprove = async () => {
         if (!suggestion.assigneeId) return setErr("No assignee found for this task.");
         setBusy(true); setErr("");
         try {
-            const body = {
+            await applyBleach({
                 targetEmployeeId: suggestion.assigneeId,
-                sopId: selSopId || undefined,
-                description: `[${suggestion.eventLabel}] ${desc} ${note}`.trim(),
-                manualPoints: selSopId ? undefined : points,
-                manualSopName: selSopId ? undefined : suggestion.eventLabel,
+                description: `[${suggestion.eventLabel}] ${suggestion.description} ${note}`.trim(),
+                manualPoints: suggestion.suggestedPoints,
+                manualSopName: suggestion.eventLabel,
                 taskId: suggestion.taskId,
                 eventKey: suggestion.eventKey,
-            };
-            await applyBleach(body);
+            });
             onDone(suggestion.taskId, suggestion.eventKey);
         } catch (e) { setErr(e.message); }
         finally { setBusy(false); }
@@ -951,14 +963,14 @@ function SuggestBleachModal({ suggestion, approvedSops, employeeId, employeeName
 
     return (
         <>
-            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1001 }} onClick={onClose} />
-            <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(460px, 95vw)", background: "#fff", borderRadius: 14, boxShadow: "0 8px 40px rgba(0,0,0,0.2)", zIndex: 1002, fontFamily: "inherit", overflow: "hidden" }}>
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1001 }} onClick={() => onClose(false)} />
+            <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(420px, 95vw)", background: "#fff", borderRadius: 14, boxShadow: "0 8px 40px rgba(0,0,0,0.2)", zIndex: 1002, fontFamily: "inherit", overflow: "hidden" }}>
 
                 {/* Header */}
                 <div style={{ background: T.red, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Suggest Bleach</div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>Review and approve or reject this deduction</div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 2 }}>Approve or reject this deduction</div>
                     </div>
                     <button onClick={() => onClose(false)} style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -969,55 +981,41 @@ function SuggestBleachModal({ suggestion, approvedSops, employeeId, employeeName
                     {err && <div style={{ padding: "8px 12px", background: T.redLight, border: `1px solid ${T.redBorder}`, borderRadius: 7, fontSize: 12, color: T.red }}>{err}</div>}
 
                     {/* Task info */}
-                    <div style={{ background: T.surface, borderRadius: 8, padding: "10px 14px" }}>
+                    <div style={{ background: T.surface, borderRadius: 8, padding: "12px 14px" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Task Details</div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{suggestion.taskTitle}</div>
-                        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6 }}>{suggestion.taskTitle}</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "2px 7px", borderRadius: 99 }}>⚠️ {suggestion.eventLabel}</span>
                             <span style={{ fontSize: 11, color: T.textSub }}>{suggestion.assigneeName} · {suggestion.department}</span>
                         </div>
                     </div>
 
-                    {/* Select SOP (optional) */}
-                    <div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Select SOP (optional)</label>
-                        <select value={selSopId} onChange={e => {
-                            setSelSopId(e.target.value);
-                            const s = deptSops.find(s => s._id === e.target.value);
-                            if (s) { setPoints(s.points); setDesc(s.description); }
-                            else { setPoints(suggestion.suggestedPoints); setDesc(suggestion.description); }
-                        }} style={iStyle}>
-                            <option value="">Use suggested points (no SOP)</option>
-                            {deptSops.map(s => <option key={s._id} value={s._id}>{s.name} ({s.points} pts)</option>)}
-                        </select>
+                    {/* Fixed points — read only */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: T.redLight, border: `1px solid ${T.redBorder}`, borderRadius: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#991B1B" }}>Deduction Points</div>
+                        <span style={{ fontSize: 18, fontWeight: 800, color: T.red }}>{suggestion.suggestedPoints} pts</span>
                     </div>
 
-                    {/* Points */}
-                    <div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Deduction Points</label>
-                        <input type="number" value={points} onChange={e => setPoints(Number(e.target.value))} step="0.5" min="0" style={iStyle} />
+                    {/* Fixed description — read only */}
+                    <div style={{ padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Description</div>
+                        <div style={{ fontSize: 13, color: T.text }}>{suggestion.description}</div>
                     </div>
 
-                    {/* Description */}
-                    <div>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Description</label>
-                        <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Violation description…" style={iStyle} />
-                    </div>
-
-                    {/* Note */}
+                    {/* Note — only editable field */}
                     <div>
                         <label style={{ fontSize: 11, fontWeight: 700, color: T.text, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 }}>Additional Note (optional)</label>
                         <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Any additional note…" rows={2} style={{ ...iStyle, resize: "none" }} />
                     </div>
 
-                    {/* Approve / Reject buttons */}
+                    {/* Approve / Reject */}
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={() => onClose(true)} style={{ flex: 1, padding: "10px", border: `1px solid ${T.border}`, borderRadius: 8, background: "#fff", color: T.text, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                            ✕ Reject (No Deduction)
+                            ✕ Reject
                         </button>
-                        <button onClick={handleApprove} disabled={busy || points <= 0}
-                            style={{ flex: 2, padding: "10px", border: "none", borderRadius: 8, background: busy || points <= 0 ? "#FCA5A5" : T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: busy || points <= 0 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                            {busy ? "Applying…" : `✓ Approve & Deduct ${points} pts`}
+                        <button onClick={handleApprove} disabled={busy}
+                            style={{ flex: 2, padding: "10px", border: "none", borderRadius: 8, background: busy ? "#FCA5A5" : T.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                            {busy ? "Applying…" : `✓ Approve & Deduct ${suggestion.suggestedPoints} pts`}
                         </button>
                     </div>
                 </div>

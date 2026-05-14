@@ -1054,9 +1054,13 @@ export default function SettingsPage() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
                   <div>
                     {/* Total all time */}
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Total Deducted</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#991B1B", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Total Deducted (Net)</div>
                     <div style={{ fontSize: 28, fontWeight: 800, color: "#DC2626", lineHeight: 1 }}>
-                      {(sopData?.sopPoints || []).reduce((s, y) => s + (y.totalDeducted || 0), 0).toFixed(1)} pts
+                      {(() => {
+                        const deductions = (sopData?.sopPoints || []).reduce((s, y) => s + (y.bleaches || []).filter(b => !b.isCredit && b.recheck?.status !== "confirmed").reduce((bs, b) => bs + Number(b.points), 0), 0);
+                        const credits = (sopData?.sopPoints || []).reduce((s, y) => s + (y.bleaches || []).filter(b => b.isCredit).reduce((bs, b) => bs + Number(b.points), 0), 0);
+                        return (deductions - credits).toFixed(1);
+                      })()} pts
                     </div>
                     {/* Per year */}
                     <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
@@ -1130,27 +1134,37 @@ export default function SettingsPage() {
                         <div key={date} style={{ border: "1px solid #E4E7EC", borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
                           <div style={{ padding: "8px 14px", background: "#F8FAFC", borderBottom: "1px solid #E4E7EC", display: "flex", alignItems: "center" }}>
                             <span style={{ fontSize: 12, fontWeight: 700, color: "#1A1D21" }}>📅 {date}</span>
-                            <span style={{ marginLeft: "auto", fontSize: 11, color: "#DC2626", fontWeight: 700 }}>
-                              -{grp[date].filter(b => b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0).toFixed(1)} pts
+                            <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700 }}>
+                              {(() => {
+                                const debits = grp[date].filter(b => !b.isCredit && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0);
+                                const credits = grp[date].filter(b => b.isCredit).reduce((s, b) => s + Number(b.points), 0);
+                                return <>
+                                  {debits > 0 && <span style={{ color: "#DC2626" }}>-{debits.toFixed(1)} pts</span>}
+                                  {credits > 0 && <span style={{ color: "#15803D", marginLeft: debits > 0 ? 6 : 0 }}>+{credits.toFixed(1)} pts</span>}
+                                </>;
+                              })()}
                             </span>
                           </div>
                           {grp[date].map((b, i) => {
                             const rs = b.recheck?.status || "none";
                             const removed = rs === "confirmed";
                             return (
-                              <div key={i} style={{ padding: "10px 14px", borderBottom: i < grp[date].length - 1 ? "1px solid #FEF2F2" : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: removed ? 0.5 : 1 }}>
-                                <span style={{ fontSize: 14, flexShrink: 0 }}>{removed ? "✅" : "❌"}</span>
+                              <div key={i} style={{ padding: "10px 14px", borderBottom: i < grp[date].length - 1 ? `1px solid ${b.isCredit ? "#F0FDF4" : "#FEF2F2"}` : "none", display: "flex", alignItems: "flex-start", gap: 10, opacity: removed ? 0.5 : 1, background: b.isCredit ? "#F0FDF4" : "transparent" }}>
+                                <span style={{ fontSize: 14, flexShrink: 0 }}>{b.isCredit ? "🟢" : removed ? "✅" : "❌"}</span>
                                 <div style={{ flex: 1 }}>
                                   {b.folderName && b.folderName !== "Uncategorized" && b.folderName !== "Task Event" && (
                                     <div style={{ fontSize: 10, color: "#9AA0A6", marginBottom: 2 }}>📁 {b.folderName}</div>
                                   )}
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1A1D21", textDecoration: removed ? "line-through" : "none" }}>{b.sopName}</div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: b.isCredit ? "#15803D" : "#1A1D21", textDecoration: removed ? "line-through" : "none" }}>{b.sopName}</div>
+                                  {b.isCredit && <span style={{ display: "inline-block", marginTop: 2, fontSize: 10, fontWeight: 700, color: "#15803D", background: "#DCFCE7", border: "1px solid #BBF7D0", padding: "1px 6px", borderRadius: 99 }}>🎯 Goal Credit</span>}
                                   {b.description && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{b.description}</div>}
                                   {rs === "pending" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", padding: "1px 6px", borderRadius: 99 }}>⏳ Recheck Pending</span>}
                                   {rs === "confirmed" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#15803D", background: "#F0FDF4", border: "1px solid #BBF7D0", padding: "1px 6px", borderRadius: 99 }}>✅ Deduction Removed</span>}
                                   {rs === "rejected" && <span style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", border: "1px solid #FECACA", padding: "1px 6px", borderRadius: 99 }}>❌ Recheck Denied</span>}
                                 </div>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: removed ? "#9AA0A6" : "#DC2626", background: removed ? "#F3F4F6" : "#FEF2F2", padding: "2px 8px", borderRadius: 6, flexShrink: 0, textDecoration: removed ? "line-through" : "none" }}>{b.points} pts</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: b.isCredit ? "#15803D" : removed ? "#9AA0A6" : "#DC2626", background: b.isCredit ? "#DCFCE7" : removed ? "#F3F4F6" : "#FEF2F2", padding: "2px 8px", borderRadius: 6, flexShrink: 0, textDecoration: removed ? "line-through" : "none" }}>
+                                  {b.isCredit ? "+" : ""}{b.points} pts
+                                </span>
                               </div>
                             );
                           })}

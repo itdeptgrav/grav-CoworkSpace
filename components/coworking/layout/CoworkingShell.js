@@ -2283,6 +2283,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const isCEO = role === "ceo";
   const isTL = role === "tl";
   const [mailExpanded, setMailExpanded] = React.useState(false);
+  const [tasksExpanded, setTasksExpanded] = React.useState(false);
 
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard", path: "/coworking" },
@@ -3016,6 +3017,35 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           <nav className="cw-sidebar-nav">
             <div className="cw-sidebar-section">Menu</div>
             {NAV.map(item => {
+              if (item.id === "tasks") return (
+                <div key="tasks-group">
+                  <div className={`cw-nav-item${isActive(item.path) ? " active" : ""}`} style={{ userSelect: "none" }}>
+                    <NavIcon name={item.icon} size={18} />
+                    <span style={{ flex: 1 }} onClick={() => handleNav(item.path)}>Tasks</span>
+                    {taskChatUnreadCount > 0 && (
+                      <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#8B5CF6", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 4 }}>
+                        {taskChatUnreadCount > 99 ? "99+" : taskChatUnreadCount}
+                      </span>
+                    )}
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      onClick={e => { e.stopPropagation(); setTasksExpanded(v => !v); }}
+                      style={{ transition: "transform 0.2s", transform: tasksExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.7, flexShrink: 0, cursor: "pointer", padding: 2 }}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </div>
+                  {tasksExpanded && (
+                    <div
+                      onClick={() => { router.push("/coworking/tasks?filter=goal"); if (isMobile) setMobileOpen(false); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px 7px 44px", cursor: "pointer", borderRadius: 8, margin: "1px 8px", fontSize: 13, fontWeight: 500, color: "#7E22CE", transition: "background 0.12s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "var(--cw-hover)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      <span style={{ fontSize: 14, flexShrink: 0 }}>🎯</span>
+                      <span>Goal Tasks</span>
+                    </div>
+                  )}
+                </div>
+              );
               if (item.id === "mail") return (
                 <div key="mail-group">
                   <div

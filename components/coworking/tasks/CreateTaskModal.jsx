@@ -51,6 +51,7 @@ export default function CreateTaskModal({
     currentEmployeeName,
     currentRole,
     parentTask = null,
+    initialIsGoal = false,
 }) {
     const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
@@ -72,7 +73,7 @@ export default function CreateTaskModal({
     });
     const setTPC = (k, v) => setThirdPartyConfig(prev => ({ ...prev, [k]: v }));
 
-    const [isGoal, setIsGoal] = useState(false);
+    const [isGoal, setIsGoal] = useState(initialIsGoal);
     const [goalConfig, setGoalConfig] = useState({
         goalType: "amount",
         targetValue: "",
@@ -596,7 +597,7 @@ export default function CreateTaskModal({
                             </div>
 
                             {/* ── Folder Task Toggle — shown right after title, only for root tasks ── */}
-                            {!parentTask && !isMultiMode && (
+                            {!parentTask && !isMultiMode && !initialIsGoal && (
                                 <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isFolder ? "#F5F3FF" : "#F8FAFC", border: `1.5px solid ${isFolder ? "#C4B5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
                                     <div style={{ position: "relative", marginTop: 2, flexShrink: 0 }}>
                                         <input
@@ -619,7 +620,7 @@ export default function CreateTaskModal({
                             )}
 
                             {/* ── Repeat Task Toggle ── */}
-                            {!parentTask && !isMultiMode && !isFolder && (
+                            {!parentTask && !isMultiMode && !isFolder && !initialIsGoal && (
                                 <>
                                     <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isRepeat ? "#EFF6FF" : "#F8FAFC", border: `1.5px solid ${isRepeat ? "#93C5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
                                         <div style={{ position: "relative", marginTop: 2, flexShrink: 0 }}>
@@ -751,7 +752,7 @@ export default function CreateTaskModal({
                             )}
 
                             {/* ── Third-party Dependency Task Toggle ── */}
-                            {!parentTask && !isMultiMode && !isFolder && !isRepeat && (
+                            {!parentTask && !isMultiMode && !isFolder && !isRepeat && !initialIsGoal && (
                                 <>
                                     <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isThirdParty ? "#F5F3FF" : "#F8FAFC", border: `1.5px solid ${isThirdParty ? "#C4B5FD" : "#E2E8F0"}`, transition: "all 0.15s" }}>
                                         <input type="checkbox" checked={isThirdParty} onChange={e => setIsThirdParty(e.target.checked)}
@@ -814,96 +815,75 @@ export default function CreateTaskModal({
                             )}
 
                             {/* ── Goal-based Task Toggle ── */}
-                            {!parentTask && !isMultiMode && !isFolder && !isRepeat && !isThirdParty && (
-                                <>
-                                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "10px 14px", borderRadius: 10, background: isGoal ? "#FDF4FF" : "#F8FAFC", border: `1.5px solid ${isGoal ? "#E879F9" : "#E2E8F0"}`, transition: "all 0.15s" }}>
-                                        <input type="checkbox" checked={isGoal} onChange={e => setIsGoal(e.target.checked)}
-                                            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#9333EA", margin: "2px 0 0", flexShrink: 0 }} />
-                                        <div>
-                                            <span style={{ fontSize: 12, fontWeight: 700, color: isGoal ? "#7E22CE" : "#374151" }}>🎯 Goal-based Task</span>
-                                            <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.45 }}>
-                                                Target-driven task. Employee updates progress, system tracks % achieved.
-                                            </p>
+                            {/* Goal tasks are now created from inside a parent task — not from here */}
+
+                            {/* Goal config — shown when opened as goal task from parent */}
+                            {isGoal && (
+                                <div style={{ border: "1.5px solid #E879F9", borderRadius: 10, background: "rgba(253,244,255,0.5)", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <span style={{ fontSize: 14 }}>🎯</span>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: "#7E22CE", textTransform: "uppercase", letterSpacing: "0.05em" }}>Goal Details</div>
+                                    </div>
+                                    {/* Goal type */}
+                                    <div style={s.field}>
+                                        <label style={s.label}>Goal type</label>
+                                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                            {["amount", "count", "percentage", "custom"].map(t => (
+                                                <button key={t} type="button" onClick={() => setGC("goalType", t)}
+                                                    style={{ padding: "5px 13px", borderRadius: 20, border: `1.5px solid ${goalConfig.goalType === t ? "#9333EA" : "#E2E8F0"}`, background: goalConfig.goalType === t ? "#9333EA" : "#fff", color: goalConfig.goalType === t ? "#fff" : "#374151", fontSize: 12, fontWeight: goalConfig.goalType === t ? 700 : 400, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
+                                                    {t === "amount" ? "💰 Amount" : t === "count" ? "🔢 Count" : t === "percentage" ? "📊 Percentage" : "✏️ Custom"}
+                                                </button>
+                                            ))}
                                         </div>
-                                    </label>
-
-                                    {isGoal && (
-                                        <div style={{ border: "1.5px solid #E879F9", borderRadius: 10, background: "rgba(253,244,255,0.5)", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#7E22CE", textTransform: "uppercase", letterSpacing: "0.05em" }}>Goal Details</div>
-
-                                            {/* Goal type */}
-                                            <div style={s.field}>
-                                                <label style={s.label}>Goal type</label>
-                                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                    {["amount", "count", "percentage", "custom"].map(t => (
-                                                        <button key={t} type="button" onClick={() => setGC("goalType", t)}
-                                                            style={{ padding: "5px 13px", borderRadius: 20, border: `1.5px solid ${goalConfig.goalType === t ? "#9333EA" : "#E2E8F0"}`, background: goalConfig.goalType === t ? "#9333EA" : "#fff", color: goalConfig.goalType === t ? "#fff" : "#374151", fontSize: 12, fontWeight: goalConfig.goalType === t ? 700 : 400, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize" }}>
-                                                            {t === "amount" ? "💰 Amount" : t === "count" ? "🔢 Count" : t === "percentage" ? "📊 Percentage" : "✏️ Custom"}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* Target value + unit */}
-                                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
-                                                <div style={s.field}>
-                                                    <label style={s.label}>Target value <span style={s.req}>*</span></label>
-                                                    <input className="ctm-input" style={s.input} type="number" placeholder={goalConfig.goalType === "amount" ? "e.g. 5000000" : goalConfig.goalType === "percentage" ? "e.g. 30" : "e.g. 50"}
-                                                        value={goalConfig.targetValue} onChange={e => setGC("targetValue", e.target.value)} />
-                                                </div>
-                                                <div style={s.field}>
-                                                    <label style={s.label}>Unit</label>
-                                                    <input className="ctm-input" style={s.input} type="text"
-                                                        placeholder={goalConfig.goalType === "amount" ? "₹" : goalConfig.goalType === "percentage" ? "%" : goalConfig.goalType === "count" ? "clients" : "unit"}
-                                                        value={goalConfig.unit} onChange={e => setGC("unit", e.target.value)} />
-                                                </div>
-                                            </div>
-
-                                            {/* Baseline — only for percentage */}
-                                            {goalConfig.goalType === "percentage" && (
-                                                <div style={s.field}>
-                                                    <label style={s.label}>Baseline value <span style={s.req}>*</span></label>
-                                                    <input className="ctm-input" style={s.input} type="number" placeholder="e.g. 100 (current ticket count)"
-                                                        value={goalConfig.baseline} onChange={e => setGC("baseline", e.target.value)} />
-                                                    <span style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>Employee will enter current value → system calculates reduction</span>
-                                                </div>
-                                            )}
-
-                                            {/* Goal description */}
-                                            <div style={s.field}>
-                                                <label style={s.label}>Goal description</label>
-                                                <input className="ctm-input" style={s.input} type="text" placeholder="e.g. Achieve ₹5 crore in sales by June"
-                                                    value={goalConfig.goalDescription} onChange={e => setGC("goalDescription", e.target.value)} />
-                                            </div>
-
-                                            {/* Hard deadline */}
-                                            <div style={s.field}>
-                                                <label style={s.label}>Hard deadline <span style={s.req}>*</span></label>
-                                                <input className="ctm-input" style={s.input} type="date"
-                                                    value={goalConfig.deadline} onChange={e => setGC("deadline", e.target.value)} />
-                                            </div>
-
-                                            {/* Milestones */}
-                                            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 10px", borderRadius: 7, background: goalConfig.hasMilestones ? "#FDF4FF" : "#F8FAFC", border: `1.5px solid ${goalConfig.hasMilestones ? "#E879F9" : "#E2E8F0"}` }}>
-                                                <input type="checkbox" checked={goalConfig.hasMilestones} onChange={e => setGC("hasMilestones", e.target.checked)}
-                                                    style={{ width: 14, height: 14, accentColor: "#9333EA", cursor: "pointer" }} />
-                                                <span style={{ fontSize: 12, fontWeight: 700, color: goalConfig.hasMilestones ? "#7E22CE" : "#374151" }}>🏁 Add milestones</span>
-                                            </label>
-
-                                            {goalConfig.hasMilestones && (
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                                    {goalConfig.milestones.map((ms, i) => (
-                                                        <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: 8, alignItems: "center" }}>
-                                                            <span style={{ fontSize: 12, fontWeight: 700, color: "#7E22CE", textAlign: "center" }}>{ms.pct}%</span>
-                                                            <input className="ctm-input" style={s.input} type="date" value={ms.date} onChange={e => setMilestone(i, "date", e.target.value)} />
-                                                            <input className="ctm-input" style={s.input} type="text" placeholder="Label (optional)" value={ms.label} onChange={e => setMilestone(i, "label", e.target.value)} />
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                    </div>
+                                    {/* Target value + unit */}
+                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
+                                        <div style={s.field}>
+                                            <label style={s.label}>Target value <span style={s.req}>*</span></label>
+                                            <input className="ctm-input" style={s.input} type="number" placeholder={goalConfig.goalType === "amount" ? "e.g. 5000000" : goalConfig.goalType === "percentage" ? "e.g. 30" : "e.g. 50"}
+                                                value={goalConfig.targetValue} onChange={e => setGC("targetValue", e.target.value)} />
+                                        </div>
+                                        <div style={s.field}>
+                                            <label style={s.label}>Unit</label>
+                                            <input className="ctm-input" style={s.input} type="text"
+                                                placeholder={goalConfig.goalType === "amount" ? "₹" : goalConfig.goalType === "percentage" ? "%" : goalConfig.goalType === "count" ? "clients" : "unit"}
+                                                value={goalConfig.unit} onChange={e => setGC("unit", e.target.value)} />
+                                        </div>
+                                    </div>
+                                    {goalConfig.goalType === "percentage" && (
+                                        <div style={s.field}>
+                                            <label style={s.label}>Baseline value <span style={s.req}>*</span></label>
+                                            <input className="ctm-input" style={s.input} type="number" placeholder="e.g. 100"
+                                                value={goalConfig.baseline} onChange={e => setGC("baseline", e.target.value)} />
                                         </div>
                                     )}
-                                </>
+                                    <div style={s.field}>
+                                        <label style={s.label}>Goal description</label>
+                                        <input className="ctm-input" style={s.input} type="text" placeholder="e.g. Achieve ₹5 crore in sales by June"
+                                            value={goalConfig.goalDescription} onChange={e => setGC("goalDescription", e.target.value)} />
+                                    </div>
+                                    <div style={s.field}>
+                                        <label style={s.label}>Hard deadline <span style={s.req}>*</span></label>
+                                        <input className="ctm-input" style={s.input} type="date"
+                                            value={goalConfig.deadline} onChange={e => setGC("deadline", e.target.value)} />
+                                    </div>
+                                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "8px 10px", borderRadius: 7, background: goalConfig.hasMilestones ? "#FDF4FF" : "#F8FAFC", border: `1.5px solid ${goalConfig.hasMilestones ? "#E879F9" : "#E2E8F0"}` }}>
+                                        <input type="checkbox" checked={goalConfig.hasMilestones} onChange={e => setGC("hasMilestones", e.target.checked)}
+                                            style={{ width: 14, height: 14, accentColor: "#9333EA", cursor: "pointer" }} />
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: goalConfig.hasMilestones ? "#7E22CE" : "#374151" }}>🏁 Add milestones</span>
+                                    </label>
+                                    {goalConfig.hasMilestones && (
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                            {goalConfig.milestones.map((ms, i) => (
+                                                <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: 8, alignItems: "center" }}>
+                                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#7E22CE", textAlign: "center" }}>{ms.pct}%</span>
+                                                    <input className="ctm-input" style={s.input} type="date" value={ms.date} onChange={e => setMilestone(i, "date", e.target.value)} />
+                                                    <input className="ctm-input" style={s.input} type="text" placeholder="Label (optional)" value={ms.label} onChange={e => setMilestone(i, "label", e.target.value)} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             )}
 
                             {/* Description */}

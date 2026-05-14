@@ -39,6 +39,38 @@ async function uploadFileToDrive(file) {
     return { name: file.name, driveUrl: d.viewUrl || d.url, downloadUrl: d.downloadUrl || d.url, mimeType: file.type, size: file.size };
 }
 
+// ── Auto-distribute percentages equally among non-done components ─────────────
+function distributeEqual(comps) {
+    const n = comps.length;
+    if (!n) return comps;
+    const base = +(100 / n).toFixed(2);
+    const remainder = +(100 - base * n).toFixed(2);
+    return comps.map((c, i) => ({
+        ...c,
+        percentage: i === n - 1 ? +(base + remainder).toFixed(2) : base,
+        points: c.points ?? 0,
+    }));
+}
+
+// ── Redistribute % when one component changes ─────────────────────────────────
+function redistributeAfterChange(comps, changedIdx, newPct) {
+    const clamped = Math.min(100, Math.max(0, newPct));
+    const remaining = +(100 - clamped).toFixed(2);
+    const others = comps.filter((_, i) => i !== changedIdx && comps[i].status !== "done");
+    if (!others.length) return comps.map((c, i) => i === changedIdx ? { ...c, percentage: 100 } : c);
+    const perOther = +(remaining / others.length).toFixed(2);
+    let othersUsed = 0;
+    return comps.map((c, i) => {
+        if (i === changedIdx) return { ...c, percentage: clamped };
+        if (c.status === "done") return c;
+        othersUsed++;
+        // Last other gets remainder to ensure sum = 100
+        const isLastOther = othersUsed === others.length;
+        const assignedPct = isLastOther ? +(remaining - perOther * (others.length - 1)).toFixed(2) : perOther;
+        return { ...c, percentage: assignedPct };
+    });
+}
+
 /* ── Design tokens ── */
 const T = {
     primary: "#6366F1",
@@ -218,7 +250,7 @@ function SubmitReportModal({ comp, idx, taskId, onSuccess, onCancel }) {
    VIEW REPORT MODAL
 ════════════════════════════════════ */
 function ViewReportModal({ comp, idx, onClose }) {
-    const r = comp.report;
+    const r = comp.report || {};
     function fileIcon(m) {
         if (!m) return "📄";
         if (m.startsWith("image/")) return "🖼️";
@@ -452,15 +484,181 @@ function HistoryPanel({ components, onClose }) {
 }
 
 /* ════════════════════════════════════
+   CUSTOM CALENDAR PICKER
+   Shows used dates highlighted inline
+════════════════════════════════════ */
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+function CustomCalendar({ value, onChange, usedDates = [] }) {
+    const today = new Date();
+    const parsed = value ? new Date(value) : null;
+    const [viewYear, setViewYear] = useState(parsed ? parsed.getFullYear() : today.getFullYear());
+    const [viewMonth, setViewMonth] = useState(parsed ? parsed.getMonth() : today.getMonth());
+    const [hour, setHour] = useState(parsed ? parsed.getHours() : 0);
+    const [minute, setMinute] = useState(parsed ? parsed.getMinutes() : 0);
+    const [tooltip, setTooltip] = useState(null); // { x, y, names }
+
+    // Build date → component names map from usedDates
+    const usedMap = {};
+    usedDates.forEach(d => {
+        if (!d.deadline) return;
+        const dd = new Date(d.deadline);
+        const key = `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`;
+        if (!usedMap[key]) usedMap[key] = [];
+        usedMap[key].push(d.heading);
+    });
+
+    const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+    const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+    const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+
+    const selectDate = (day) => {
+        const d = new Date(viewYear, viewMonth, day, hour, minute);
+        // Format as datetime-local value: YYYY-MM-DDTHH:mm
+        const pad = n => String(n).padStart(2, "0");
+        const str = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:${pad(minute)}`;
+        onChange(str);
+    };
+
+    const updateTime = (h, m) => {
+        setHour(h); setMinute(m);
+        if (parsed) {
+            const pad = n => String(n).padStart(2, "0");
+            const str = `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(h)}:${pad(m)}`;
+            onChange(str);
+        }
+    };
+
+    return (
+        <div style={{ background: "#fff", border: `1.5px solid #E2E8F0`, borderRadius: 12, overflow: "hidden", userSelect: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.08)" }}>
+
+            {/* Month nav */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+                <button onClick={prevMonth} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748B" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6" /></svg>
+                </button>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{MONTHS[viewMonth]} {viewYear}</span>
+                <button onClick={nextMonth} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748B" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+            </div>
+
+            {/* Legend */}
+            <div style={{ padding: "6px 14px", background: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#475569" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: "#3B82F6" }} />
+                    <span>Selected</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#475569" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: "#94A3B8" }} />
+                    <span>Already used</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#475569" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: "#F1F5F9", border: "1px solid #CBD5E1" }} />
+                    <span>Today</span>
+                </div>
+            </div>
+
+            {/* Day headers */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", padding: "8px 10px 4px", gap: 2 }}>
+                {DAYS.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.04em" }}>{d}</div>)}
+            </div>
+
+            {/* Calendar grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", padding: "0 10px 10px", gap: 2, position: "relative" }}>
+                {/* Empty cells before first day */}
+                {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
+
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const key = `${viewYear}-${viewMonth}-${day}`;
+                    const isToday = today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
+                    const isSelected = parsed && parsed.getFullYear() === viewYear && parsed.getMonth() === viewMonth && parsed.getDate() === day;
+                    const usedNames = usedMap[key] || [];
+                    const isUsed = usedNames.length > 0;
+
+                    let bg = "transparent", color = "#1E293B", border = "1px solid transparent";
+                    if (isSelected) { bg = "#3B82F6"; color = "#fff"; border = "1px solid #2563EB"; }
+                    else if (isUsed) { bg = "#94A3B8"; color = "#fff"; border = "1px solid #64748B"; }
+                    else if (isToday) { bg = "#F1F5F9"; border = "1px solid #CBD5E1"; }
+
+                    return (
+                        <div key={day} style={{ position: "relative" }}>
+                            <div
+                                onClick={() => selectDate(day)}
+                                onMouseEnter={isUsed ? (e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setTooltip({ day, names: usedNames, key });
+                                } : undefined}
+                                onMouseLeave={isUsed ? () => setTooltip(null) : undefined}
+                                style={{ textAlign: "center", padding: "6px 2px", borderRadius: 7, fontSize: 12, fontWeight: isSelected || isToday ? 700 : 400, cursor: "pointer", background: bg, color, border, transition: "all 0.1s" }}
+                            >
+                                {day}
+                                {isUsed && !isSelected && (
+                                    <div style={{ width: 4, height: 4, borderRadius: "50%", background: "#fff", margin: "1px auto 0" }} />
+                                )}
+                            </div>
+                            {/* Tooltip */}
+                            {tooltip?.key === key && (
+                                <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", zIndex: 99, background: "#0F172A", color: "#fff", borderRadius: 8, padding: "6px 10px", fontSize: 10, fontWeight: 600, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", marginBottom: 4, minWidth: 120, textAlign: "center" }}>
+                                    {tooltip.names.map((n, ni) => <div key={ni}>📌 {n}</div>)}
+                                    <div style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid #0F172A" }} />
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Time picker */}
+            <div style={{ padding: "10px 14px", borderTop: "1px solid #E2E8F0", background: "#F8FAFC", display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Time</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                    <select value={hour} onChange={e => updateTime(Number(e.target.value), minute)}
+                        style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontWeight: 600, color: "#0F172A", background: "#fff", fontFamily: "inherit", cursor: "pointer", outline: "none" }}>
+                        {Array.from({ length: 24 }).map((_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}</option>)}
+                    </select>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#64748B" }}>:</span>
+                    <select value={minute} onChange={e => updateTime(hour, Number(e.target.value))}
+                        style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontWeight: 600, color: "#0F172A", background: "#fff", fontFamily: "inherit", cursor: "pointer", outline: "none" }}>
+                        {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+                    </select>
+                </div>
+                {parsed && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "#3B82F6", flexShrink: 0 }}>
+                        {String(hour).padStart(2, "0")}:{String(minute).padStart(2, "0")}
+                    </span>
+                )}
+            </div>
+
+            {/* Selected date display */}
+            {parsed && (
+                <div style={{ padding: "8px 14px", borderTop: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 6, background: "#EFF6FF" }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1D4ED8" }}>
+                        Selected: {fmtReadable(value)}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ════════════════════════════════════
    FLOW EDIT BOX
 ════════════════════════════════════ */
-function FlowEditBox({ idx, comp, onSave, onCancel, isNew }) {
+function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [] }) {
     const [heading, setHeading] = useState(comp.heading || "");
     const [description, setDescription] = useState(comp.description || "");
     const [deadline, setDeadline] = useState(comp.deadline || "");
     const ref = useRef(null);
     useEffect(() => { if (isNew) ref.current?.focus(); }, [isNew]);
     const canSave = heading.trim() && description.trim() && deadline;
+
+    const otherDeadlines = existingDeadlines.filter(d => d.deadline && d.heading !== comp.heading);
 
     const inp = (extra = {}) => ({
         width: "100%", padding: "10px 12px", border: `1.5px solid ${T.border}`, borderRadius: 9,
@@ -490,8 +688,11 @@ function FlowEditBox({ idx, comp, onSave, onCancel, isNew }) {
             </div>
             <div>
                 <label style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>Deadline *</label>
-                <input type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)} style={inp()}
-                    onFocus={e => e.target.style.borderColor = T.primary} onBlur={e => e.target.style.borderColor = T.border} />
+                <CustomCalendar
+                    value={deadline}
+                    onChange={setDeadline}
+                    usedDates={otherDeadlines}
+                />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={onCancel} style={{ ...btn("ghost"), flex: 1, padding: "10px" }}>Cancel</button>
@@ -522,16 +723,23 @@ function AddBtn({ onClick }) {
 /* ════════════════════════════════════
    NODE CARD
 ════════════════════════════════════ */
-function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete, onMarkDone, onMarkUndo, onReportSubmitted }) {
+function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject, onReportSubmitted }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [showSubmit, setShowSubmit] = useState(false);
     const [showView, setShowView] = useState(false);
     const [showUndoConfirm, setShowUndoConfirm] = useState(false);
     const reportSubmitted = comp.reportSubmitted;
+    const isPendingApproval = comp.status === "pending_approval";
+
+    // Professional card colors based on who created it
+    const isCreatedByHead = comp.createdByRole === "head";
+    const cardAccent = isDone ? "#16A34A" : isCreatedByHead ? "#0F172A" : "#2563EB";
+    const cardBg = isDone ? "#F0FDF4" : isCreatedByHead ? "#F8FAFC" : "#EFF6FF";
+    const cardBorder = isDone ? T.successBorder : isCreatedByHead ? "#CBD5E1" : "#BFDBFE";
 
     return (
         <>
-            {showSubmit && <SubmitReportModal comp={comp} idx={idx} taskId={taskId} onSuccess={() => { setShowSubmit(false); onMarkDone(); onReportSubmitted(); }} onCancel={() => setShowSubmit(false)} />}
+            {showSubmit && <SubmitReportModal comp={comp} idx={idx} taskId={taskId} onSuccess={() => { setShowSubmit(false); onPendingApproval(); onReportSubmitted(); }} onCancel={() => setShowSubmit(false)} />}
             {showView && <ViewReportModal comp={comp} idx={idx} onClose={() => setShowView(false)} />}
             {showUndoConfirm && (
                 <ConfirmModal
@@ -541,8 +749,9 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete
             )}
 
             <div style={{
-                background: isDone ? "#F0FDF4" : "#fff",
-                border: `1.5px solid ${isDone ? T.successBorder : T.border}`,
+                background: cardBg,
+                border: `1px solid ${cardBorder}`,
+                borderLeft: `3px solid ${cardAccent}`,
                 borderRadius: 12, padding: "12px 14px",
                 boxShadow: T.shadow,
                 position: "relative",
@@ -559,21 +768,36 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete
                 {/* Status badge */}
                 <div style={{
                     display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 99, marginBottom: 8,
-                    background: isDone ? T.successBg : "#F1F5F9",
-                    border: `1px solid ${isDone ? T.successBorder : T.border}`,
+                    background: isDone ? T.successBg : isPendingApproval ? "#FFFBEB" : "#F1F5F9",
+                    border: `1px solid ${isDone ? T.successBorder : isPendingApproval ? "#FDE68A" : T.border}`,
                 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: isDone ? "#22C55E" : "#94A3B8" }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: isDone ? "#166534" : "#64748B" }}>{isDone ? "DONE" : "PENDING"}</span>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: isDone ? "#22C55E" : isPendingApproval ? "#F59E0B" : "#94A3B8" }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: isDone ? "#166534" : isPendingApproval ? "#92400E" : "#64748B" }}>{isDone ? "DONE" : isPendingApproval ? "⏳ AWAITING APPROVAL" : "PENDING"}</span>
                     {isDone && comp.doneAt && <span style={{ fontSize: 9, color: "#4ADE80", fontWeight: 600 }}>· {fmtReadable(comp.doneAt)}</span>}
                 </div>
 
                 {/* Report submitted badge */}
-                {reportSubmitted && (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginBottom: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: "#1D4ED8" }}>
-                            <span>📋</span> Report submitted · {comp.report?.submittedBy}
+                {(reportSubmitted || isPendingApproval) && (
+                    <div style={{ marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginBottom: isHead && !isDone ? 6 : 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, color: "#1D4ED8" }}>
+                                <span>📋</span> Report submitted · {comp.report?.submittedBy}
+                            </div>
+                            <button onClick={() => setShowView(true)} style={{ fontSize: 10, fontWeight: 700, color: T.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View →</button>
                         </div>
-                        <button onClick={() => setShowView(true)} style={{ fontSize: 10, fontWeight: 700, color: T.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View →</button>
+                        {/* Approve / Reject — visible inline for TL/CEO */}
+                        {isHead && isPendingApproval && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                                <button onClick={() => { setMenuOpen(false); onMarkDone(); }}
+                                    style={{ ...btn("success"), flex: 1, padding: "7px 10px", fontSize: 11 }}>
+                                    ✅ Approve
+                                </button>
+                                <button onClick={() => { setMenuOpen(false); onReject(); }}
+                                    style={{ ...btn("ghost"), flex: 1, padding: "7px 10px", fontSize: 11, color: T.danger, borderColor: T.dangerBorder, background: T.dangerBg }}>
+                                    ✕ Reject
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -581,10 +805,35 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete
                 <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 4, lineHeight: 1.4, paddingRight: 36 }}>{comp.heading}</div>
                 <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.6, marginBottom: 8, whiteSpace: "pre-wrap" }}>{comp.description}</div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: T.textMuted, fontWeight: 600, marginBottom: (comp.createdAt || comp.editedAt) ? 5 : 0 }}>
-                    <span>🕐</span>
-                    <span>{fmtReadable(comp.deadline)}</span>
+                {/* % weight + points badges */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                    {comp.percentage != null && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#5B5EF4", background: "#EEF2FF", border: "1px solid #C7D2FE", padding: "2px 8px", borderRadius: 99 }}>
+                            {Number(comp.percentage).toFixed(1)}% weight
+                        </span>
+                    )}
+                    {(comp.points > 0) && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#7E22CE", background: "#F5F3FF", border: "1px solid #DDD6FE", padding: "2px 8px", borderRadius: 99 }}>
+                            +{comp.points} pts on completion
+                        </span>
+                    )}
+                    {/* Creator role badge */}
+                    {comp.createdByRole && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: comp.createdByRole === "head" ? "#475569" : "#1D4ED8", background: comp.createdByRole === "head" ? "#F1F5F9" : "#DBEAFE", border: `1px solid ${comp.createdByRole === "head" ? "#CBD5E1" : "#93C5FD"}`, padding: "2px 7px", borderRadius: 99, letterSpacing: "0.03em" }}>
+                            {comp.createdByRole === "head" ? "SET BY ADMIN" : "SET BY EMPLOYEE"}
+                        </span>
+                    )}
                 </div>
+
+                {/* Deadline — displayed as a badge, not overwritten */}
+                {comp.deadline && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: isDone ? "#DCFCE7" : "#F1F5F9", border: `1px solid ${isDone ? "#86EFAC" : "#E2E8F0"}`, borderRadius: 8, marginBottom: 6 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={isDone ? "#16A34A" : "#64748B"} strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: isDone ? "#16A34A" : "#334155" }}>
+                            Deadline: {fmtReadable(comp.deadline)}
+                        </span>
+                    </div>
+                )}
 
                 {(comp.createdAt || comp.editedAt) && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
@@ -614,11 +863,23 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, onEdit, onDelete
                                 }
                             </div>
                         )}
-                        {isHead && reportSubmitted && (
-                            <button onClick={() => { setMenuOpen(false); setShowView(true); }}
-                                style={{ ...btn("ghost"), padding: "8px 10px", fontSize: 11, color: T.primary, borderColor: "#BFDBFE", background: "#EFF6FF" }}>
-                                👁 View Submitted Report
-                            </button>
+                        {isHead && isPendingApproval && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                <button onClick={() => { setMenuOpen(false); setShowView(true); }}
+                                    style={{ ...btn("ghost"), padding: "8px 10px", fontSize: 11, color: T.primary, borderColor: "#BFDBFE", background: "#EFF6FF" }}>
+                                    👁 View Submitted Report
+                                </button>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                    <button onClick={() => { setMenuOpen(false); onMarkDone(); }}
+                                        style={{ ...btn("success"), flex: 1, padding: "8px 10px", fontSize: 11 }}>
+                                        ✅ Approve
+                                    </button>
+                                    <button onClick={() => { setMenuOpen(false); onReject(); }}
+                                        style={{ ...btn("ghost"), flex: 1, padding: "8px 10px", fontSize: 11, color: T.danger, borderColor: T.dangerBorder, background: T.dangerBg }}>
+                                        ✕ Reject
+                                    </button>
+                                </div>
+                            </div>
                         )}
                     </div>
                 )}
@@ -640,7 +901,7 @@ function getProgressPct(components) {
 function InteractiveFlowchart({
     components, editingIdx, addingAfter, submitted, canEdit, isHead, editingMode, taskId,
     seenCount, onSeen,
-    onEdit, onDelete, onMarkDone, onMarkUndo,
+    onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject,
     onAddBetween, onSaveNew, onSaveEdit, onCancelEdit, onCancelAdd,
     onDeleteAll, onToggleEditMode, onRefresh,
 }) {
@@ -822,7 +1083,7 @@ function InteractiveFlowchart({
                         </div>
                     )}
                     {components.length === 0 && addingAfter === -1 && (
-                        <FlowEditBox idx={0} comp={{}} isNew onSave={(d) => onSaveNew(-1, d)} onCancel={onCancelAdd} />
+                        <FlowEditBox idx={0} comp={{}} isNew onSave={(d) => onSaveNew(-1, d)} onCancel={onCancelAdd} existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))} />
                     )}
 
                     {components.length > 0 && (
@@ -842,7 +1103,7 @@ function InteractiveFlowchart({
                             )}
                             {addingAfter === -1 && (
                                 <div style={{ position: "relative", zIndex: 2, marginBottom: 14 }}>
-                                    <FlowEditBox idx={0} comp={{}} isNew onSave={(d) => onSaveNew(-1, d)} onCancel={onCancelAdd} />
+                                    <FlowEditBox idx={0} comp={{}} isNew onSave={(d) => onSaveNew(-1, d)} onCancel={onCancelAdd} existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))} />
                                 </div>
                             )}
 
@@ -861,6 +1122,7 @@ function InteractiveFlowchart({
                                                     <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId}
                                                         onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                                         onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
+                                                        onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
                                                         onReportSubmitted={onRefresh} />
                                                 )}
                                             </div>
@@ -885,6 +1147,7 @@ function InteractiveFlowchart({
                                                     <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId}
                                                         onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                                         onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
+                                                        onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
                                                         onReportSubmitted={onRefresh} />
                                                 )}
                                             </div>
@@ -893,14 +1156,14 @@ function InteractiveFlowchart({
                                         {/* Edit form */}
                                         {isEditing && (
                                             <div style={{ position: "relative", zIndex: 3, marginTop: 10, marginBottom: 4 }}>
-                                                <FlowEditBox idx={i} comp={comp} isNew={false} onSave={(d) => onSaveEdit(i, d)} onCancel={onCancelEdit} />
+                                                <FlowEditBox idx={i} comp={comp} isNew={false} onSave={(d) => onSaveEdit(i, d)} onCancel={onCancelEdit} existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))} />
                                             </div>
                                         )}
 
                                         {/* Add after */}
                                         <div style={{ position: "relative", zIndex: 2, margin: "10px 0" }}>
                                             {addingAfter === i
-                                                ? <FlowEditBox idx={i + 1} comp={{}} isNew onSave={(d) => onSaveNew(i, d)} onCancel={onCancelAdd} />
+                                                ? <FlowEditBox idx={i + 1} comp={{}} isNew onSave={(d) => onSaveNew(i, d)} onCancel={onCancelAdd} existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))} />
                                                 : canEdit && (!submitted || editingMode)
                                                     ? <AddBtn onClick={() => onAddBetween(i)} />
                                                     : <div style={{ height: 6 }} />
@@ -918,6 +1181,149 @@ function InteractiveFlowchart({
 }
 
 /* ════════════════════════════════════
+   COMPONENT SETTINGS PANEL (CEO/TL)
+   Edit % and points per component
+════════════════════════════════════ */
+function ComponentSettingsPanel({ components, onSave, onClose }) {
+    const [local, setLocal] = useState(() => components.map(c => ({ ...c, percentage: c.percentage ?? 0, points: c.points ?? 0, locked: c.locked ?? false })));
+    const [err, setErr] = useState("");
+
+    const totalPct = local.reduce((s, c) => s + Number(c.percentage), 0);
+
+    const handlePctChange = (idx, val) => {
+        if (local[idx].locked || local[idx].status === "done") return;
+        const newPct = Math.max(0, Math.min(100, Number(val) || 0));
+        // Only redistribute among unlocked, non-done components
+        const lockedTotal = local.reduce((s, c, i) => i !== idx && (c.locked || c.status === "done") ? s + Number(c.percentage) : s, 0);
+        const remaining = +(100 - newPct - lockedTotal).toFixed(2);
+        const freeIdxs = local.map((c, i) => i).filter(i => i !== idx && !local[i].locked && local[i].status !== "done");
+        const perFree = freeIdxs.length > 0 ? +(remaining / freeIdxs.length).toFixed(2) : 0;
+        setLocal(prev => prev.map((c, i) => {
+            if (i === idx) return { ...c, percentage: newPct };
+            if (c.locked || c.status === "done") return c;
+            const isLast = i === freeIdxs[freeIdxs.length - 1];
+            return { ...c, percentage: isLast ? +(remaining - perFree * (freeIdxs.length - 1)).toFixed(2) : perFree };
+        }));
+        setErr("");
+    };
+
+    const handlePointsChange = (idx, val) => {
+        const pts = Math.max(0, Number(val) || 0);
+        setLocal(prev => prev.map((c, i) => i === idx ? { ...c, points: pts } : c));
+    };
+
+    const toggleLock = (idx) => {
+        setLocal(prev => prev.map((c, i) => i === idx ? { ...c, locked: !c.locked } : c));
+    };
+
+    const handleSave = () => {
+        const total = local.reduce((s, c) => s + Number(c.percentage), 0);
+        if (Math.abs(total - 100) > 0.5) { setErr(`Percentages must sum to 100%. Current: ${total.toFixed(2)}%`); return; }
+        onSave(local);
+    };
+
+    return (
+        <Modal>
+            <div style={{ position: "fixed", inset: 0, zIndex: 99999, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+                <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 -8px 40px rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
+
+                    {/* Handle */}
+                    <div style={{ width: 40, height: 4, background: T.border, borderRadius: 99, margin: "12px auto 0" }} />
+
+                    {/* Header */}
+                    <div style={{ padding: "16px 20px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>⚙️ Component Settings</div>
+                            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Adjust % completion weight and reward points per component</div>
+                        </div>
+                        <button onClick={onClose} style={{ ...btn("ghost"), width: 32, height: 32, padding: 0 }}>✕</button>
+                    </div>
+
+                    {/* Total % indicator */}
+                    <div style={{ padding: "8px 20px", background: Math.abs(totalPct - 100) > 0.5 ? T.dangerBg : T.successBg, borderBottom: `1px solid ${Math.abs(totalPct - 100) > 0.5 ? T.dangerBorder : T.successBorder}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: Math.abs(totalPct - 100) > 0.5 ? T.danger : "#166534" }}>
+                            Total: {totalPct.toFixed(2)}% {Math.abs(totalPct - 100) <= 0.5 ? "✅" : "⚠️ Must equal 100%"}
+                        </span>
+                        <span style={{ fontSize: 11, color: T.textMuted }}>{local.length} components</span>
+                    </div>
+
+                    {/* Column headers */}
+                    <div style={{ padding: "8px 20px", display: "grid", gridTemplateColumns: "1fr 90px 90px 40px", gap: 8, background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Component</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>% Weight</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Points</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>Lock</span>
+                    </div>
+
+                    {/* Component rows */}
+                    <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        {local.map((c, i) => {
+                            const isDone = c.status === "done";
+                            const isLocked = c.locked || isDone;
+                            return (
+                                <div key={c.id || i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 90px 40px", gap: 8, alignItems: "center", padding: "10px 12px", background: isDone ? T.successBg : isLocked ? "#FFFBEB" : "#fff", border: `1px solid ${isDone ? T.successBorder : isLocked ? T.warningBorder : T.border}`, borderRadius: 10 }}>
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {isDone ? "✅ " : isLocked ? "🔒 " : ""}{c.heading}
+                                        </div>
+                                        {isDone && <div style={{ fontSize: 10, color: "#166534", fontWeight: 600 }}>Completed — locked</div>}
+                                        {!isDone && isLocked && <div style={{ fontSize: 10, color: "#92400E", fontWeight: 600 }}>% locked — click 🔓 to unlock</div>}
+                                    </div>
+                                    <div style={{ textAlign: "center" }}>
+                                        {isDone
+                                            ? <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>{Number(c.percentage).toFixed(1)}%</span>
+                                            : <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                                <input type="number" value={c.percentage} min="0" max="100" step="0.1"
+                                                    disabled={isLocked}
+                                                    onChange={e => handlePctChange(i, e.target.value)}
+                                                    style={{ width: "100%", padding: "6px 8px", border: `1.5px solid ${isLocked ? T.warningBorder : T.border}`, borderRadius: 7, fontSize: 12, fontWeight: 700, color: isLocked ? "#92400E" : T.text, fontFamily: "inherit", textAlign: "center", outline: "none", background: isLocked ? "#FFFBEB" : "#fff", cursor: isLocked ? "not-allowed" : "text" }}
+                                                    onFocus={e => { if (!isLocked) e.target.style.borderColor = T.primary; }}
+                                                    onBlur={e => e.target.style.borderColor = isLocked ? T.warningBorder : T.border}
+                                                />
+                                                <span style={{ fontSize: 11, color: T.textMuted, flexShrink: 0 }}>%</span>
+                                            </div>
+                                        }
+                                    </div>
+                                    <div style={{ textAlign: "center" }}>
+                                        {isDone
+                                            ? <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>{c.points || 0} pts</span>
+                                            : <input type="number" value={c.points || 0} min="0" step="1"
+                                                onChange={e => handlePointsChange(i, e.target.value)}
+                                                placeholder="0"
+                                                style={{ width: "100%", padding: "6px 8px", border: `1.5px solid ${T.border}`, borderRadius: 7, fontSize: 12, fontWeight: 700, color: "#7E22CE", fontFamily: "inherit", textAlign: "center", outline: "none" }}
+                                                onFocus={e => e.target.style.borderColor = "#9333EA"}
+                                                onBlur={e => e.target.style.borderColor = T.border}
+                                            />
+                                        }
+                                    </div>
+                                    <div style={{ textAlign: "center" }}>
+                                        {!isDone && (
+                                            <button onClick={() => toggleLock(i)}
+                                                title={isLocked ? "Unlock %" : "Lock %"}
+                                                style={{ width: 30, height: 30, borderRadius: 7, border: `1.5px solid ${isLocked ? T.warningBorder : T.border}`, background: isLocked ? T.warningBg : "#fff", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                                {isLocked ? "🔒" : "🔓"}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {err && <div style={{ margin: "0 20px 8px", padding: "10px 12px", background: T.dangerBg, border: `1px solid ${T.dangerBorder}`, borderRadius: 8, fontSize: 11, color: T.danger, fontWeight: 600 }}>{err}</div>}
+
+                    {/* Footer */}
+                    <div style={{ padding: "12px 20px 24px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 10 }}>
+                        <button onClick={onClose} style={{ ...btn("ghost"), flex: 1, padding: "12px" }}>Cancel</button>
+                        <button onClick={handleSave} style={{ ...btn("primary"), flex: 2, padding: "12px", fontSize: 13, fontWeight: 700 }}>Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+/* ════════════════════════════════════
    ACTIVITIES SECTION (state container)
 ════════════════════════════════════ */
 function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
@@ -930,6 +1336,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
     const [loading, setLoading] = useState(true);
     const [saveErr, setSaveErr] = useState("");
     const [editingMode, setEditingMode] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
 
     const seenKey = `history_seen_${task?.taskId}`;
     const [seenCount, setSeenCountRaw] = useState(() => {
@@ -937,7 +1344,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
     });
     const handleSeen = (n) => { setSeenCountRaw(n); try { localStorage.setItem(seenKey, String(n)); } catch { } };
 
-    const canEdit = isAssignee;
+    const canEdit = isAssignee || isCEO || isTL;
     const isHead = isCEO || isTL;
 
     const load = useCallback(async () => {
@@ -980,11 +1387,12 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
                 { field: "Deadline", to: fmtDatetime(data.deadline) },
             ]
         };
-        const newComp = { id: genId(), ...data, status: "pending", createdAt: now, history: [entry] };
+        const newComp = { id: genId(), ...data, status: "pending", points: 0, createdByRole: isHead ? "head" : "employee", createdAt: now, history: [entry] };
         const updated = [...components];
         updated.splice(afterIdx + 1, 0, newComp);
-        setComponents(updated); setAddingAfter(null);
-        persist(updated, submitted);
+        const withPct = distributeEqual(updated); // auto-distribute equally
+        setComponents(withPct); setAddingAfter(null);
+        persist(withPct, submitted);
     };
 
     const handleSaveEdit = (idx, data) => {
@@ -1002,10 +1410,11 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
 
     const handleDelete = (idx) => {
         const updated = components.filter((_, i) => i !== idx);
-        setComponents(updated);
+        const withPct = distributeEqual(updated); // re-distribute equally
+        setComponents(withPct);
         if (editingIdx === idx) setEditingIdx(null);
         if (addingAfter === idx) setAddingAfter(null);
-        persist(updated, submitted);
+        persist(withPct, submitted);
     };
 
     const handleDeleteAll = async () => {
@@ -1014,11 +1423,54 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
         await persist([], false, null);
     };
 
-    const handleMarkDone = (idx) => {
+    const handleMarkDone = async (idx) => {
         const now = fmtDatetime(new Date().toISOString());
-        const prev = components[idx];
-        const entry = { type: "done", label: "Marked as Done", at: now, by: null, changes: [] };
+        const comp = components[idx];
+        const entry = { type: "done", label: "Approved & Marked Done", at: now, by: null, changes: [] };
         const u = components.map((c, i) => i === idx ? { ...c, status: "done", doneAt: now, history: [...(c.history || []), entry] } : c);
+        setComponents(u); persist(u, submitted);
+
+        // Award points if component has points set
+        const pts = comp.points || 0;
+        if (pts > 0) {
+            try {
+                const token = await getToken();
+                const assigneeId = (task.assigneeIds || [])[0];
+                if (assigneeId) {
+                    const creditRes = await fetch(`${BASE}/cowork/sop/goal-credit`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({
+                            targetEmployeeId: assigneeId,
+                            points: pts,
+                            componentName: comp.heading,
+                            taskTitle: task.title,
+                            taskId: task.taskId,
+                            componentId: comp.id,
+                        }),
+                    });
+                    if (!creditRes.ok) {
+                        const errData = await creditRes.json().catch(() => ({}));
+                        console.error("[goal-credit] failed:", creditRes.status, errData);
+                    } else {
+                        console.log(`[goal-credit] +${pts} pts awarded to ${assigneeId}`);
+                    }
+                }
+            } catch (e) { console.error("[goal-credit]", e.message); }
+        }
+    };
+
+    // Called when employee submits report — backend already saved report data
+    // Just reload from backend to get the updated component with report data
+    const handlePendingApproval = async (idx) => {
+        await load(); // reload fresh from Firestore — preserves report data
+    };
+
+    // Called when TL/CEO rejects — resets to pending so employee can resubmit
+    const handleReject = (idx) => {
+        const now = fmtDatetime(new Date().toISOString());
+        const entry = { type: "rejected", label: "Report Rejected — Back to Pending", at: now, by: null, changes: [] };
+        const u = components.map((c, i) => i === idx ? { ...c, status: "pending", reportSubmitted: false, report: null, history: [...(c.history || []), entry] } : c);
         setComponents(u); persist(u, submitted);
     };
 
@@ -1035,6 +1487,12 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
         const now = fmtDatetime(new Date().toISOString());
         setSubmitted(true); setSubmittedAt(now);
         await persist(components, true, now);
+    };
+
+    const handleSaveSettings = (updated) => {
+        setComponents(updated);
+        setShowSettings(false);
+        persist(updated, submitted);
     };
 
     if (loading) return (
@@ -1054,6 +1512,27 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
                     .gt-activities-wrap { padding: 10px 10px 20px !important; gap: 10px !important; }
                 }
             `}</style>
+
+            {/* Settings panel */}
+            {showSettings && components.length > 0 && (
+                <ComponentSettingsPanel
+                    components={components}
+                    onSave={handleSaveSettings}
+                    onClose={() => setShowSettings(false)}
+                />
+            )}
+
+            {/* CEO/TL settings button */}
+            {(isCEO || isTL) && components.length > 0 && (
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button onClick={() => setShowSettings(true)} style={{ ...btn("default"), padding: "7px 14px", fontSize: 11, gap: 6 }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                        </svg>
+                        % &amp; Points Settings
+                    </button>
+                </div>
+            )}
             <InteractiveFlowchart
                 components={components} editingIdx={editingIdx} addingAfter={addingAfter}
                 submitted={submitted} canEdit={canEdit} isHead={isHead} editingMode={editingMode}
@@ -1061,6 +1540,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL }) {
                 seenCount={seenCount} onSeen={handleSeen}
                 onEdit={(i) => { setEditingIdx(i); setAddingAfter(null); }}
                 onDelete={handleDelete} onMarkDone={handleMarkDone} onMarkUndo={handleMarkUndo}
+                onPendingApproval={handlePendingApproval} onReject={handleReject}
                 onAddBetween={(i) => { setAddingAfter(i); setEditingIdx(null); }}
                 onSaveNew={handleSaveNew} onSaveEdit={handleSaveEdit}
                 onCancelEdit={() => setEditingIdx(null)} onCancelAdd={() => setAddingAfter(null)}

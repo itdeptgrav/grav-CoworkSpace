@@ -7,7 +7,7 @@
  * FIXED: TL approve button properly integrated
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
 
@@ -1023,6 +1023,93 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
             )}
           </div>
 
+          {/* ── Goal Config Details ── */}
+          {task.isGoal && task.goalConfig && (
+            <div style={{ margin: "14px 14px 0" }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#7E22CE,#9333EA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🎯</div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#7E22CE", textTransform: "uppercase", letterSpacing: "0.08em" }}>Goal Details</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>Target-driven task metrics</div>
+                </div>
+              </div>
+
+              {/* Target card — hero stat */}
+              <div style={{ background: "linear-gradient(135deg,#7E22CE 0%,#9333EA 100%)", borderRadius: 12, padding: "16px 18px", marginBottom: 10, position: "relative", overflow: "hidden" }}>
+                <div style={{ position: "absolute", top: -10, right: -10, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+                <div style={{ position: "absolute", bottom: -20, right: 20, width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
+                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Target Value</div>
+                <div style={{ fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: "-0.02em", lineHeight: 1 }}>
+                  {task.goalConfig.unit || ""}{task.goalConfig.targetValue}{task.goalConfig.goalType === "percentage" ? "%" : ""}
+                </div>
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.9)", background: "rgba(255,255,255,0.15)", padding: "2px 8px", borderRadius: 99, textTransform: "capitalize" }}>
+                    {task.goalConfig.goalType === "amount" ? "💰 Amount" : task.goalConfig.goalType === "count" ? "🔢 Count" : task.goalConfig.goalType === "percentage" ? "📊 Percentage" : "✏️ Custom"}
+                  </span>
+                  {task.goalConfig.goalDescription && (
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.65)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.goalConfig.goalDescription}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Info grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                {/* Hard deadline */}
+                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Hard Deadline</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#DC2626" }}>
+                    {task.goalConfig.deadline ? new Date(task.goalConfig.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                  </div>
+                </div>
+                {/* Unit */}
+                <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Unit</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#7E22CE" }}>{task.goalConfig.unit || "—"}</div>
+                </div>
+              </div>
+
+              {/* Goal description — shown like Notes field */}
+              {task.goalConfig.goalDescription && (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderTop: "1px solid #F3F4F6", marginBottom: 10 }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 2, flexShrink: 0 }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>Goal Description</div>
+                    <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>{task.goalConfig.goalDescription}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Baseline for percentage */}
+              {task.goalConfig.goalType === "percentage" && task.goalConfig.baseline && (
+                <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Baseline Value</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#15803D" }}>{task.goalConfig.baseline}</div>
+                </div>
+              )}
+
+              {/* Milestones */}
+              {task.goalConfig.hasMilestones && task.goalConfig.milestones?.filter(m => m.date).length > 0 && (
+                <div style={{ background: "#FAFAFA", border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>🏁 Milestones</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {task.goalConfig.milestones.filter(m => m.date).map((m, i, arr) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: i < arr.length - 1 ? 8 : 0, marginBottom: i < arr.length - 1 ? 8 : 0, borderBottom: i < arr.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#7E22CE,#9333EA)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: "#fff" }}>{m.pct}%</span>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{m.label || `Milestone ${i + 1}`}</div>
+                          <div style={{ fontSize: 10, color: "#9CA3AF" }}>{new Date(m.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Progress bar */}
           <div style={{ marginTop: 14, padding: "0 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
@@ -1996,6 +2083,18 @@ function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setAc
 export default function TasksPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isGoalView = searchParams?.get("filter") === "goal";
+
+  // Clear selected task when switching between goal/regular view
+  const prevGoalView = useRef(isGoalView);
+  useEffect(() => {
+    if (prevGoalView.current !== isGoalView) {
+      prevGoalView.current = isGoalView;
+      setSelectedTask(null);
+      setChatMessages([]);
+    }
+  }, [isGoalView]);
 
   // State Variables
   const [allTasks, setAllTasks] = useState([]);
@@ -3286,7 +3385,7 @@ export default function TasksPage() {
     const targetTask = allTaskMap.get(tid) || selectedTask;
 
     // Modal actions
-    if (["add_subtask", "forward", "report", "submit_completion", "review_completion", "ceo_review", "deadline"].includes(type)) {
+    if (["add_subtask", "add_goal_task", "forward", "report", "submit_completion", "review_completion", "ceo_review", "deadline"].includes(type)) {
       setActiveModal({ type, taskId: tid, task: targetTask });
       return;
     }
@@ -4557,17 +4656,9 @@ export default function TasksPage() {
 
     /* Gradient hero strip (decorative banner) — only when a task is selected */
     .gv-chat-hero {
-      flex-shrink:0; height:64px; position:relative; overflow:hidden;
-      background:
-        radial-gradient(circle at 15% 30%, rgba(255,255,255,0.5), transparent 35%),
-        radial-gradient(circle at 75% 60%, rgba(255,182,255,0.55), transparent 45%),
-        linear-gradient(120deg,#C4B5FD 0%,#A78BFA 25%,#8B5CF6 50%,#EC4899 100%);
+      flex-shrink:0; height:0 !important; overflow:hidden; display:none;
     }
-    .gv-chat-hero::after {
-      content:""; position:absolute; inset:0;
-      background:linear-gradient(180deg, transparent 60%, rgba(255,255,255,0.18) 100%);
-      pointer-events:none;
-    }
+    .gv-chat-hero::after { display:none; }
 
     /* Restyle the desktop chat header to match Image 2 (white bar under hero) */
     .gv-chat-head.gv-desk-only {
@@ -4651,7 +4742,7 @@ export default function TasksPage() {
     .gv-grp-count { background: #EEF2FF !important; color: #5B5EF4 !important; padding: 2px 9px !important; font-size: 11px !important; font-weight: 700 !important; }
 
     /* === Chat panel polish -- match Image-2 message bubbles & input === */
-    .gv-chat-hero { height: 88px !important; }
+    .gv-chat-hero { display:none !important; }
     .gv-chat-head.gv-desk-only { padding: 14px 22px !important; min-height: 64px !important; }
     .gv-chat-head.gv-desk-only .gv-chat-task-name { font-size: 17px !important; }
     .gv-chat-head.gv-desk-only .gv-chat-badge { padding: 5px 12px !important; font-size: 11px !important; }
@@ -4818,7 +4909,7 @@ export default function TasksPage() {
     .gv-tbl-group { margin: 4px 0 !important; }
 
     /* === Chat panel: shorter hero, tighter header so chat content starts higher === */
-    .gv-chat-hero { height: 70px !important; }
+    /* .gv-chat-hero removed */
     .gv-chat-head.gv-desk-only { padding: 10px 18px !important; min-height: 52px !important; gap: 8px !important; }
     .gv-chat-head.gv-desk-only .gv-chat-task-name { font-size: 15px !important; font-weight: 700 !important; }
     .gv-chat-head.gv-desk-only .gv-chat-badge { padding: 4px 9px !important; font-size: 10.5px !important; }
@@ -5525,10 +5616,10 @@ em-emoji-picker,
           // For CEO/TL: show only root tasks (they see full hierarchy via subtask expansion)
           // Deduplicate allTasks first — guards against any race condition duplicates
           const dedupedTasks = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
-          const rootTasks = role === "employee"
-            // Use allTaskMapRef.current (always fresh) to avoid stale-state duplicates
+          const rootTasks = (role === "employee"
             ? dedupedTasks.filter(t => !t.parentTaskId || !allTaskMapRef.current.has(t.parentTaskId))
-            : dedupedTasks.filter(t => !t.parentTaskId);
+            : dedupedTasks.filter(t => !t.parentTaskId)
+          ).filter(t => isGoalView ? t.isGoal : true);
           const filteredRoots = rootTasks.filter(t => {
             const q = listSearch.toLowerCase();
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
@@ -5608,7 +5699,7 @@ em-emoji-picker,
               }
               return true;
             })();
-            return matchQ && matchSt && matchDept && matchEmp && matchDate && matchView;
+            return matchQ && matchSt && matchDept && matchEmp && matchDate && matchView && (isGoalView ? true : !t.isGoal);
           });
 
           // Sort: if ANY task has order set, sort all by order (use priority*1000+created as fallback)
@@ -6049,6 +6140,18 @@ em-emoji-picker,
                   .filter(Boolean)
                   .sort((a, b) => Number(a.priority ?? 5) - Number(b.priority ?? 5))
                   .map(sub => <CompactItem key={sub.taskId} t={sub} isSubEl />)}
+                {/* ── 🎯 Add Goal Task — shows under task when expanded ── */}
+                {!isSubEl && isExp && (isCEO || isTL) && !t.isFolder && !t.isRepeat && !t.isGoal && (
+                  <div
+                    style={{ paddingLeft: 28, paddingRight: 8, paddingTop: 4, paddingBottom: 4, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", opacity: 0.7 }}
+                    onClick={e => { e.stopPropagation(); setActiveModal({ type: "add_goal_task", taskId: t.taskId, task: t }); }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "1"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}
+                  >
+                    <span style={{ fontSize: 10 }}>🎯</span>
+                    <span style={{ fontSize: 10, color: "#7E22CE", fontWeight: 600 }}>+ Add Goal Task</span>
+                  </div>
+                )}
               </>
             );
           };
@@ -6081,29 +6184,25 @@ em-emoji-picker,
                   </>
                 ) : (
                   <>
-                    <span className="gv-lp-title">Tasks</span>
+                    <span className="gv-lp-title">{isGoalView ? "🎯 Goal Tasks" : "Tasks"}</span>
                     <div className="gv-search-box">
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
-                      <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search tasks..." />
+                      <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder={isGoalView ? "Search goal tasks..." : "Search tasks..."} />
                     </div>
-                    {(isCEO || isTL) && <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Task</button>}
-                    <button
-                      className="gv-new-btn"
-                      onClick={() => setActiveModal({ type: "self_assign" })}
-                      style={{ background: "#7C3AED", marginLeft: 6 }}
-                      title="Create a task assigned to yourself"
-                    >
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
-                      </svg>
-                      Assign to Self
-                    </button>
+                    {(isCEO || isTL) && !isGoalView && topTab !== "selftasks" && <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Task</button>}
+                    {(isCEO || isTL) && isGoalView && <button className="gv-new-btn" style={{ background: "#7E22CE" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Goal</button>}
+                    {!isGoalView && topTab === "selftasks" && (
+                      <button className="gv-new-btn" onClick={() => setActiveModal({ type: "self_assign" })} style={{ background: "#7C3AED" }}>
+                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                        Assign to Self
+                      </button>
+                    )}
                   </>
                 )}
               </div>
 
-              {/* === Image-2 top tabs row: My Tasks / All Tasks / Calendar / Timeline / Kanban === */}
-              {(
+              {/* === Top tabs — hidden in goal view === */}
+              {!isGoalView && (
                 <div className="gv-img2-toptabs">
                   <button type="button" className={`gv-img2-toptab ${topTab === "my" ? "active" : ""}`} onClick={() => setTopTab("my")}>My Tasks</button>
                   <button type="button" className={`gv-img2-toptab ${topTab === "timeline" ? "active" : ""}`} onClick={() => setTopTab("timeline")}>Timeline</button>
@@ -6114,7 +6213,7 @@ em-emoji-picker,
 
               {/* === Image-2 filter pills row: All / Due Today N / Due This Week N / Overdue N / Completed N / Filters === */}
               {(() => {
-                const baseTasks = allTasks.filter(t => !t.parentTaskId);
+                const baseTasks = allTasks.filter(t => !t.parentTaskId && (isGoalView ? t.isGoal : true));
                 const now = Date.now();
                 const todayS = new Date(); todayS.setHours(0, 0, 0, 0);
                 const todayE = new Date(); todayE.setHours(23, 59, 59, 999);
@@ -6141,8 +6240,8 @@ em-emoji-picker,
                 );
               })()}
 
-              {/* Task.Co-style project info */}
-              {!isCompact && (
+              {/* Task.Co-style project info — hidden in goal view */}
+              {!isCompact && !isGoalView && (
                 <div className="gv-legacy-info" style={{ padding: "8px 14px", borderBottom: "1px solid var(--border)", background: "var(--surface)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", marginBottom: 2 }}>Daily Task Board</div>
@@ -6511,20 +6610,28 @@ em-emoji-picker,
                     const isApproved = t.selfAssignApproved === true;
                     const parent = showParent ? allTasks.find(p => p.taskId === t.parentTaskId) : null;
                     return (
-                      <div onClick={() => handleSelectNode(t)} style={{ background: "#fff", border: `1.5px solid ${selectedTask?.taskId === t.taskId ? accentColor : "#E5E7EB"}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer", borderLeft: `4px solid ${isApproved ? "#16A34A" : accentColor}`, transition: "all 0.1s" }}>
-                        {parent && <div style={{ fontSize: 9, color: "#94A3B8", marginBottom: 3 }}>↳ <strong style={{ color: "#64748B" }}>{parent.title}</strong></div>}
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
-                          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, flexShrink: 0, background: isApproved ? "#DCFCE7" : "#F5F3FF", color: isApproved ? "#15803D" : accentColor, border: `1px solid ${isApproved ? "#86EFAC" : "#E9D5FF"}` }}>
-                            {isApproved ? "✓ Approved" : "⏳ Pending"}
-                          </span>
+                      <div onClick={() => handleSelectNode(t)}
+                        style={{ background: "#fff", border: `1px solid ${selectedTask?.taskId === t.taskId ? accentColor : "#E5E7EB"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", borderLeft: `3px solid ${isApproved ? "#16A34A" : accentColor}`, transition: "all 0.1s", display: "flex", alignItems: "center", gap: 12 }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#FAFAFA"}
+                        onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                        {/* Avatar */}
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: isApproved ? "#DCFCE7" : "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}>
+                          {isApproved ? "✅" : "👤"}
                         </div>
-                        {t.notes && <div style={{ fontSize: 11, color: "#64748B", marginBottom: 5, lineHeight: 1.4 }}>{t.notes.slice(0, 80)}{t.notes.length > 80 ? "…" : ""}</div>}
-                        <div style={{ display: "flex", gap: 8, fontSize: 10, color: "#94A3B8", flexWrap: "wrap" }}>
-                          {t.assignedByName && <span>By: <strong style={{ color: "#374151" }}>{t.assignedByName}</strong></span>}
-                          {t.approverName && <span>Approver: <strong style={{ color: accentColor }}>{t.approverName}</strong></span>}
-                          {t.fixedDeadline && <span>📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>}
+                        {/* Content */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {parent && <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 2 }}>↳ {parent.title}</div>}
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>{t.title}</div>
+                          <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#64748B", flexWrap: "wrap" }}>
+                            {t.assignedByName && <span>By <strong style={{ color: "#374151" }}>{t.assignedByName}</strong></span>}
+                            {t.approverName && <span>· Approver <strong style={{ color: accentColor }}>{t.approverName}</strong></span>}
+                            {t.fixedDeadline && <span>· 📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>}
+                          </div>
                         </div>
+                        {/* Status badge */}
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 99, flexShrink: 0, background: isApproved ? "#DCFCE7" : "#F5F3FF", color: isApproved ? "#15803D" : accentColor, border: `1px solid ${isApproved ? "#86EFAC" : "#E9D5FF"}` }}>
+                          {isApproved ? "✓ Approved" : "⏳ Pending"}
+                        </span>
                       </div>
                     );
                   };
@@ -6536,7 +6643,11 @@ em-emoji-picker,
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
                           <div style={{ fontSize: 28, marginBottom: 8 }}>👤</div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#64748B" }}>No self-assigned tasks</div>
-                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>Use "Assign to Self" to create one</div>
+                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, marginBottom: 16 }}>Use "Assign to Self" to create one</div>
+                          <button className="gv-new-btn" onClick={() => setActiveModal({ type: "self_assign" })} style={{ background: "#7C3AED", padding: "9px 20px", fontSize: 13 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                            Assign to Self
+                          </button>
                         </div>
                       )}
 
@@ -6550,15 +6661,28 @@ em-emoji-picker,
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {needsMyApproval.map(t => (
-                              <div key={t.taskId}>
-                                <TaskCard t={t} accentColor="#DC2626" showParent={!!t.parentTaskId} />
-                                <div style={{ display: "flex", gap: 6, marginTop: 6 }} onClick={e => e.stopPropagation()}>
+                              <div key={t.taskId} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", borderLeft: "3px solid #DC2626" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}>👤</div>
+                                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => handleSelectNode(t)}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                                    <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                      By <strong style={{ color: "#374151" }}>{t.assignedByName}</strong>
+                                      {t.approverName && <> · Approver <strong style={{ color: "#DC2626" }}>{t.approverName}</strong></>}
+                                      {t.fixedDeadline && <> · 📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                    </div>
+                                  </div>
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 99, flexShrink: 0, background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA" }}>⏳ Pending</span>
+                                </div>
+                                {/* Compact action buttons */}
+                                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }} onClick={e => e.stopPropagation()}>
                                   <button onClick={async () => { try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
-                                    style={{ flex: 1, padding: "7px 0", background: "#16A34A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                                    ✓ Approve Task
+                                    style={{ padding: "6px 16px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                    Approve
                                   </button>
                                   <button onClick={async () => { const r = prompt("Rejection reason (optional):"); if (r === null) return; try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
-                                    style={{ padding: "7px 16px", background: "#fff", color: "#DC2626", border: "1.5px solid #FECACA", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                    style={{ padding: "6px 16px", background: "#fff", color: "#DC2626", border: "1.5px solid #FECACA", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                                     ✕ Reject
                                   </button>
                                 </div>
@@ -6858,51 +6982,85 @@ em-emoji-picker,
 
                     return (
                       <>
-                        {/* Section A: Assigned to me by others */}
-                        {assignedToMe.length > 0 && (
-                          <SectionBox
-                            sectionKey="assigned"
-                            title="Assigned to me"
-                            icon="📥"
-                            accentColor="#5B5EF4"
-                            accentBg="#F5F3FF"
-                            tasks={assignedToMe}
-                            count={assignedToMe.length}
-                          />
-                        )}
-                        {/* Section B: Created by me */}
-                        {createdByMe.length > 0 && (
-                          <SectionBox
-                            sectionKey="created"
-                            title="Created by me"
-                            icon="✏️"
-                            accentColor="#0891B2"
-                            accentBg="#F0F9FF"
-                            tasks={createdByMe}
-                            count={createdByMe.length}
-                          />
-                        )}
-                        {/* Section C: Other tasks (only when "All Tasks" is selected) */}
-                        {topTab === "all" && otherTasks.length > 0 && (
-                          <SectionBox
-                            sectionKey="other"
-                            title="Other tasks"
-                            icon="📋"
-                            accentColor="#F59E0B"
-                            accentBg="#FFFBEB"
-                            tasks={otherTasks}
-                            count={otherTasks.length}
-                          />
-                        )}
-
-                        {/* === Image-2: "+ Add Another Task" footer card === */}
-                        {(isCEO || isTL) && (
-                          <button type="button" className="gv-img2-add-another" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                            Add Another Task
-                          </button>
+                        {isGoalView ? (
+                          // ── Goal view: flat list, no sections ──
+                          <>
+                            {filteredRoots.length === 0 ? (
+                              <div style={{ textAlign: "center", padding: "60px 20px" }}>
+                                <div style={{ fontSize: 32, marginBottom: 12 }}>🎯</div>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-1)", marginBottom: 6 }}>No goal tasks yet</div>
+                                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 20 }}>Create your first goal task to start tracking progress</div>
+                                {(isCEO || isTL) && <button className="gv-new-btn" style={{ background: "#7E22CE", margin: "0 auto" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}>+ Add Goal Task</button>}
+                              </div>
+                            ) : (
+                              <SectionBox
+                                sectionKey="goals"
+                                title="All Goal Tasks"
+                                icon="🎯"
+                                accentColor="#7E22CE"
+                                accentBg="#F5F3FF"
+                                tasks={filteredRoots}
+                                count={filteredRoots.length}
+                              />
+                            )}
+                            {filteredRoots.length > 0 && (isCEO || isTL) && (
+                              <button type="button" className="gv-img2-add-another" style={{ borderColor: "#7E22CE22", color: "#7E22CE" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                Add Goal Task
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          // ── Regular view: Assigned / Created / Other sections ──
+                          <>
+                            {/* Section A: Assigned to me by others */}
+                            {assignedToMe.length > 0 && (
+                              <SectionBox
+                                sectionKey="assigned"
+                                title="Assigned to me"
+                                icon="📥"
+                                accentColor="#5B5EF4"
+                                accentBg="#F5F3FF"
+                                tasks={assignedToMe}
+                                count={assignedToMe.length}
+                              />
+                            )}
+                            {/* Section B: Created by me */}
+                            {createdByMe.length > 0 && (
+                              <SectionBox
+                                sectionKey="created"
+                                title="Created by me"
+                                icon="✏️"
+                                accentColor="#0891B2"
+                                accentBg="#F0F9FF"
+                                tasks={createdByMe}
+                                count={createdByMe.length}
+                              />
+                            )}
+                            {/* Section C: Other tasks (only when "All Tasks" is selected) */}
+                            {topTab === "all" && otherTasks.length > 0 && (
+                              <SectionBox
+                                sectionKey="other"
+                                title="Other tasks"
+                                icon="📋"
+                                accentColor="#F59E0B"
+                                accentBg="#FFFBEB"
+                                tasks={otherTasks}
+                                count={otherTasks.length}
+                              />
+                            )}
+                            {/* === Image-2: "+ Add Another Task" footer card === */}
+                            {(isCEO || isTL) && (
+                              <button type="button" className="gv-img2-add-another" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                Add Another Task
+                              </button>
+                            )}
+                          </>
                         )}
                       </>
                     );
@@ -7003,15 +7161,7 @@ em-emoji-picker,
         ) : (
           <div className={`gv-chat ${task ? "gv-has-task" : "gv-no-task"} ${mobileView === "chat" ? "mob-visible" : "mob-hidden"} ${mobDetailPanel ? "mob-hidden" : ""}`} style={{ position: "relative" }}>
 
-            {/* ── Image-2 gradient hero banner (desktop, only when task selected) ── */}
-            {task && (
-              <div className="gv-chat-hero gv-desk-only" aria-hidden="true"
-                style={{ background: "linear-gradient(120deg,#C4B5FD 0%,#A78BFA 25%,#8B5CF6 50%,#EC4899 100%)", overflow: "hidden" }}>
-                {/* Replace src below with your uploaded hero image URL */}
-                <img src="/cowork-hero-bg.jpg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: 1 }}
-                  onError={e => { e.target.style.display = "none"; }} />
-              </div>
-            )}
+            {/* ── Hero banner removed — more space for chat ── */}
 
             {/* ── Chat header: WhatsApp-style on mobile, standard on desktop ── */}
             {task ? (
@@ -8463,6 +8613,23 @@ em-emoji-picker,
           currentEmployeeName={employeeName}
           currentRole={role}
           parentTask={activeModal.task}
+        />
+      }
+      {/* ── Add Goal Task — opens same CreateTaskModal with isGoal=true pre-set ── */}
+      {
+        activeModal?.type === "add_goal_task" && <CreateTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async (newTask) => {
+            setActiveModal(null);
+            if (activeModal.task?.taskId) setExpandedIds(prev => new Set([...prev, activeModal.task.taskId]));
+            await loadAllTasks();
+            if (selectedTask) loadDetail(selectedTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+          parentTask={activeModal.task}
+          initialIsGoal={true}
         />
       }
       {activeModal?.type === "self_assign" && (
