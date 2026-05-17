@@ -134,28 +134,6 @@ function showViaServiceWorker(reg: ServiceWorkerRegistration, opts: PushOpts) {
 
 /** Fallback: fire a Notification directly when no SW is available. */
 function showDirect(opts: PushOpts) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  const n = new Notification(opts.title, {
-    body: opts.body,
-    icon: opts.senderIcon || `/icons/notif-${opts.notifType || "default"}.png`,
-    tag: opts.tag,
-    requireInteraction: false,
-    silent: false,
-  } as NotificationOptions);
-  n.onclick = () => {
-    window.focus();
-    if (opts.notifType === "request") {
-      window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received" } }));
-    } else if (opts.data?.taskId) {
-      localStorage.setItem("selectedTaskId", opts.data.taskId);
-      window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "received", taskId: opts.data.taskId } }));
-    } else {
-      window.location.href = opts.url;
-    }
-    n.close();
-  };
-  // Play sound manually for direct notifications
-  playSound(opts.notifType);
 }
 
 /** Register the service worker and request permission. Returns the registration or null. */
@@ -299,12 +277,8 @@ export function useCoworkNotifications(employeeId: string | null): UseCoworkNoti
               detail: { title, body, url, type: notifType, tag }
             }));
           }
-
-          // Always try OS push (works in background, browsers suppress when app focused)
           if (swRef.current?.active) {
             showViaServiceWorker(swRef.current, opts);
-          } else {
-            showDirect(opts);
           }
         });
       },
