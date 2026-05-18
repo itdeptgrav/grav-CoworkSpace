@@ -1,175 +1,174 @@
-"use client";
 /**
- * GRAV-CMS/components/coworking/tasks/ReviewCompletionModal.jsx
- * TL reviews employee submission → approve (forwards to CEO) or reject (with reason).
- * CEO reviews TL-approved submission → final approve or reject.
+ * components/coworking/tasks/ReviewCompletionModal.jsx
+ * RIGHT SLIDER — TL/CEO reviews employee submission.
+ * All logic identical to original.
  */
-import { useState } from "react";
+"use client";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { reviewCompletion, ceoReviewCompletion } from "../../../lib/mediaUploadApi";
 
-export default function ReviewCompletionModal({ task, currentEmployeeId, role, reviewType, onClose, onSuccess }) {
-    const [rejectionReason, setRejectionReason] = useState("");
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState("");
-    const [showRejectForm, setShowRejectForm] = useState(false);
+const F = { fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif" };
 
-    const isCEOReview = reviewType === "ceo_review";
-    const submission = task.completionSubmission;
-    const tlReview = task.tlReview;
-
-    const handleApprove = async () => {
-        setSubmitting(true); setError("");
-        try {
-            if (isCEOReview) {
-                await ceoReviewCompletion({ taskId: task.taskId, approved: true });
-            } else {
-                await reviewCompletion({ taskId: task.taskId, approved: true });
-            }
-            onSuccess?.();
-        } catch (err) { setError(err.message); }
-        finally { setSubmitting(false); }
-    };
-
-    const handleReject = async () => {
-        if (!rejectionReason.trim()) { setError("Please provide a reason for rejection."); return; }
-        setSubmitting(true); setError("");
-        try {
-            if (isCEOReview) {
-                await ceoReviewCompletion({ taskId: task.taskId, approved: false, rejectionReason: rejectionReason.trim() });
-            } else {
-                await reviewCompletion({ taskId: task.taskId, approved: false, rejectionReason: rejectionReason.trim() });
-            }
-            onSuccess?.();
-        } catch (err) { setError(err.message); }
-        finally { setSubmitting(false); }
-    };
-
-    return (
-        <div style={s.overlay}>
-            <div style={s.modal}>
-                <div style={s.header}>
-                    <div>
-                        <h2 style={s.title}>{isCEOReview ? "CEO Final Review" : "Review Completion"}</h2>
-                        <p style={s.subtitle}>{task.title} ({task.taskId})</p>
-                    </div>
-                    <button onClick={onClose} style={s.closeBtn}>✕</button>
-                </div>
-
-                {error && <div style={s.errBox}>⚠️ {error}</div>}
-
-                {/* Submission details */}
-                {submission && (
-                    <div style={s.submissionCard}>
-                        <div style={s.submissionHeader}>
-                            <span style={s.submissionBy}>📤 Submitted by {submission.submittedByName}</span>
-                            <span style={s.submissionDate}>{new Date(submission.submittedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        </div>
-                        {submission.message && <p style={s.submissionMsg}>{submission.message}</p>}
-
-                        {/* Proof images */}
-                        {submission.imageUrls?.length > 0 && (
-                            <div style={s.proofSection}>
-                                <div style={s.proofLabel}>📷 Proof Images ({submission.imageUrls.length})</div>
-                                <div style={s.imageGrid}>
-                                    {submission.imageUrls.map((url, i) => (
-                                        <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                                            <img src={url} alt={`Proof ${i + 1}`} style={s.proofImg} />
-                                        </a>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* PDF attachments */}
-                        {submission.pdfAttachments?.length > 0 && (
-                            <div style={s.proofSection}>
-                                <div style={s.proofLabel}>📄 PDF Documents ({submission.pdfAttachments.length})</div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                    {submission.pdfAttachments.map((pdf, i) => (
-                                        <div key={i} style={s.pdfRow}>
-                                            <span>📄 {pdf.name || "Document"}</span>
-                                            <div style={{ display: "flex", gap: "8px" }}>
-                                                {pdf.url && <a href={pdf.url} target="_blank" rel="noopener noreferrer" style={s.pdfLink}>View ↗</a>}
-                                                {pdf.downloadUrl && <a href={pdf.downloadUrl} target="_blank" rel="noopener noreferrer" style={s.pdfLink}>Download ⬇</a>}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* TL review info (for CEO view) */}
-                {isCEOReview && tlReview && (
-                    <div style={{ ...s.submissionCard, background: "#e8f0fe" }}>
-                        <div style={s.submissionBy}>✅ TL {tlReview.reviewedByName} approved this work</div>
-                        <div style={s.submissionDate}>{new Date(tlReview.reviewedAt).toLocaleDateString("en-IN")}</div>
-                    </div>
-                )}
-
-                {/* Rejection form */}
-                {showRejectForm && (
-                    <div style={s.rejectForm}>
-                        <label style={s.label}>Reason for rejection *</label>
-                        <textarea
-                            style={{ ...s.input, height: "80px" }}
-                            value={rejectionReason}
-                            onChange={e => setRejectionReason(e.target.value)}
-                            placeholder="Explain why this work is not complete..."
-                            autoFocus
-                        />
-                    </div>
-                )}
-
-                {/* Actions */}
-                <div style={s.actions}>
-                    <button onClick={onClose} style={s.cancelBtn} disabled={submitting}>Cancel</button>
-                    {!showRejectForm ? (
-                        <>
-                            <button onClick={() => setShowRejectForm(true)} style={s.rejectBtn} disabled={submitting}>❌ Reject</button>
-                            <button onClick={handleApprove} style={s.approveBtn} disabled={submitting}>
-                                {submitting ? "Processing..." : isCEOReview ? "✅ Final Approve" : "✅ Approve → CEO"}
-                            </button>
-                        </>
-                    ) : (
-                        <>
-                            <button onClick={() => setShowRejectForm(false)} style={s.cancelBtn} disabled={submitting}>Back</button>
-                            <button onClick={handleReject} style={s.rejectBtn} disabled={submitting || !rejectionReason.trim()}>
-                                {submitting ? "Rejecting..." : "Confirm Rejection"}
-                            </button>
-                        </>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
+function SliderPortal({ children }) {
+  const [m, setM] = useState(false);
+  useEffect(() => setM(true), []);
+  if (!m) return null;
+  return createPortal(children, document.body);
 }
 
-const s = {
-    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, fontFamily: "'Google Sans','Roboto',sans-serif" },
-    modal: { background: "#fff", borderRadius: "12px", width: "min(620px,96vw)", maxHeight: "90vh", overflow: "auto", padding: "26px", boxShadow: "0 24px 48px rgba(0,0,0,0.2)" },
-    header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" },
-    title: { margin: "0 0 4px", fontSize: "20px", fontWeight: 400, color: "#202124" },
-    subtitle: { margin: 0, fontSize: "13px", color: "#5f6368" },
-    closeBtn: { background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#5f6368" },
-    errBox: { background: "#fce8e6", border: "1px solid #f5c6c6", borderRadius: "6px", padding: "9px 12px", color: "#c5221f", fontSize: "13px", marginBottom: "14px" },
-    submissionCard: { background: "#f8f9fa", borderRadius: "8px", padding: "14px", marginBottom: "16px", border: "1px solid #e8eaed" },
-    submissionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" },
-    submissionBy: { fontSize: "13px", fontWeight: 500, color: "#202124" },
-    submissionDate: { fontSize: "12px", color: "#80868b" },
-    submissionMsg: { margin: "0 0 12px", fontSize: "14px", color: "#202124", lineHeight: 1.5, whiteSpace: "pre-wrap" },
-    proofSection: { marginTop: "10px" },
-    proofLabel: { fontSize: "12px", fontWeight: 500, color: "#5f6368", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.4px" },
-    imageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))", gap: "8px" },
-    proofImg: { width: "100%", height: "90px", objectFit: "cover", borderRadius: "6px", cursor: "pointer", border: "1px solid #e8eaed" },
-    pdfRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "#fff", borderRadius: "6px", border: "1px solid #e8eaed", fontSize: "13px" },
-    pdfLink: { color: "#1a73e8", fontSize: "12px", textDecoration: "none", padding: "3px 8px", border: "1px solid #1a73e8", borderRadius: "4px" },
-    rejectForm: { display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" },
-    label: { fontSize: "11px", fontWeight: 500, color: "#5f6368", textTransform: "uppercase", letterSpacing: "0.5px" },
-    input: { padding: "10px 12px", border: "1px solid #dadce0", borderRadius: "4px", fontSize: "14px", fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box", resize: "vertical" },
-    actions: { display: "flex", justifyContent: "flex-end", gap: "10px", paddingTop: "16px", borderTop: "1px solid #e8eaed" },
-    cancelBtn: { padding: "9px 20px", border: "none", background: "transparent", color: "#5f6368", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-    rejectBtn: { padding: "9px 20px", border: "1px solid #d93025", background: "#fce8e6", color: "#d93025", borderRadius: "4px", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-    approveBtn: { padding: "9px 22px", border: "none", background: "#1e8e3e", color: "#fff", borderRadius: "4px", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-};
+export default function ReviewCompletionModal({ task, currentEmployeeId, role, reviewType, onClose, onSuccess }) {
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [submitting, setSubmitting]           = useState(false);
+  const [error, setError]                     = useState("");
+  const [showRejectForm, setShowRejectForm]   = useState(false);
+
+  const isCEOReview = reviewType === "ceo_review";
+  const submission  = task.completionSubmission;
+  const tlReview    = task.tlReview;
+
+  const handleApprove = async () => {
+    setSubmitting(true); setError("");
+    try {
+      if (isCEOReview) await ceoReviewCompletion({ taskId: task.taskId, approved: true });
+      else             await reviewCompletion({ taskId: task.taskId, approved: true });
+      onSuccess?.();
+    } catch (err) { setError(err.message); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleReject = async () => {
+    if (!rejectionReason.trim()) { setError("Please provide a reason for rejection."); return; }
+    setSubmitting(true); setError("");
+    try {
+      if (isCEOReview) await ceoReviewCompletion({ taskId: task.taskId, approved: false, rejectionReason: rejectionReason.trim() });
+      else             await reviewCompletion({ taskId: task.taskId, approved: false, rejectionReason: rejectionReason.trim() });
+      onSuccess?.();
+    } catch (err) { setError(err.message); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <SliderPortal>
+      <style>{`@keyframes rcm-in{from{transform:translateX(100%)}to{transform:translateX(0)}} @keyframes rcm-spin{to{transform:rotate(360deg)}}`}</style>
+
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(15,23,42,0.25)",zIndex:8998,backdropFilter:"blur(1px)" }} />
+
+      {/* Panel */}
+      <div style={{ position:"fixed",top:0,right:0,bottom:0,width:"min(500px,100vw)",background:"#fff",borderLeft:"1px solid #E5E7EB",boxShadow:"-6px 0 32px rgba(15,23,42,0.12)",display:"flex",flexDirection:"column",zIndex:8999,...F,animation:"rcm-in 0.24s cubic-bezier(0.32,0.72,0,1) both" }}>
+
+        {/* Header */}
+        <div style={{ padding:"14px 18px",borderBottom:"1px solid #E5E7EB",flexShrink:0,display:"flex",alignItems:"center",gap:10 }}>
+          <div style={{ width:3,height:28,borderRadius:2,background:isCEOReview?"#D97706":"#1B4F8A",flexShrink:0 }} />
+          <div style={{ flex:1,minWidth:0 }}>
+            <div style={{ fontSize:14,fontWeight:700,color:"#111827" }}>{isCEOReview ? "CEO Final Review" : "Review Completion"}</div>
+            <div style={{ fontSize:11,color:"#6B7280",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+              {task.title}
+              <span style={{ fontFamily:"monospace",background:"#F1F5F9",padding:"1px 5px",borderRadius:3,marginLeft:6,fontSize:10 }}>{task.taskId}</span>
+            </div>
+          </div>
+          <button onClick={onClose} disabled={submitting} style={{ width:28,height:28,borderRadius:6,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#6B7280",cursor:submitting?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:0,opacity:submitting?0.4:1 }}>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex:1,overflowY:"auto",padding:"16px 18px",display:"flex",flexDirection:"column",gap:12 }}>
+          {error && <div style={{ background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:6,padding:"9px 12px",color:"#991B1B",fontSize:12 }}>⚠️ {error}</div>}
+
+          {/* Submission card */}
+          {submission && (
+            <div style={{ background:"#F8FAFC",border:"1px solid #E5E7EB",borderRadius:8,padding:"12px 14px" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:4 }}>
+                <span style={{ fontSize:12,fontWeight:600,color:"#374151" }}>📤 Submitted by {submission.submittedByName}</span>
+                <span style={{ fontSize:10,color:"#9CA3AF" }}>{submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}</span>
+              </div>
+
+              {submission.message && (
+                <p style={{ fontSize:12,color:"#1F2937",lineHeight:1.6,margin:"0 0 10px",whiteSpace:"pre-wrap" }}>{submission.message}</p>
+              )}
+
+              {/* Proof images */}
+              {submission.imageUrls?.length > 0 && (
+                <div style={{ marginTop:8 }}>
+                  <div style={{ fontSize:10,fontWeight:700,color:"#6B7280",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6 }}>📷 Proof Images ({submission.imageUrls.length})</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:6 }}>
+                    {submission.imageUrls.map((url,i) => (
+                      <a key={i} href={url} target="_blank" rel="noreferrer">
+                        <img src={url} alt={`Proof ${i+1}`} style={{ width:"100%",height:80,objectFit:"cover",borderRadius:6,border:"1px solid #E5E7EB",cursor:"pointer" }} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PDF attachments */}
+              {submission.pdfAttachments?.length > 0 && (
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:10,fontWeight:700,color:"#6B7280",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6 }}>📄 Documents ({submission.pdfAttachments.length})</div>
+                  <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+                    {submission.pdfAttachments.map((pdf,i) => (
+                      <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#fff",borderRadius:6,border:"1px solid #E5E7EB",fontSize:11 }}>
+                        <span style={{ color:"#374151" }}>📄 {pdf.name||"Document"}</span>
+                        <div style={{ display:"flex",gap:6 }}>
+                          {pdf.url && <a href={pdf.url} target="_blank" rel="noreferrer" style={{ color:"#1B4F8A",fontSize:11,textDecoration:"none",padding:"2px 7px",border:"1px solid #BFDBFE",borderRadius:4 }}>View ↗</a>}
+                          {pdf.downloadUrl && <a href={pdf.downloadUrl} target="_blank" rel="noreferrer" style={{ color:"#1B4F8A",fontSize:11,textDecoration:"none",padding:"2px 7px",border:"1px solid #BFDBFE",borderRadius:4 }}>↓</a>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TL review info (CEO view) */}
+          {isCEOReview && tlReview && (
+            <div style={{ background:"#EBF2FA",border:"1px solid #BFDBFE",borderRadius:8,padding:"10px 12px",fontSize:11,color:"#1B4F8A" }}>
+              ✅ TL <strong>{tlReview.reviewedByName}</strong> approved this work on {new Date(tlReview.reviewedAt).toLocaleDateString("en-IN")}
+            </div>
+          )}
+
+          {/* Rejection form */}
+          {showRejectForm && (
+            <div>
+              <label style={{ fontSize:10,fontWeight:700,color:"#6B7280",textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:6 }}>
+                Reason for rejection <span style={{color:"#EF4444"}}>*</span>
+              </label>
+              <textarea autoFocus value={rejectionReason} onChange={e=>setRejectionReason(e.target.value)}
+                placeholder="Explain what needs to be improved…"
+                style={{ width:"100%",minHeight:90,padding:"9px 11px",border:"1px solid #FECACA",borderRadius:6,fontSize:12,...F,outline:"none",resize:"vertical",boxSizing:"border-box",color:"#111827" }} />
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding:"12px 18px",borderTop:"1px solid #E5E7EB",background:"#FAFAFA",display:"flex",gap:8,flexShrink:0 }}>
+          {!showRejectForm ? (
+            <>
+              <button onClick={onClose} disabled={submitting} style={{ flex:1,padding:"9px",border:"1px solid #E5E7EB",borderRadius:6,background:"#fff",color:"#6B7280",fontSize:12,fontWeight:500,cursor:submitting?"not-allowed":"pointer",...F }}>
+                Cancel
+              </button>
+              <button onClick={()=>setShowRejectForm(true)} disabled={submitting} style={{ flex:1,padding:"9px",border:"1px solid #FECACA",borderRadius:6,background:"#FEF2F2",color:"#DC2626",fontSize:12,fontWeight:600,cursor:submitting?"not-allowed":"pointer",...F }}>
+                ✕ Reject
+              </button>
+              <button onClick={handleApprove} disabled={submitting} style={{ flex:2,padding:"9px",border:"none",borderRadius:6,background:submitting?"#E5E7EB":"#059669",color:submitting?"#9CA3AF":"#fff",fontSize:12,fontWeight:600,cursor:submitting?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,...F }}>
+                {submitting ? (<><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{animation:"rcm-spin 1s linear infinite"}}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>Processing…</>) : (isCEOReview ? "✅ Final Approve" : "✅ Approve → CEO")}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={()=>{ setShowRejectForm(false); setRejectionReason(""); setError(""); }} disabled={submitting} style={{ flex:1,padding:"9px",border:"1px solid #E5E7EB",borderRadius:6,background:"#fff",color:"#6B7280",fontSize:12,fontWeight:500,cursor:submitting?"not-allowed":"pointer",...F }}>
+                ← Back
+              </button>
+              <button onClick={handleReject} disabled={submitting||!rejectionReason.trim()} style={{ flex:2,padding:"9px",border:"none",borderRadius:6,background:submitting||!rejectionReason.trim()?"#E5E7EB":"#DC2626",color:submitting||!rejectionReason.trim()?"#9CA3AF":"#fff",fontSize:12,fontWeight:600,cursor:submitting||!rejectionReason.trim()?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,...F }}>
+                {submitting ? (<><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{animation:"rcm-spin 1s linear infinite"}}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>Rejecting…</>) : "Confirm Rejection"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </SliderPortal>
+  );
+}

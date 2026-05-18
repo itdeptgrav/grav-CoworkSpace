@@ -177,7 +177,7 @@ export default function NewMeetPage() {
 
         /* ── Body grid ── */
         .sm-body {
-          max-width: 960px;
+          
           margin: 0 auto;
           padding: 28px 20px 60px;
           display: grid;

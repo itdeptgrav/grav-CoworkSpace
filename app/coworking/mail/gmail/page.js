@@ -1091,6 +1091,7 @@ export default function GmailPage() {
     const [labelsOpen, setLabelsOpen] = useState(false);
     const [customLabels, setCustomLabels] = useState([]);
     const [isMobile, setIsMobile] = useState(false);
+    const [mobilePanel, setMobilePanel] = useState("list");
     const searchRef = useRef(null);
 
     useEffect(() => {
@@ -1213,12 +1214,10 @@ export default function GmailPage() {
         </div>
     );
 
-    const mob = isMobile; // < 768
-    const tab = !isMobile && window && window.innerWidth < 1024; // 768-1024
+    const mob = isMobile;
     const SW = mob ? 0 : sidebarCollapsed ? 72 : 256;
 
-    // Mobile: which panel is showing — "list" | "detail" | "sidebar"
-    const [mobilePanel, setMobilePanel] = useState("list");
+    
     const showSidebar = mob ? mobilePanel === "sidebar" : true;
     const showList = mob ? mobilePanel === "list" : true;
     const showDetail = mob ? mobilePanel === "detail" : true;

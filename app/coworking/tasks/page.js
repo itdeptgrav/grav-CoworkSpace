@@ -20,6 +20,8 @@ import SubmitCompletionModal from "../../../components/coworking/tasks/SubmitCom
 import ReviewCompletionModal from "../../../components/coworking/tasks/ReviewCompletionModal";
 import DeadlineBadge, { getDeadlineInfo } from "../../../components/coworking/tasks/DeadlineBadge";
 
+import TaskActionBanner from "../../../components/coworking/tasks/TaskActionBanner";
+
 import DeadlineBreakdown from "../../../components/coworking/tasks/DeadlineBreakdown";
 import ImageLightbox from "../../../components/coworking/tasks/ImageLightbox";
 import SwipeableMessage from "../../../components/coworking/tasks/SwipeableMessage";
@@ -35,6 +37,11 @@ import {
   groupByDate,
 } from "../../../lib/tasksPageHelpers";
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
+
+// remove the inline DetailBody function from page.js
+// add at the top imports:
+import DetailBody from "../../../components/coworking/tasks/DetailBody";
+
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
 import LinkedText from "../../../components/coworking/messaging/LinkedText";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
@@ -643,1441 +650,6 @@ function RepeatSubmissionsTab({ task, employeeId, isAssignee, isCEO, isTL }) {
   );
 }
 
-
-function DetailBody({ task, dailyReports, reportsLoading, activeDetailTab, setActiveDetailTab,
-  isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
-  employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
-  timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow }) {
-  const st = STATUS[task.status] || STATUS.open;
-  // Derive comp label — for "submitted" status, show flow-appropriate label
-  const _compBase = task.completionStatus ? COMP[task.completionStatus] : null;
-  const comp = _compBase ? {
-    ..._compBase,
-    label: (task.completionStatus === "submitted" && task.reviewFlow === "ceo_direct")
-      ? "Awaiting CEO Review"
-      : (task.completionStatus === "submitted" && task.reviewFlow === "tl_final")
-        ? "Awaiting TL Final Review"
-        : (task.completionStatus === "submitted")
-          ? "Awaiting TL Review"
-          : _compBase.label,
-  } : null;
-  const pri = getPriDisplay(task.priority);
-
-  const createdDate = task.createdAt
-    ? new Date(typeof task.createdAt === "object" && task.createdAt.seconds ? task.createdAt.seconds * 1000 : task.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-    : null;
-
-  /* ── Field row helper ── */
-  const Field = ({ icon, label, children }) => (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
-      <span style={{ fontSize: 11, color: "var(--text-4)", width: 90, flexShrink: 0, display: "flex", alignItems: "center", gap: 5, paddingTop: 1 }}>
-        {icon} {label}
-      </span>
-      <div style={{ flex: 1, fontSize: 12, color: "var(--text-1)", lineHeight: 1.5 }}>{children}</div>
-    </div>
-  );
-
-  /* ── Collect all files from task.attachments + chat message attachments ── */
-  const allFiles = (() => {
-    const files = [];
-    // Task-level attachments
-    (task.attachments || []).forEach(att => files.push({ ...att, source: "task" }));
-    // Chat message attachments
-    const msgs = chatMessages || task.chatMessages || [];
-    msgs.forEach(msg => {
-      (msg.attachments || []).forEach(att => {
-        if (att.url) files.push({ name: att.name || att.fileName || (att.type === "image" ? "Image" : att.type === "pdf" ? "Document.pdf" : att.type === "voice" ? "Voice Note" : "File"), url: att.url, type: att.type || "file", size: att.size || 0, source: "chat" });
-      });
-      if (msg.mediaUrl && !msg.attachments?.length) files.push({ name: "Image", url: msg.mediaUrl, type: "image", size: 0, source: "chat" });
-      if (msg.pdfUrl && !msg.attachments?.length) files.push({ name: "Document.pdf", url: msg.pdfUrl, type: "pdf", size: 0, source: "chat" });
-    });
-    return files;
-  })();
-
-  return (
-    <>
-      {activeDetailTab === "info" && (
-        <div className="gv-detail-scroll" style={{ gap: 0, padding: "0 0 16px" }}>
-
-          {/* ── Header block: created date + badges + title ── */}
-          <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--border)" }}>
-            {createdDate && (
-              <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                Created on {createdDate}
-              </div>
-            )}
-            {/* Badges row */}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 9px", borderRadius: 6, color: "var(--p)", background: "var(--p-lt)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" /><path d="M3 5h4" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" /></svg>
-                Task Name
-              </span>
-
-              {st && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: st.color, background: st.bg, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: st.dot }} /> {st.label}
-              </span>}
-              <span style={{ fontSize: 9, fontFamily: "var(--mono)", color: "var(--text-4)", padding: "3px 7px", background: "var(--bg)", borderRadius: 5, border: "1px solid var(--border)" }}>{task.taskId}</span>
-              {task.isFolder && (
-                <span style={{ fontSize: 9, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: "#7C3AED", background: "#EDE9FE", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
-                  Folder
-                </span>
-              )}
-              {task.isRepeat && (
-                <span style={{ fontSize: 9, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: "#1D4ED8", background: "#EFF6FF", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  🔁 Repeat
-                </span>
-              )}
-              {task.isThirdParty && (
-                <span style={{ fontSize: 9, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: "#6D28D9", background: "#F5F3FF", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  🔗 Third-party
-                </span>
-              )}
-              {task.isGoal && (
-                <span style={{ fontSize: 9, fontWeight: 700, padding: "3px 9px", borderRadius: 6, color: "#7E22CE", background: "#FDF4FF", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  🎯 Goal
-                </span>
-              )}
-            </div>
-            {/* Big title */}
-            <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--text-1)", lineHeight: 1.3, margin: 0, letterSpacing: "-0.01em" }}>{task.title}</h2>
-
-          </div>
-
-          {/* ── Extension approved, waiting for employee to press Start ────
-              When TL/CEO approves an extension, the backend flips
-              awaitingExtensionStart=true and leaves dueDate stale on purpose.
-              The new deadline is anchored to Timer Start Time (not approval
-              time), so this card shows the prominent CTA. Employee sees the
-              green Start Timer button; anyone else sees a passive waiting
-              note. Both read the same flag, so the two views stay in sync. */}
-          {task.awaitingExtensionStart && Number(task.lastExtensionSecs) > 0 && (() => {
-            const extSecs = Number(task.lastExtensionSecs) || 0;
-            // Short, friendly duration label — kept inline so this block is
-            // fully self-contained.
-            const extLabel = extSecs < 60 ? `${extSecs}s`
-              : extSecs < 3600 ? `${Math.round(extSecs / 60)} min`
-                : `${Math.round(extSecs / 3600)}h`;
-            const isAssignee = Array.isArray(task.assigneeIds) && task.assigneeIds.includes(employeeId);
-
-            if (isAssignee) {
-              return (
-                <div style={{
-                  margin: "10px 14px 0",
-                  padding: "12px 14px",
-                  background: "#ECFDF5",
-                  border: "1.5px solid #A7F3D0",
-                  borderRadius: 10,
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#065F46", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                    ✅ Extension Approved
-                  </div>
-                  <div style={{ fontSize: 11, color: "#047857", lineHeight: 1.55, marginBottom: 10 }}>
-                    You have <b>+{extLabel}</b> extra time.
-                    Your new deadline starts the moment you press <b>Start Timer</b> — not before.
-                    Pause whenever you need; the deadline stays the same.
-                  </div>
-                  <button
-                    onClick={() => timerStart(task.taskId, task.title)}
-                    style={{
-                      width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
-                      background: "#10B981", color: "#fff", fontSize: 12, fontWeight: 700,
-                      cursor: "pointer", fontFamily: "inherit",
-                      display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    }}
-                  >
-                    ▶ Start Timer · Begin +{extLabel} Extension
-                  </button>
-                </div>
-              );
-            }
-
-            // TL/CEO side — passive waiting note
-            return (
-              <div style={{
-                margin: "10px 14px 0",
-                padding: "10px 12px",
-                background: "#F0FDF4",
-                border: "1px solid #BBF7D0",
-                borderRadius: 8,
-                fontSize: 11, color: "#166534",
-              }}>
-                ⏳ Extension approved — waiting for employee to press <b>Start</b>. New deadline = Start Time + {extLabel}.
-              </div>
-            );
-          })()}
-
-          {/* ── Description ── */}
-          {task.description && (
-            <div style={{ margin: "0 14px 0", padding: "10px 0", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.65, color: "var(--text-2)" }}>
-              {task.description}
-            </div>
-          )}
-
-          {/* ── Structured fields ── */}
-          <div style={{ display: "flex", flexDirection: "column", padding: "0 14px" }}>
-            {/* People */}
-            <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>} label="People">
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                {(task.assigneeIds || []).length > 0
-                  ? (task.assigneeIds || []).map((id, i) => {
-                    const empFull = employeeMapFull?.get(id);
-                    const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || (task.assigneeNames || [])[i] || id;
-                    const picUrl = empFull?.profilePicUrl || "";
-                    const [c1, c2] = getAvatarColors(nm || id);
-                    return (
-                      <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px 3px 3px", borderRadius: 99, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 500 }}>
-                        {picUrl ? (
-                          <img src={picUrl} alt={nm} style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover" }} />
-                        ) : (
-                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {(nm || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                        {nm}
-                      </span>
-                    );
-                  })
-                  : <span style={{ color: "var(--text-4)", fontSize: 11 }}>Unassigned</span>
-                }
-              </div>
-            </Field>
-
-            {/* Timeline */}
-            {(task.startDate || task.dueDate) && (
-              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>} label="Timeline Date">
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)" }}>
-                    {[
-                      task.startDate ? new Date(task.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null,
-                      fmtLiveDeadlineDate(task, getTimerSession ? getTimerSession(task.taskId) : null)
-                    ].filter(Boolean).join(" – ")}
-                  </span>
-                  {/* Live clock-time deadline — visible at every task state so employee & manager
-                      both see the same "Due at 10:30 AM" that shifts with pause/resume. */}
-                  {task.dueDate && (() => {
-                    // CEO/TL view: getTimerSession returns null (the logged-in
-                    // viewer isn't the assignee). Fall back to watchedTimers
-                    // which is assigneeAllTimers from useWatchEmployeeTimers
-                    // and carries the live session of whichever assignee is
-                    // actually running the timer. Same math on both sides now.
-                    const _mySess = getTimerSession ? getTimerSession(task.taskId) : null;
-                    const _watchedSess = watchedTimers?.get(task.taskId) || null;
-                    const _ms = computeLiveDeadline(task, _mySess || _watchedSess);
-                    if (!_ms) return null;
-
-                    const _d = new Date(_ms);
-                    const _now = new Date();
-                    const sameDay = _d.toDateString() === _now.toDateString();
-                    const dayLabel = sameDay ? "Today"
-                      : (_d.toDateString() === new Date(_now.getTime() + 86400000).toDateString()) ? "Tomorrow"
-                        : _d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-                    const timeLabel = _d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-                    const isOver = _ms < Date.now();
-                    // Theme shifts subtly when overdue — red tint instead of neutral
-                    const theme = isOver
-                      ? { bg: "#FEF2F2", border: "#FECDD3", chipBg: "#FEE2E2", chipColor: "#991B1B", timeColor: "#B91C1C", dayColor: "#B91C1C", iconColor: "#B91C1C" }
-                      : { bg: "#F8FAFC", border: "#E2E8F0", chipBg: "#EEF2FF", chipColor: "#4F46E5", timeColor: "#0F172A", dayColor: "#64748B", iconColor: "#64748B" };
-                    return (
-                      <div style={{
-                        display: "inline-flex", alignItems: "center", gap: 8,
-                        padding: "5px 10px 5px 8px", borderRadius: 8,
-                        background: theme.bg, border: `1px solid ${theme.border}`,
-                        width: "fit-content",
-                      }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                          <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
-                          padding: "2px 7px", borderRadius: 99,
-                          background: theme.chipBg, color: theme.chipColor,
-                          lineHeight: 1.4, flexShrink: 0,
-                        }}>
-                          {isOver ? "Overdue" : "Due"}
-                        </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: theme.timeColor, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
-                          {timeLabel}
-                        </span>
-                        <span style={{ fontSize: 11, color: theme.dayColor, lineHeight: 1 }}>
-                          · {dayLabel}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {(task.dueDate || task.deadlineWindowSecs) && (() => {
-                    // Prefer own session (I'm the assignee) → else watched
-                    // session (I'm CEO/TL viewing someone else's task).
-                    // Without this fallback, CEO/TL always see "0s worked"
-                    // because getDisplaySeconds only knows their own timer.
-                    const _mine = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                    const _watched = watchedTimers?.get(task.taskId)?.displaySeconds || 0;
-                    return <DeadlineBadge dueDate={task.dueDate} deadlineWindowSecs={task.deadlineWindowSecs || 0} workedSecs={_mine || _watched} />;
-                  })()}
-                </div>
-              </Field>
-            )}
-
-            {/* ── Time Requested — visible to all roles ── */}
-
-            {task.deadlineWindowSecs > 0 && (() => {
-              const w = task.deadlineWindowSecs;
-              const _mine = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-              const _watched = watchedTimers?.get(task.taskId)?.displaySeconds || 0;
-              const workedSecs = _mine || _watched;
-              const fmtSecs = (s) => {
-                const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-                if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-                if (h > 0) return `${h}h ${m}m`;
-                return `${m}m`;
-              };
-              const remaining = Math.max(0, w - workedSecs);
-              const timerStarted = workedSecs > 0;
-              return (
-                <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>} label="Time Requested">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", background: "#F1F5F9", padding: "2px 8px", borderRadius: 6 }}>
-
-                      </span>
-                      {timerStarted && (
-                        <span style={{ fontSize: 11, fontWeight: 600, color: workedSecs >= w ? "#B91C1C" : "#16A34A", background: workedSecs >= w ? "#FEF2F2" : "#F0FDF4", padding: "2px 8px", borderRadius: 6 }}>
-                          {workedSecs >= w ? `` : `${fmtSecs(remaining)} left`}
-                        </span>
-                      )}
-                      {timerStarted && (
-                        <span style={{ fontSize: 11, color: "#64748B" }}>
-                          {fmtSecs(workedSecs)} worked
-                        </span>
-                      )}
-                      {!timerStarted && (
-                        <span style={{ fontSize: 11, color: "#94A3B8" }}>— starts when timer runs</span>
-                      )}
-                    </div>
-                    {timerStarted && w > 0 && (
-                      <div style={{ height: 4, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${Math.min(100, (workedSecs / w) * 100)}%`, background: workedSecs >= w ? "#EF4444" : "#22C55E", borderRadius: 99, transition: "width 1s linear" }} />
-                      </div>
-                    )}
-                    {/* Extension audit breakdown — shows "30m + 20m + 10m = 60m"
-                        with expandable history. Renders nothing for tasks that
-                        have never had an extension (originalWindowSecs absent
-                        and extensions[] empty), so new tasks stay clean. */}
-                    <DeadlineBreakdown task={task} showList={true} />
-                  </div>
-                </Field>
-              );
-            })()}
-
-
-
-            {/* Type / category if exists */}
-            {task.type && (
-              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>} label="Type">
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, background: "var(--bg)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 600 }}>
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-                  {task.type}
-                </span>
-              </Field>
-            )}
-
-            {/* Attachments — sidebar card style */}
-            {allFiles.length > 0 && (
-              <div style={{ padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 7 }}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)" }}>Attachments ( {allFiles.length} )</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {allFiles.map((att, i) => {
-                    const isImg = att.type === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name || att.fileName || "");
-                    return (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)" }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: isImg ? "#FEF3C7" : "var(--p-lt)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {isImg
-                            ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
-                            : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--p)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-                          }
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name || att.fileName || "Attachment"}</div>
-                          <div style={{ fontSize: 9, color: "var(--text-4)", marginTop: 1 }}>
-                            {att.size ? `${(att.size / 1048576).toFixed(2)} MB` : ""}
-                            {att.url && <>{att.size ? " • " : ""}<a href={att.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--p)", fontWeight: 600, textDecoration: "none" }}>Preview</a></>}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Notes */}
-            {task.notes && (
-              <Field icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>} label="Notes">
-                <div style={{ fontSize: 11, lineHeight: 1.6, color: "var(--text-2)", whiteSpace: "pre-wrap" }}>{task.notes}</div>
-              </Field>
-            )}
-          </div>
-
-          {/* ── Goal Config Details ── */}
-          {task.isGoal && task.goalConfig && (
-            <div style={{ margin: "14px 14px 0" }}>
-              {/* Header */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg,#7E22CE,#9333EA)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>🎯</div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: "#7E22CE", textTransform: "uppercase", letterSpacing: "0.08em" }}>Goal Details</div>
-                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>Target-driven task metrics</div>
-                </div>
-              </div>
-
-              {/* Target card — hero stat */}
-              <div style={{ background: "linear-gradient(135deg,#7E22CE 0%,#9333EA 100%)", borderRadius: 12, padding: "16px 18px", marginBottom: 10, position: "relative", overflow: "hidden" }}>
-                <div style={{ position: "absolute", top: -10, right: -10, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
-                <div style={{ position: "absolute", bottom: -20, right: 20, width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
-                <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Target Value</div>
-                <div style={{ fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: "-0.02em", lineHeight: 1 }}>
-                  {task.goalConfig.unit || ""}{task.goalConfig.targetValue}{task.goalConfig.goalType === "percentage" ? "%" : ""}
-                </div>
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.9)", background: "rgba(255,255,255,0.15)", padding: "2px 8px", borderRadius: 99, textTransform: "capitalize" }}>
-                    {task.goalConfig.goalType === "amount" ? "💰 Amount" : task.goalConfig.goalType === "count" ? "🔢 Count" : task.goalConfig.goalType === "percentage" ? "📊 Percentage" : "✏️ Custom"}
-                  </span>
-                  {task.goalConfig.goalDescription && (
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.65)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.goalConfig.goalDescription}</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Info grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-                {/* Hard deadline */}
-                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Hard Deadline</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#DC2626" }}>
-                    {task.goalConfig.deadline ? new Date(task.goalConfig.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                  </div>
-                </div>
-                {/* Unit */}
-                <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Unit</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#7E22CE" }}>{task.goalConfig.unit || "—"}</div>
-                </div>
-              </div>
-
-              {/* Goal description — shown like Notes field */}
-              {task.goalConfig.goalDescription && (
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderTop: "1px solid #F3F4F6", marginBottom: 10 }}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: 2, flexShrink: 0 }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>Goal Description</div>
-                    <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>{task.goalConfig.goalDescription}</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Baseline for percentage */}
-              {task.goalConfig.goalType === "percentage" && task.goalConfig.baseline && (
-                <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Baseline Value</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#15803D" }}>{task.goalConfig.baseline}</div>
-                </div>
-              )}
-
-              {/* Milestones */}
-              {task.goalConfig.hasMilestones && task.goalConfig.milestones?.filter(m => m.date).length > 0 && (
-                <div style={{ background: "#FAFAFA", border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>🏁 Milestones</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                    {task.goalConfig.milestones.filter(m => m.date).map((m, i, arr) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, paddingBottom: i < arr.length - 1 ? 8 : 0, marginBottom: i < arr.length - 1 ? 8 : 0, borderBottom: i < arr.length - 1 ? "1px solid #F3F4F6" : "none" }}>
-                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#7E22CE,#9333EA)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <span style={{ fontSize: 10, fontWeight: 800, color: "#fff" }}>{m.pct}%</span>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{m.label || `Milestone ${i + 1}`}</div>
-                          <div style={{ fontSize: 10, color: "#9CA3AF" }}>{new Date(m.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Progress bar */}
-          <div style={{ marginTop: 14, padding: "0 14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-              <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Progress</span>
-              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--mono)", color: pctColor }}>{pct}%</span>
-            </div>
-            <div style={{ height: 4, background: "var(--bg)", borderRadius: 99, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: pctGradient, transition: "width 0.6s" }} />
-            </div>
-          </div>
-
-          {/* Completion banner */}
-          {comp && (
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 12px", borderRadius: 8, border: `1px solid ${comp.color}33`, color: comp.color, background: comp.bg, marginTop: 12, marginRight: 14 }}>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{comp.icon}</span>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700 }}>{comp.label}</div>
-                {task.completionStatus === "tl_rejected" && task.tlReview?.rejectionReason && <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{task.tlReview.rejectionReason}</div>}
-                {task.completionStatus === "ceo_rejected" && task.ceoReview?.rejectionReason && <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{task.ceoReview.rejectionReason}</div>}
-              </div>
-            </div>
-          )}
-
-          {/* Workflow actions */}
-          {(isAssignee || isTL || isCEO) && (
-            <div style={{ marginTop: 14, padding: "0 14px" }}>
-
-              {/* ── Time Tracker ── never for repeat, only when hasTimer=true for others */}
-              {!task.isRepeat && task.hasTimer === true && <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                  Time Tracked
-                </div>
-                {(() => {
-                  const isRunningThis = timerActiveTaskId === task.taskId;
-                  const secs = getDisplaySeconds(task.taskId);
-                  const sess = getTimerSession(task.taskId);
-                  const hasTime = (sess?.totalSeconds || 0) > 0 || isRunningThis || secs > 0;
-                  // Block timer until deadline is fully approved
-                  // Timer ONLY allowed when deadline is approved or task already in progress
-                  const timerBlocked = !["deadline_approved", "confirmed", "in_progress", "done"].includes(task.status);
-
-                  // Block Resume (but not Pause) when deadline exceeded — must request extension first
-                  const _wSecs = getDisplaySeconds(task.taskId);
-                  const _win = task.deadlineWindowSecs || 0;
-                  const isTimerExceeded = !isRunningThis && _win > 0 && _wSecs >= _win;
-
-                  return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-
-                      {/* Assignee view: Start/Pause + own timer */}
-                      {isAssignee && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {timerBlocked && (
-                            <div style={{ fontSize: 10, fontWeight: 600, color: "#D97706", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5 }}>
-                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                              {task.status === "open"
-                                ? "Timer locked — propose a deadline first"
-                                : task.status === "pending_employee_deadline_confirmation"
-                                  ? "Timer locked — respond to TL's deadline suggestion"
-                                  : "Timer locked — waiting for deadline approval"
-                              }
-                            </div>
-                          )}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {/* Show locked state when timer exceeded — must request extension first */}
-                            {isTimerExceeded && (
-                              <div style={{ fontSize: 10, fontWeight: 600, color: "#991B1B", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, padding: "5px 9px", display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                                Timer locked — deadline exceeded. Request an extension to continue.
-                              </div>
-                            )}
-                            <button
-                              disabled={timerBlocked && !isRunningThis || isTimerExceeded}
-                              onClick={() => isRunningThis ? timerPause(task.taskId, task.title) : timerStart(task.taskId, task.title)}
-                              style={{
-                                display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "none",
-                                cursor: ((timerBlocked && !isRunningThis) || isTimerExceeded) ? "not-allowed" : "pointer",
-                                fontFamily: "inherit", fontSize: 11, fontWeight: 600, transition: "all 0.15s",
-                                opacity: ((timerBlocked && !isRunningThis) || isTimerExceeded) ? 0.35 : 1,
-                                background: isRunningThis ? "#DCFCE7" : isTimerExceeded ? "#FEF2F2" : "#F1F5F9",
-                                color: isRunningThis ? "#16A34A" : isTimerExceeded ? "#991B1B" : "#475569",
-                              }}
-                              onMouseEnter={e => { if ((!timerBlocked || isRunningThis) && !isTimerExceeded) e.currentTarget.style.background = isRunningThis ? "#BBF7D0" : "#E2E8F0"; }}
-                              onMouseLeave={e => { e.currentTarget.style.background = isRunningThis ? "#DCFCE7" : isTimerExceeded ? "#FEF2F2" : "#F1F5F9"; }}
-                            >
-                              {isRunningThis
-                                ? <><svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg> Pause</>
-                                : <><svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg> {hasTime ? "Resume" : "Start"}</>
-                              }
-                            </button>
-                            <span style={{ fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: isRunningThis ? "#16A34A" : "#64748B", letterSpacing: "0.06em" }}>
-                              {formatTimeHMS(secs)}
-                            </span>
-                            {isRunningThis && (
-                              <span style={{ fontSize: 9, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 7px", borderRadius: 99, display: "flex", alignItems: "center", gap: 3 }}>
-                                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A", display: "inline-block", animation: "timerPulse 1.5s ease-in-out infinite" }} />
-                                Running
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* CEO/TL view: show who is working + live time, or grey if paused */}
-                      {(isCEO || isTL) && (() => {
-                        const watchedInfo = watchedTimers?.get(task.taskId);
-                        if (!watchedInfo) return null;
-                        const isWorking = watchedInfo.isActive;
-                        return (
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: isWorking ? "#F0FDF4" : "#F8FAFC", borderRadius: 8, border: `1px solid ${isWorking ? "#BBF7D0" : "#E2E8F0"}` }}>
-                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: isWorking ? "#16A34A" : "#94A3B8", flexShrink: 0, display: "inline-block", ...(isWorking ? { animation: "timerPulse 1.5s ease-in-out infinite" } : {}) }} />
-                            <span style={{ fontSize: 11, fontWeight: 600, color: "#0F172A" }}>{watchedInfo.employeeName}</span>
-                            <span style={{ fontSize: 11, color: isWorking ? "#16A34A" : "#94A3B8" }}>{isWorking ? "working now" : "paused"}</span>
-                            <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: isWorking ? "#16A34A" : "#64748B", marginLeft: "auto" }}>{formatTimeHMS(watchedInfo.displaySeconds)}</span>
-                            {/* Clear timer button — only for paused sessions */}
-                            {!isWorking && (
-                              <button
-                                title="Clear this timer record"
-                                onClick={async () => {
-                                  if (!confirm(`Clear ${watchedInfo.employeeName}'s timer for this task? This removes the recorded time.`)) return;
-                                  try {
-                                    const { doc: _doc, deleteDoc } = await import("firebase/firestore");
-                                    await deleteDoc(_doc(firebaseDb, "cowork_task_timers", watchedInfo.employeeId, "sessions", task.taskId));
-                                  } catch (e) { console.error("clear timer:", e.message); }
-                                }}
-                                style={{ width: 20, height: 20, borderRadius: 4, border: "1px solid #FECDD3", background: "#FEF2F2", color: "#EF4444", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })()}
-              </div>}
-
-              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6 }}>Workflow</div>
-
-              {/* ── NON-TIMER TASK: confirm directly (no deadline proposal) ── */}
-              {/* Only for plain normal tasks — goal/third-party/repeat have their own confirm buttons */}
-              {!task.isRepeat && !task.isThirdParty && !task.isGoal && task.hasTimer === false && isAssignee && !isConfirmed && !task.isFolder && !task.isSelfAssigned && (
-                <div style={{ background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#166534", marginBottom: 6 }}>✅ Confirm Task</div>
-                  <div style={{ fontSize: 11, color: "#14532D", lineHeight: 1.55, marginBottom: 10 }}>
-                    {task.fixedDeadline
-                      ? `Deadline set by CEO/TL: ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Confirm to begin.`
-                      : "Review task details and confirm to begin working."}
-                  </div>
-                  <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Confirm Task
-                  </button>
-                </div>
-              )}
-
-              {/* ── GOAL TASK: confirm directly, no deadline/timer ── */}
-              {task.isGoal && isAssignee && !isConfirmed && !task.isFolder && (
-                <div style={{ background: "#FDF4FF", border: "1.5px solid #E879F9", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#7E22CE", marginBottom: 6 }}>🎯 Confirm this Goal Task</div>
-                  <div style={{ fontSize: 11, color: "#6B21A8", lineHeight: 1.55, marginBottom: 10 }}>
-                    Review the target in the Goal tab. Once confirmed, chat unlocks and you can start logging progress.
-                  </div>
-                  <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Confirm & Accept Goal
-                  </button>
-                </div>
-              )}
-
-              {/* ── THIRD-PARTY TASK: show Confirm directly (no deadline/timer) ── */}
-              {task.isThirdParty && isAssignee && !isConfirmed && !task.isFolder && (
-                <div style={{ background: "#F5F3FF", border: "1.5px solid #C4B5FD", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#6D28D9", marginBottom: 6 }}>⏳ Confirm this Third-party Task</div>
-                  <div style={{ fontSize: 11, color: "#5B21B6", lineHeight: 1.55, marginBottom: 10 }}>
-                    Review the vendor details. Once confirmed, chat unlocks and you can start logging vendor updates.
-                  </div>
-                  <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Confirm & Accept Task
-                  </button>
-                </div>
-              )}
-
-              {/* ── REPEAT TASK: show Confirm directly (no deadline step) ── */}
-              {task.isRepeat && isAssignee && !isConfirmed && !task.isFolder && (
-                <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#92400E", marginBottom: 6 }}>⏳ Confirm this Repeat Task</div>
-                  <div style={{ fontSize: 11, color: "#78350F", lineHeight: 1.55, marginBottom: 10 }}>
-                    Review the schedule on the right. Once confirmed, you can start working and submit daily.
-                  </div>
-                  <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Confirm & Accept Task
-                  </button>
-                </div>
-              )}
-
-              {(task.isThirdParty || task.isGoal || task.isRepeat) && task.status !== "done" && (() => {
-                const { showExtReqForm, setShowExtReqForm, extReqDate, setExtReqDate, extReqReason, setExtReqReason, extReqBusy, handleRequestExtension, reviewExtDate, setReviewExtDate, reviewExtBusy, handleReviewExtension } = extFlow || {};
-                // Each task type stores deadline differently
-                const deadlineStr = task.isGoal
-                  ? task.goalConfig?.deadline
-                  : task.isThirdParty
-                    ? task.thirdPartyConfig?.estimatedDate
-                    : task.fixedDeadline; // repeat
-
-                if (!deadlineStr) return null;
-
-                const dl = new Date(deadlineStr);
-                const now = new Date();
-                const isOverdue = dl < now;
-                const daysLeft = Math.ceil((dl - now) / 86400000);
-                const ext = task.deadlineExtRequest;
-                const fmtDl = dl.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-                const fmtDate = (d) => new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-                return (
-                  <div style={{ marginBottom: 10 }}>
-                    {/* Deadline pill */}
-                    <div style={{ background: isOverdue ? "#FEF2F2" : daysLeft <= 2 ? "#FFFBEB" : "#F0FDF4", border: `1.5px solid ${isOverdue ? "#FECDD3" : daysLeft <= 2 ? "#FDE68A" : "#86EFAC"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: isOverdue ? "#991B1B" : daysLeft <= 2 ? "#92400E" : "#166534", marginBottom: 3 }}>📅 Deadline</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: isOverdue ? "#7F1D1D" : "#14532D" }}>{fmtDl}</div>
-                      <div style={{ fontSize: 10, marginTop: 2, color: isOverdue ? "#DC2626" : daysLeft <= 2 ? "#D97706" : "#166534" }}>
-                        {isOverdue ? `⛔ ${Math.abs(daysLeft)} day${Math.abs(daysLeft) !== 1 ? "s" : ""} overdue` : daysLeft === 0 ? "⚠️ Due today" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} remaining`}
-                      </div>
-                    </div>
-
-                    {/* Pending request — shown to everyone */}
-                    {ext?.status === "pending" && (
-                      <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
-                        <div style={{ fontWeight: 700, color: "#92400E", marginBottom: 4 }}>⏳ Extension Request Pending</div>
-                        <div style={{ color: "#78350F" }}>Proposed date: <b>{fmtDate(ext.proposedDate)}</b></div>
-                        {ext.reason && <div style={{ color: "#78350F", marginTop: 2 }}>Reason: {ext.reason}</div>}
-                        <div style={{ color: "#92400E", marginTop: 2, fontSize: 10 }}>Requested by {ext.requestedByName} · Awaiting CEO/TL approval</div>
-                      </div>
-                    )}
-
-                    {/* Approved */}
-                    {ext?.status === "approved" && (
-                      <div style={{ background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
-                        <div style={{ fontWeight: 700, color: "#166534" }}>✅ Deadline Extended</div>
-                        <div style={{ color: "#15803D", marginTop: 2 }}>Approved by {ext.reviewedByName} · New deadline: <b>{fmtDate(ext.approvedDate || deadlineStr)}</b></div>
-                      </div>
-                    )}
-
-                    {/* Rejected */}
-                    {ext?.status === "rejected" && (
-                      <div style={{ background: "#FEF2F2", border: "1.5px solid #FECDD3", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
-                        <div style={{ fontWeight: 700, color: "#991B1B" }}>❌ Extension Rejected by {ext.reviewedByName}</div>
-                      </div>
-                    )}
-
-                    {/* Countered */}
-                    {ext?.status === "countered" && (
-                      <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 8, padding: "8px 12px", marginBottom: 8, fontSize: 11 }}>
-                        <div style={{ fontWeight: 700, color: "#1E40AF" }}>📅 New deadline set by {ext.reviewedByName}: <b>{fmtDate(ext.counterDate)}</b></div>
-                      </div>
-                    )}
-
-                    {/* ASSIGNEE — request form */}
-                    {isAssignee && task.status !== "done" && (!ext || ext.status === "rejected") && (isOverdue || daysLeft <= 3) && (
-                      !showExtReqForm ? (
-                        <button onClick={() => setShowExtReqForm(true)}
-                          style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: `1.5px solid ${isOverdue ? "#FECDD3" : "#FDE68A"}`, background: isOverdue ? "#FFF1F2" : "#FFFBEB", color: isOverdue ? "#991B1B" : "#92400E", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                          📅 Request Deadline Extension
-                        </button>
-                      ) : (
-                        <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: 12 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 8 }}>📅 Request Extension</div>
-                          <input type="datetime-local" value={extReqDate} onChange={e => setExtReqDate(e.target.value)}
-                            style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 6, boxSizing: "border-box", outline: "none" }} />
-                          <input type="text" placeholder="Reason (optional)" value={extReqReason} onChange={e => setExtReqReason(e.target.value)}
-                            style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 8, boxSizing: "border-box", outline: "none" }} />
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button disabled={!extReqDate || extReqBusy} onClick={handleRequestExtension}
-                              style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !extReqDate || extReqBusy ? "#E5E7EB" : "#4F46E5", color: !extReqDate || extReqBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !extReqDate || extReqBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                              {extReqBusy ? "Submitting…" : "Submit Request"}
-                            </button>
-                            <button onClick={() => { setShowExtReqForm(false); setExtReqDate(""); setExtReqReason(""); }}
-                              style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#fff", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    )}
-
-                    {/* CEO/TL — review panel */}
-                    {(isCEO || isTL) && ext?.status === "pending" && (
-                      <div style={{ background: "#F8FAFC", border: "1.5px solid #C4B5FD", borderRadius: 10, padding: 12 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6D28D9", marginBottom: 10 }}>Review Extension Request</div>
-                        <div style={{ fontSize: 11, color: "#374151", marginBottom: 8 }}>
-                          <b>{ext.requestedByName}</b> requested: <b>{fmtDate(ext.proposedDate)}</b>
-                          {ext.reason && <div style={{ color: "#64748B", marginTop: 2 }}>"{ext.reason}"</div>}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                          <button disabled={reviewExtBusy} onClick={() => handleReviewExtension("approve")}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: "#059669", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                            ✅ Approve
-                          </button>
-                          <button disabled={reviewExtBusy} onClick={() => handleReviewExtension("reject")}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: "#DC2626", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                            ❌ Reject
-                          </button>
-                        </div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: "#64748B", marginBottom: 5 }}>Or set a different date:</div>
-                        <input type="datetime-local" value={reviewExtDate} onChange={e => setReviewExtDate(e.target.value)}
-                          style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", marginBottom: 6, boxSizing: "border-box", outline: "none" }} />
-                        <button disabled={!reviewExtDate || reviewExtBusy} onClick={() => handleReviewExtension("counter", reviewExtDate)}
-                          style={{ width: "100%", padding: "7px", borderRadius: 7, border: "none", background: !reviewExtDate || reviewExtBusy ? "#E5E7EB" : "#7C3AED", color: !reviewExtDate || reviewExtBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !reviewExtDate || reviewExtBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                          Set This Date Instead
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-
-              {/* ── Fixed deadline (non-timer normal tasks) ── */}
-              {!task.isRepeat && !task.isThirdParty && !task.isGoal && !task.hasTimer && task.fixedDeadline && (
-                <div style={{ background: "#F0FDF4", border: "1.5px solid #86EFAC", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#166534", marginBottom: 4 }}>📅 Deadline</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#14532D" }}>
-                    {new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                  </div>
-                  {(() => {
-                    const dl = Math.ceil((new Date(task.fixedDeadline) - new Date()) / 86400000);
-                    return <div style={{ fontSize: 10, color: dl < 0 ? "#DC2626" : dl <= 2 ? "#D97706" : "#166534", marginTop: 2 }}>
-                      {dl < 0 ? `⛔ ${Math.abs(dl)} days overdue` : dl === 0 ? "⚠️ Due today" : `${dl} days remaining`}
-                    </div>;
-                  })()}
-                </div>
-              )}
-
-              {/* ── DEADLINE STEP-FLOW (timer-mode tasks only, not repeat) ─────────────────────────────────── */}
-              {isAssignee && !isConfirmed && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && task.hasTimer === true && (() => {
-                const df = deadlineFlow || {};
-                const status = task.status;
-
-                // PRIORITY 1: Show Confirm ONLY when deadline is fully approved by TL/CEO
-                // hasDueDate = deadline was approved (not just proposed/pending)
-                const deadlineApprovedStatuses = ["deadline_approved", "confirmed", "in_progress", "done"];
-                const hasDueDate = deadlineApprovedStatuses.includes(status);
-                const isPendingApproval = ["pending_deadline_approval", "pending_employee_deadline_confirmation"].includes(status);
-
-                // ── Deadline passed = ONLY when timer has run AND worked >= window ──
-                // If timer never started (workedSecs === 0), deadline NEVER triggers
-                const _workedNow = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                const _window = task.deadlineWindowSecs || 0;
-                const _timerEverStarted = _workedNow > 0;
-
-                // "Deadline passed" is purely worked-time based — wall clock irrelevant
-                const deadlinePassed = _timerEverStarted && _window > 0 && _workedNow >= _window;
-
-                // How long over (in worked seconds)
-                const deadlinePassedStr = deadlinePassed ? (() => {
-                  const over = _workedNow - _window;
-                  if (over < 3600) return `${Math.round(over / 60)}m over`;
-                  if (over < 86400) return `${Math.round(over / 3600)}h over`;
-                  return `${Math.round(over / 86400)}d over`;
-                })() : null;
-
-                // If dueDate is set and not currently pending → show Step 3 Confirm directly
-                if (hasDueDate && !isPendingApproval) return (
-                  <div style={{ background: deadlinePassed ? "#FEF2F2" : "#F0FDF4", border: `1.5px solid ${deadlinePassed ? "#FECDD3" : "#BBF7D0"}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: deadlinePassed ? "#FEE2E2" : "#DCFCE7", border: `2px solid ${deadlinePassed ? "#EF4444" : "#16A34A"}`, color: deadlinePassed ? "#EF4444" : "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {deadlinePassed ? "!" : "✓"}
-                      </span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: deadlinePassed ? "#991B1B" : "#166534" }}>
-                        {deadlinePassed ? "⚠️ Deadline Passed — Confirm Task" : "✓ Deadline Approved"}
-                      </span>
-                    </div>
-                    {(task.deadlineWindowSecs > 0) && (
-                      <div style={{ fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 8, background: deadlinePassed ? "#FEE2E2" : _timerEverStarted ? "#DCFCE7" : "#F1F5F9", color: deadlinePassed ? "#B91C1C" : _timerEverStarted ? "#166534" : "#64748B" }}>
-                        {!_timerEverStarted
-                          ? `⏱ ${_window < 3600 ? `${Math.round(_window / 60)}m` : _window < 86400 ? `${Math.round(_window / 3600)}h` : `${Math.round(_window / 86400)}d`} — starts when you start timer`
-                          : deadlinePassed
-                            ? `⚠ ${deadlinePassedStr}`
-                            : (() => {
-                              const _rem = _window - _workedNow;
-                              const _fmt = _rem < 3600 ? `${Math.round(_rem / 60)}m` : _rem < 86400 ? `${Math.round(_rem / 3600)}h` : `${Math.round(_rem / 86400)}d`;
-                              return `⏱ ${_fmt} left`;
-                            })()
-                        }
-                      </div>
-                    )}
-                    {deadlinePassed && (
-                      <div style={{ fontSize: 11, color: "#B91C1C", background: "#FEF2F2", borderRadius: 7, padding: "6px 9px", marginBottom: 8, lineHeight: 1.5 }}>
-                        The deadline has passed. Confirm receipt and start working, or request a new deadline.
-                      </div>
-                    )}
-                    <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      Confirm & Accept Task
-                    </button>
-                  </div>
-                );
-
-                // effectiveStatus for proposal flow (no dueDate yet)
-                const effectiveStatus = status;
-
-                if (effectiveStatus === "open") return (
-                  <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                      <span style={{ fontSize: 16 }}>📅</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1D4ED8" }}>Propose Your Deadline</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: "#1E40AF", lineHeight: 1.55, marginBottom: 6 }}>
-                      This task uses a timer. Propose how long you need — your manager will approve it before you begin.
-                    </div>
-                  </div>
-                );
-                if (effectiveStatus === "pending_deadline_approval") return (
-                  <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#FEF3C7", border: "2px solid #D97706", color: "#D97706", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
-                    </div>
-                    {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 6 }}>
-                      {(() => {
-                        const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
-                        const delta = Number(task.pendingExtensionSecs) || 0;
-                        const total = Number(task.deadlineWindowSecs) || 0;
-                        // Extension: show the extra ask, not the total, to match
-                        // how the approver sees it on their side.
-                        if (delta > 0) return `⏱ +${fmt(delta)} extra requested`;
-                        return `⏱ ${fmt(total)} requested`;
-                      })()}
-                    </div>}
-                    <div style={{ fontSize: 10, color: "#A16207" }}>💬 Use Draft Chat to discuss while waiting</div>
-                  </div>
-                );
-                if (effectiveStatus === "deadline_approved") return (
-                  <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#DCFCE7", border: "2px solid #16A34A", color: "#16A34A", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>3</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>✓ Deadline Approved</span>
-                    </div>
-                    {task.dueDate && <div style={{ fontSize: 11, fontWeight: 600, color: "#166534", background: "#DCFCE7", padding: "4px 8px", borderRadius: 6, display: "inline-block", marginBottom: 4 }}>
-                      {(() => {
-                        const _wk = task.deadlineWindowSecs || 0;
-                        const _ws = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                        const _rem = _wk > 0 ? (_wk - _ws) : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : 0);
-                        const _abs = Math.round(Math.abs(_rem));
-                        const _fmt = _abs < 3600 ? `${Math.round(_abs / 60)}m` : _abs < 86400 ? `${Math.round(_abs / 3600)}h` : `${Math.round(_abs / 86400)}d`;
-                        return _rem < 0 ? `⚠ ${_fmt} over` : `⏱ ${_fmt} left`;
-                      })()}
-                    </div>}
-                    {task.dueDate && (() => {
-                      const _live = fmtLiveDeadlineDateTime(task, getTimerSession ? getTimerSession(task.taskId) : null);
-                      return _live ? (
-                        <div style={{ fontSize: 10, color: "#64748B", marginBottom: 8 }}>
-                          Due at <strong style={{ color: "#166534" }}>{_live}</strong>
-                        </div>
-                      ) : null;
-                    })()}
-                    <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}>
-                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      Confirm & Accept Task
-                    </button>
-                  </div>
-                );
-                return null;
-              })()}
-
-              {/* ── CREATOR APPROVAL PANEL ─────────────────────────────────────────── */}
-              {/* ── POST-CONFIRM ACTIONS ────────────────────────────────────────────── */}
-              {isAssignee && isConfirmed && !isStarted && task.status !== "pending_deadline_approval" && (
-                <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}>
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
-                  Start Working
-                </button>
-              )}
-              {isAssignee && task.status === "pending_deadline_approval" && !task.isFolder && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, fontSize: 11, color: "#92400E" }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                  <span><strong>Work paused</strong> — waiting for new deadline approval</span>
-                </div>
-              )}
-              {isAssignee && task.status === "in_progress" && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
-                <button className="gv-wf-btn gv-wf-report" onClick={() => handleAction("report")}>Daily Report</button>
-              )}
-
-              {/* ── DEADLINE EXTENSION (in_progress — only after deadline passed) ── */}
-              {isAssignee && ["in_progress", "confirmed"].includes(task.status) && !task.isFolder && (() => {
-                const df = deadlineFlow || {};
-                const _workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-                const _window = task.deadlineWindowSecs || 0;
-                const _remaining = _window > 0 ? _window - _workedSecs : (task.dueDate ? (new Date(task.dueDate).getTime() - Date.now()) / 1000 : null);
-                // Only show overdue/near AFTER timer has been started at least once
-                const _timerStarted = _workedSecs > 0;
-                const isOverdue = _timerStarted && _remaining !== null && _remaining < 0;
-                // isNear = last 20% of window OR last 2 minutes, whichever is SMALLER — handles short tasks correctly
-                const _nearThreshold = _window > 0 ? Math.min(_window * 0.2, 120) : 120;
-                const isNear = _timerStarted && _remaining !== null && !isOverdue && _remaining < _nearThreshold;
-                return (
-                  <div style={{ marginBottom: 8 }}>
-                    {/* Near-deadline warning + extension button (show early so user can act before time runs out) */}
-                    {isNear && (
-                      <>
-                        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
-                          ⏰ Almost out of time
-                          <span style={{ fontWeight: 700 }}> · ⏱ {(() => {
-                            const _rem = (_window > 0 ? _window - _workedSecs : 0);
-                            const _abs = Math.round(Math.abs(_rem));
-                            if (_abs < 3600) return `${Math.round(_abs / 60)}m left`;
-                            return `${Math.round(_abs / 3600)}h left`;
-                          })()}</span>
-                        </div>
-                        {/* Show extension button while still near — don't wait for overdue */}
-                        <button onClick={() => df.setShowExtend?.(true)}
-                          style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: "1.5px solid #FDE68A", background: "#FFFBEB", color: "#92400E", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5, marginBottom: 8 }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                          Request Deadline Extension
-                        </button>
-                      </>
-                    )}
-                    {/* Overdue warning + Request Extension button — ONLY after deadline passed */}
-                    {isOverdue && (
-                      <>
-                        <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 8, padding: "7px 10px", marginBottom: 8, fontSize: 11, color: "#991B1B", display: "flex", alignItems: "center", gap: 5 }}>
-                          ⚠️ Time exceeded!
-                          <span style={{ fontWeight: 700 }}> · ⏱ {(() => {
-                            const _over = _workedSecs - _window;
-                            if (_over < 3600) return `${Math.round(_over / 60)}m over`;
-                            return `${Math.round(_over / 3600)}h over`;
-                          })()}</span>
-                        </div>
-                        <button onClick={() => df.setShowExtend?.(true)}
-                          style={{ width: "100%", padding: "7px 12px", borderRadius: 8, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                          Request Deadline Extension
-                        </button>
-                      </>
-                    )}
-
-                    {/* Extension form */}
-                    {df.showExtend && (
-                      <div style={{ marginTop: 8, background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "12px 12px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                          Propose New Deadline
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                          <input type="number" min="1" max="999" placeholder="e.g. 4"
-                            value={df.proposedDurationVal || ""}
-                            onChange={e => df.setDurationVal?.(e.target.value)}
-                            style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                          <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
-                            style={{ width: 72, padding: "7px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
-                            <option value="minutes">min</option>
-                            <option value="hours">hrs</option>
-                            <option value="days">days</option>
-                          </select>
-                        </div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.proposedDurationVal || df.proposing ? "#E5E7EB" : "#4F46E5", color: !df.proposedDurationVal || df.proposing ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                            {df.proposing ? "Submitting…" : "⏱ Submit for Approval"}
-                          </button>
-                          <button onClick={() => df.setShowExtend?.(false)}
-                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* ── CREATOR: Approve / Reject / Counter-propose ── */}
-              {task.status === "pending_deadline_approval" && task.assignedBy === employeeId && !task.isFolder && (() => {
-                const df = deadlineFlow || {};
-                const isExt = ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "");
-                return (
-                  <div style={{ background: "#FFF7ED", border: "1.5px solid #FED7AA", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#9A3412", marginBottom: 6 }}>
-                      {isExt ? "📅 Deadline Extension Request" : "📋 Deadline Proposal"}
-                    </div>
-                    {task.proposedDeadline && <div style={{ fontSize: 12, color: "#78350F", marginBottom: 10 }}>
-                      <strong>{task.proposedDeadlineByName}</strong> proposed:<br />
-                      <span style={{ fontWeight: 700, color: "#9A3412" }}>
-                        {(() => {
-                          // Helper: seconds → short human label
-                          const fmt = (s) => {
-                            if (!s) return "?";
-                            if (s < 60) return `${s}s`;
-                            if (s < 3600) return `${Math.round(s / 60)} min`;
-                            if (s < 86400) return `${Math.round(s / 3600)}h`;
-                            return `${Math.round(s / 86400)}d`;
-                          };
-                          // Extension context: proposal carries the DELTA in pendingExtensionSecs.
-                          // Show the extra ask prominently; the new total is secondary context.
-                          const delta = Number(task.pendingExtensionSecs) || 0;
-                          const total = Number(task.deadlineWindowSecs) || 0;
-                          if (delta > 0) {
-                            const prev = Math.max(0, total - delta);
-                            return <>⏱ +{fmt(delta)} extra <span style={{ color: "#C2410C", fontWeight: 500, fontSize: 11 }}>(was {fmt(prev)} → new {fmt(total)})</span></>;
-                          }
-                          // First-time proposal: no delta, show the ask as-is.
-                          return <>⏱ {fmt(total)} needed</>;
-                        })()}
-                      </span>
-                    </div>}
-
-                    {!df.showRejectInput && !df.showCounterForm ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={() => df.onApprove?.(true)} disabled={df.approving}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: df.approving ? 0.5 : 1 }}>
-                            ✓ Approve
-                          </button>
-                          <button onClick={() => df.setShowRejectInput?.(true)} disabled={df.approving}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                            ✕ Reject
-                          </button>
-                        </div>
-                        <button onClick={() => df.setShowCounterForm?.(true)}
-                          style={{ width: "100%", padding: "7px", borderRadius: 7, border: "1.5px solid #DDD6FE", background: "#F5F3FF", color: "#7C3AED", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                          📅 Suggest Different Durations
-                        </button>
-                      </div>
-                    ) : df.showCounterForm ? (
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>Suggest a deadline:</div>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="number" min="1" max="999" placeholder="e.g. 4"
-                            value={df.counterDurationVal || ""}
-                            onChange={e => df.setCounterDurationVal?.(e.target.value)}
-                            style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
-                          <select value={df.counterDurationUnit || "hours"} onChange={e => df.setCounterDurationUnit?.(e.target.value)}
-                            style={{ padding: "6px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer" }}>
-                            <option value="minutes">min</option>
-                            <option value="hours">hrs</option>
-                            <option value="days">days</option>
-                          </select>
-                        </div>
-                        <textarea value={df.counterMessage || ""} onChange={e => df.setCounterMessage?.(e.target.value)}
-                          placeholder="Message to employee (optional)…"
-                          style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={df.handleTlCounterPropose} disabled={!df.counterDurationVal || df.counterBusy}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "none", background: !df.counterDurationVal || df.counterBusy ? "#E5E7EB" : "#7C3AED", color: !df.counterDurationVal || df.counterBusy ? "#9CA3AF" : "#fff", fontSize: 11, fontWeight: 700, cursor: !df.counterDurationVal || df.counterBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                            {df.counterBusy ? "…" : "Send Suggestion"}
-                          </button>
-                          <button onClick={() => { df.setShowCounterForm?.(false); df.setCounterDurationVal?.(""); df.setCounterMessage?.(""); }}
-                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <textarea value={df.rejectReason || ""} onChange={e => df.setRejectReason?.(e.target.value)}
-                          placeholder="Reason for rejection…"
-                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box" }} />
-                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                          <button onClick={() => df.onApprove?.(false)} disabled={!df.rejectReason?.trim() || df.approving}
-                            style={{ flex: 1, padding: "7px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !df.rejectReason?.trim() || df.approving ? 0.5 : 1 }}>
-                            {df.approving ? "…" : "Send Rejection"}
-                          </button>
-                          <button onClick={() => { df.setShowRejectInput?.(false); df.setRejectReason?.(""); }}
-                            style={{ padding: "7px 12px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* ── EMPLOYEE: Respond to TL's counter-proposed deadline ── */}
-              {task.status === "pending_employee_deadline_confirmation" && isAssignee && !task.isFolder && (() => {
-                const df = deadlineFlow || {};
-                return (
-                  <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "12px 12px", marginBottom: 8 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                      📅 {task.tlCounterDeadlineByName || "TL"} Suggested a Duration
-                    </div>
-                    {(task.tlCounterWindowSecs || task.tlCounterDeadline) && (
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#4C1D95", marginBottom: 4 }}>
-                        {(() => {
-                          // Show the window duration — not wall-clock countdown
-                          const w = task.tlCounterWindowSecs
-                            || (task.tlCounterDeadline ? Math.round((new Date(task.tlCounterDeadline).getTime() - (task.tlCounterDeadlineAt?.seconds ? task.tlCounterDeadlineAt.seconds * 1000 : Date.now())) / 1000) : 0);
-                          if (w <= 0) return "⏱ Duration set";
-                          if (w < 3600) return `⏱ ${Math.round(w / 60)}m to complete`;
-                          if (w < 86400) return `⏱ ${Math.round(w / 3600)}h to complete`;
-                          return `⏱ ${Math.round(w / 86400)}d to complete`;
-                        })()}
-                        <div style={{ fontSize: 10, color: "#7C3AED", fontWeight: 500, marginTop: 2 }}>
-                          ⏸ Countdown starts when you press Play
-                        </div>
-                      </div>
-                    )}
-                    {task.tlCounterDeadlineMessage && (
-                      <div style={{ fontSize: 11, color: "#6D28D9", background: "#EDE9FE", borderRadius: 6, padding: "5px 8px", marginBottom: 8, fontStyle: "italic" }}>
-                        "{task.tlCounterDeadlineMessage}"
-                      </div>
-                    )}
-                    {/* Agree | Not Agree buttons */}
-                    <div style={{ display: "flex", background: "#fff", borderRadius: 8, border: "1px solid #DDD6FE", overflow: "hidden", marginBottom: df.showEmpCounterForm ? 8 : 0 }}>
-                      <button onClick={() => { df.setShowEmpCounterForm?.(false); df.handleRespondToCounter?.(true); }} disabled={df.respondBusy}
-                        style={{ flex: 1, padding: "9px 4px", border: "none", borderRight: "1px solid #DDD6FE", fontFamily: "inherit", fontSize: 11, fontWeight: 700, color: "#166534", background: "#fff", cursor: df.respondBusy ? "not-allowed" : "pointer", opacity: df.respondBusy ? 0.5 : 1 }}>
-                        {df.respondBusy && !df.showEmpCounterForm ? "..." : "✓ Agree"}
-                      </button>
-                      <button onClick={() => df.setShowEmpCounterForm?.(!df.showEmpCounterForm)}
-                        style={{ flex: 1, padding: "9px 4px", border: "none", fontFamily: "inherit", fontSize: 11, fontWeight: 700, color: df.showEmpCounterForm ? "#6D28D9" : "#6B7280", background: df.showEmpCounterForm ? "#EDE9FE" : "#fff", cursor: "pointer", transition: "all 0.1s" }}>
-                        📅 Not Agree
-                      </button>
-                    </div>
-                    {/* Employee new date form */}
-                    {df.showEmpCounterForm && (
-                      <div style={{ paddingTop: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Your preferred deadline:</div>
-                        <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 6 }}>How much time do you need?</div>
-                        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                          <input type="number" min="1" max="999" placeholder="e.g. 6"
-                            value={df.empCounterDurationVal || ""}
-                            onChange={e => df.setEmpCounterDurationVal?.(e.target.value)}
-                            style={{ flex: 1, padding: "7px 8px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                          <select value={df.empCounterDurationUnit || "hours"} onChange={e => df.setEmpCounterDurationUnit?.(e.target.value)}
-                            style={{ width: 72, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
-                            <option value="minutes">min</option>
-                            <option value="hours">hrs</option>
-                            <option value="days">days</option>
-                          </select>
-                        </div>
-                        <textarea value={df.empCounterMsg || ""} onChange={e => df.setEmpCounterMsg?.(e.target.value)}
-                          placeholder="Message to TL/CEO (optional)..."
-                          style={{ width: "100%", padding: "7px 9px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 50, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-                        <button onClick={() => df.handleRespondToCounter?.(false)} disabled={!df.empCounterDurationVal || df.respondBusy}
-                          style={{ width: "100%", padding: "8px", borderRadius: 8, border: "none", background: !df.empCounterDurationVal || df.respondBusy ? "#E5E7EB" : "#7C3AED", color: !df.empCounterDurationVal || df.respondBusy ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 700, cursor: !df.empCounterDurationVal || df.respondBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                          {df.respondBusy ? "Sending..." : "⏱ Send My Request to TL for Approval"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              {isAssignee && task.status === "in_progress" && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && !["submitted", "tl_approved", "tl_final_approved", "ceo_approved", "ceo_direct_approved"].includes(task.completionStatus) && (
-                <button className="gv-wf-btn gv-wf-submit" onClick={() => handleAction("submit_completion")}>Submit for Review</button>
-              )}
-              {isTL && task.status === "pending_tl_approval" && task.assigneeIds?.includes(employeeId) && (
-                <button className="gv-wf-btn" style={{ background: "#EDEDFE", color: "#5B5EF4", borderColor: "rgba(91,94,244,.3)" }} disabled={actionBusy} onClick={() => handleAction("approve_tl")}>⭐ Approve Task</button>
-              )}
-              {isTL && task.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(task.reviewFlow) && (
-                <button className="gv-wf-btn gv-wf-review" onClick={() => handleAction("review_completion")}>
-                  {task.reviewFlow === "tl_final" ? "✅ Final Review" : "Review Submission"}
-                </button>
-              )}
-              {isCEO && task.completionStatus === "submitted" && task.reviewFlow === "ceo_direct" && (
-                <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("review_completion")}>CEO Final Review</button>
-              )}
-              {isCEO && task.completionStatus === "tl_approved" && task.reviewFlow === "tl_then_ceo" && (
-                <button className="gv-wf-btn gv-wf-ceo" onClick={() => handleAction("ceo_review")}>CEO Final Approval</button>
-              )}
-              {/* ── THIRD-PARTY: CEO/TL approve completion ── */}
-              {(isCEO || isTL) && task.isThirdParty && task.completionStatus === "submitted" && task.status !== "done" && (
-                <button
-                  className="gv-wf-btn gv-wf-ceo"
-                  disabled={actionBusy}
-                  onClick={() => handleAction("third_party_complete")}
-                  style={{ background: "#DCFCE7", color: "#166534", borderColor: "#86EFAC" }}
-                >
-                  ✅ Mark Third-Party Task as Completed
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Subtasks — Task.Co style */}
-          {(() => {
-            // Employee: only show subtasks assigned to or by them
-            const visibleSubtasks = ((!isCEO && !isTL)
-              ? (task.subtasks || []).filter(sub =>
-                (sub.assigneeIds || []).includes(employeeId) || sub.assignedBy === employeeId
-              )
-              : (task.subtasks || [])
-            ).sort((a, b) => {
-              const pa = a.priority ?? 5, pb = b.priority ?? 5;
-              if (pa !== pb) return pa - pb;
-              return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
-            });
-            return visibleSubtasks.length > 0 ? (
-              <div style={{ marginTop: 14, padding: "0 14px" }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="6" y="1" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /><rect x="1" y="6" width="3" height="3" rx=".5" stroke="currentColor" strokeWidth=".9" /></svg>
-                  Subtasks ({visibleSubtasks.length})
-                </div>
-                {visibleSubtasks.map(sub => {
-                  const sst = STATUS[sub.status] || STATUS.open;
-                  const subIsRunning = timerActiveTaskId === sub.taskId;
-                  const subSecs = getDisplaySeconds(sub.taskId);
-                  const subSess = getTimerSession(sub.taskId);
-                  const subHasTime = (subSess?.totalSeconds || 0) > 0 || subIsRunning;
-                  const subIsAssignee = (sub.assigneeIds || []).includes(employeeId);
-                  return (
-                    <div key={sub.taskId}
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: subIsRunning ? "#F0FDF4" : "var(--bg)", marginBottom: 3, transition: "all 0.1s", border: `1px solid ${subIsRunning ? "#BBF7D0" : "transparent"}` }}
-                      onMouseEnter={e => { if (!subIsRunning) { e.currentTarget.style.background = "var(--p-lt)"; e.currentTarget.style.borderColor = "var(--p)"; } }}
-                      onMouseLeave={e => { if (!subIsRunning) { e.currentTarget.style.background = "var(--bg)"; e.currentTarget.style.borderColor = "transparent"; } }}
-                    >
-                      {/* Timer button for subtask */}
-                      {(subIsAssignee || isCEO || isTL) && (
-                        <button
-                          onClick={e => { e.stopPropagation(); subIsRunning ? timerPause(sub.taskId, sub.title) : timerStart(sub.taskId, sub.title); }}
-                          style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: subIsRunning ? "#DCFCE7" : "#F1F5F9", color: subIsRunning ? "#16A34A" : "#94A3B8", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-                          title={subIsRunning ? "Pause" : subHasTime ? "Resume" : "Start"}
-                        >
-                          {subIsRunning
-                            ? <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg>
-                            : <svg width="8" height="8" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
-                          }
-                        </button>
-                      )}
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: sst.dot, flexShrink: 0, display: "inline-block" }} />
-                      <span onClick={() => handleSelectNode(sub)} style={{ fontSize: 11, fontWeight: 500, color: "var(--text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>{sub.title}</span>
-                      {subHasTime && (
-                        <span style={{ fontSize: 10, fontFamily: "monospace", fontWeight: 600, color: subIsRunning ? "#16A34A" : "#94A3B8", letterSpacing: "0.04em", flexShrink: 0 }}>
-                          {formatTimeHMS(subSecs)}
-                        </span>
-                      )}
-                      <svg onClick={() => handleSelectNode(sub)} width="8" height="8" viewBox="0 0 9 9" fill="none" style={{ color: "var(--text-4)", flexShrink: 0, cursor: "pointer" }}><path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null;
-          })()}
-
-          {/* ── REPEAT TASK INFO BLOCK ── */}
-          {task.isRepeat && task.repeatConfig && (isAssignee || isTL || isCEO) && (() => {
-            const rc = task.repeatConfig;
-            const times = rc.deadlineTimes || (rc.deadlineTime ? [rc.deadlineTime] : ["10:00"]);
-            const now = new Date();
-            const todayStr = now.toISOString().split("T")[0];
-            const currentHHMM = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
-            const isConfirmedRepeat = (task.confirmedBy || []).length > 0;
-            const todaySubmission = task.repeatSubmissions?.[todayStr];
-            const submittedToday = !!todaySubmission;
-            const anyDeadlinePassed = times.some(t => currentHHMM > t);
-            const isMissed = anyDeadlinePassed && !submittedToday && rc.missedAction === "lock";
-            const isLate = anyDeadlinePassed && !submittedToday && rc.missedAction === "late";
-            const noEndDate = !rc.endDate;
-            const isExpired = rc.endDate && todayStr > rc.endDate;
-
-            return (
-              <div style={{ margin: "10px 14px 0", display: "flex", flexDirection: "column", gap: 8 }}>
-
-                {/* Schedule card — always shown */}
-                <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748B", marginBottom: 8 }}>🔁 Repeat Schedule</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, background: "#EFF6FF", color: "#1D4ED8", textTransform: "capitalize" }}>{rc.frequency || "daily"}</span>
-                    {(rc.frequency === "weekly" || rc.frequency === "custom") && rc.activeDays?.map(d => (
-                      <span key={d} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#F1F5F9", color: "#475569" }}>{d}</span>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 10, color: "#374151" }}>⏰ {times.length > 1 ? "Deadlines" : "Deadline"}:</span>
-                    {times.map((t, i) => (
-                      <span key={i} style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", padding: "2px 8px", borderRadius: 5, background: "#1D4ED8", color: "#fff" }}>{t}</span>
-                    ))}
-                  </div>
-                  <div style={{ fontSize: 10, color: "#64748B", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span>From: <b style={{ color: "#1E293B" }}>{rc.startDate || "—"}</b></span>
-                    {noEndDate ? <b style={{ color: "#059669" }}>∞ Repeats forever</b> : <span>To: <b style={{ color: "#1E293B" }}>{rc.endDate}</b></span>}
-                  </div>
-                </div>
-
-                {/* ══ TODAY STATUS + WARNINGS (shown once confirmed/active) ══ */}
-                {isConfirmedRepeat && (
-                  <>
-                    <div style={{ background: submittedToday ? "#F0FDF4" : isMissed ? "#FEF2F2" : "#FFFBEB", border: `1.5px solid ${submittedToday ? "#86EFAC" : isMissed ? "#FECDD3" : "#FDE68A"}`, borderRadius: 8, padding: "8px 10px" }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: submittedToday ? "#166534" : isMissed ? "#991B1B" : "#92400E" }}>
-                        {submittedToday ? "✅ Submitted today" : isMissed ? "❌ Missed — deadline passed, submission locked" : isLate ? "⚠️ Late — deadline passed, still allowed" : "🕐 Pending — not yet submitted today"}
-                      </div>
-                      {submittedToday && todaySubmission?.submittedAt && (
-                        <div style={{ fontSize: 10, color: "#166534", marginTop: 2 }}>Submitted at {new Date(todaySubmission.submittedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</div>
-                      )}
-                    </div>
-
-                    {isAssignee && !submittedToday && anyDeadlinePassed && (
-                      <div style={{ background: isMissed ? "#FEF2F2" : "#FFFBEB", border: `1px solid ${isMissed ? "#FECDD3" : "#FDE68A"}`, borderRadius: 8, padding: "8px 10px", fontSize: 11, color: isMissed ? "#991B1B" : "#92400E", lineHeight: 1.5 }}>
-                        {isMissed ? "⛔ You missed today's deadline. Submission is locked and marked as Missed." : "⚠️ You missed the deadline but late submission is still allowed. Submit now."}
-                      </div>
-                    )}
-                    {(isCEO || isTL) && !submittedToday && anyDeadlinePassed && (
-                      <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#991B1B", lineHeight: 1.5 }}>
-                        ⚠️ <b>{task.assigneeIds?.length > 1 ? "Assignees have" : "Employee has"} not submitted today.</b> Deadline passed at {times[times.length - 1]}.
-                      </div>
-                    )}
-                    {isExpired && (
-                      <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#64748B" }}>
-                        📅 This repeat task ended on <b>{rc.endDate}</b> and is no longer active.
-                      </div>
-                    )}
-                    {isAssignee && !submittedToday && !isMissed && !isExpired && (
-                      <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#1D4ED8", display: "flex", alignItems: "center", gap: 6 }}>
-                        📋 Go to the <b>Reports tab</b> to submit today's slots.
-                      </div>
-                    )}
-                  </>
-                )}
-
-              </div>
-            );
-          })()}
-
-          {/* Deadline history */}
-          {isCEO && task.deadlineHistory?.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-4)", marginBottom: 6 }}>Deadline History</div>
-              {task.deadlineHistory.map((h, i) => (
-                <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", padding: "6px 8px", background: "var(--bg)", borderRadius: 6, marginBottom: 3, fontSize: 10 }}>
-                  <span style={{ color: "var(--text-4)", fontFamily: "var(--mono)", flexShrink: 0 }}>{new Date(h.editedAt).toLocaleDateString("en-IN")}</span>
-                  <span style={{ color: "var(--text-2)", flex: 1 }}>
-                    {h.editedByName}: <span style={{ color: "var(--danger)", fontWeight: 700 }}>{h.oldDueDate || "None"}</span> → <span style={{ color: "var(--success)", fontWeight: 700 }}>{h.newDueDate}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeDetailTab === "reports" && (
-        <div className="gv-reports-scroll" style={{ flex: 1, padding: task.isThirdParty ? 0 : undefined }}>
-          {task.isThirdParty
-            ? <ThirdPartyTask task={task} isAssignee={isAssignee} isCEO={iCEO} isTL={isTL} onRefresh={() => softRefreshTask(task.taskId)} />
-            : task.isGoal
-              ? <GoalTask task={task} isAssignee={isAssignee} isCEO={isCEO} isTL={isTL} onRefresh={() => softRefreshTask(task.taskId)} />
-              : task.isRepeat
-                ? <RepeatSubmissionsTab task={task} employeeId={employeeId} isAssignee={isAssignee} isCEO={isCEO} isTL={isTL} />
-                : reportsLoading
-                  ? <div style={{ display: "flex", justifyContent: "center", padding: 28 }}><GwSpinner /></div>
-                  : dailyReports.length === 0
-                    ? <div className="gv-empty"><div className="gv-empty-icon">📊</div><p className="gv-empty-t">No reports</p><p className="gv-empty-s">Daily reports will appear here.</p></div>
-                    : (() => {
-                      // Group reports by date (newest first)
-                      const grouped = {};
-                      [...dailyReports]
-                        .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0))
-                        .forEach(r => {
-                          const ts = r.createdAt?.seconds ? r.createdAt.seconds * 1000 : (r.createdAt ? new Date(r.createdAt).getTime() : Date.now());
-                          const key = new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-                          if (!grouped[key]) grouped[key] = [];
-                          grouped[key].push(r);
-                        });
-                      return Object.entries(grouped).map(([dateKey, reports]) => (
-                        <ReportDateGroup key={dateKey} dateLabel={dateKey} reports={reports} />
-                      ));
-                    })()
-          }
-        </div>
-      )}
-    </>
-  );
-}
-
-
 /* ─── SwipeableMessage — swipe right to reply (WhatsApp-style) ─── */
 /* ─── Main Page ─── */
 export default function TasksPage() {
@@ -2243,10 +815,12 @@ export default function TasksPage() {
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterDeadline, setFilterDeadline] = useState(""); // "tomorrow" | "week" | "month"
   // Image-2 top-level navigation tabs and filter pills
-  const [topTab, setTopTab] = useState("my"); // "my" | "all"
+  const [taskSection, setTaskSection] = useState("assigned"); // "assigned" | "created" | "self"
   const [viewFilter, setViewFilter] = useState(""); // "" | "today" | "week" | "overdue" | "completed"
-  const [filterOpen, setFilterOpen] = useState(false);
+
   const [employeeMapFull, setEmployeeMapFull] = useState(new Map());
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [priCtxMenu, setPriCtxMenu] = useState(null); // { x, y, taskId, current }
 
   // ── Resizable split panel state ──
   const [sidebarWidth, setSidebarWidth] = useState(50); // percentage — task list : chat split
@@ -2283,12 +857,20 @@ export default function TasksPage() {
 
 
   // Sync toolbar with detail tab
+  // Sync toolbar with detail tab
   useEffect(() => {
     if (rightPanel === "info" || rightPanel === "reports") {
       setActiveDetailTab(rightPanel);
     }
     // "requests" panel is independent — no detail tab sync needed
   }, [rightPanel]);
+
+  // Auto-open Activity tab when a goal task is selected
+  useEffect(() => {
+    if (selectedTask?.isGoal) {
+      setRightPanel("reports");
+    }
+  }, [selectedTask?.taskId, selectedTask?.isGoal]);
 
 
 
@@ -2315,6 +897,16 @@ export default function TasksPage() {
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [contextMenu]);
+
+  // Close priority context menu on outside click
+  useEffect(() => {
+    if (!priCtxMenu) return;
+    const close = (e) => {
+      if (!e.target.closest(".gv-pri-ctx")) setPriCtxMenu(null);
+    };
+    setTimeout(() => document.addEventListener("click", close), 50);
+    return () => document.removeEventListener("click", close);
+  }, [priCtxMenu]);
 
   // Close row action menu on outside click
   // Uses "click" (not mousedown) so menu items fire before menu closes
@@ -2528,8 +1120,8 @@ export default function TasksPage() {
     dragTaskIdRef.current = taskId;
   }, []);
 
-  const handleDrop = useCallback(async (dropOnTaskId) => {
-    const dragId = dragTaskIdRef.current;
+  const handleDrop = useCallback(async (dropOnTaskId, explicitDragId) => {
+    const dragId = explicitDragId || dragTaskIdRef.current;
     dragTaskIdRef.current = null;
     dragOverIdRef.current = null;
     if (!dragId || dragId === dropOnTaskId) return;
@@ -2584,44 +1176,53 @@ export default function TasksPage() {
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
+
+    // Get all siblings at this level
     const rawSiblings = [...allTaskMapRef.current.values()]
       .filter(t => (t.parentTaskId || null) === parentId);
-    const hasOrder = rawSiblings.some(t => t.order !== undefined);
-    const siblings = rawSiblings.sort((a, b) => {
-      if (hasOrder) {
-        const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
-        const bo = b.order !== undefined ? b.order : 90000 + (b.priority ?? 5) * 1000;
-        return ao - bo;
-      }
-      const pa = a.priority ?? 5, pb = b.priority ?? 5;
-      if (pa !== pb) return pa - pb;
-      return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+
+    // Sort by current order/priority to get the real current positions
+    const sorted = [...rawSiblings].sort((a, b) => {
+      const ao = a.order !== undefined ? a.order : (Number(a.priority ?? 99)) * 1000;
+      const bo = b.order !== undefined ? b.order : (Number(b.priority ?? 99)) * 1000;
+      if (ao !== bo) return ao - bo;
+      return (a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0);
     });
 
-    // Find positions
-    const dropIdx = siblings.findIndex(t => t.taskId === dropOnTaskId);
-    if (dropIdx < 0) return;
+    const dragIdx = sorted.findIndex(t => t.taskId === dragId);
+    const dropIdx = sorted.findIndex(t => t.taskId === dropOnTaskId);
+    if (dragIdx < 0 || dropIdx < 0) return;
 
-    // Build new order: insert dragTask before dropTask
-    const others = siblings.filter(t => t.taskId !== dragId);
-    others.splice(dropIdx, 0, { ...dragTask, parentTaskId: parentId });
+    // TRUE SWAP: just exchange the two tasks' positions, everything else stays
+    const reordered = [...sorted];
+    reordered[dragIdx] = { ...sorted[dropIdx], parentTaskId: parentId };
+    reordered[dropIdx] = { ...sorted[dragIdx], parentTaskId: parentId };
 
-    // Optimistic update + block live listener for 8s so it doesn't overwrite
-    // NEW — saves order AND recalculates priority based on position
-    const updates = others.map((t, i) => ({ taskId: t.taskId, order: i * 10, priority: i + 1, parentTaskId: parentId }));
+    // Reassign order + priority based on final position
+    const updates = reordered.map((t, i) => ({
+      taskId: t.taskId,
+      order: i * 10,
+      priority: i + 1,
+      parentTaskId: parentId,
+    }));
+
+    // Block live listener for 8s so optimistic update isn't overwritten
     const now8 = Date.now() + 8000;
     updates.forEach(u => { ignoreLiveUntilRef.current[u.taskId] = now8; });
 
+    // Optimistic local update
     setAllTasks(prev => {
       const map = new Map(prev.map(t => [t.taskId, t]));
-      // NEW — also apply priority to local state immediately
-      updates.forEach(u => { const t = map.get(u.taskId); if (t) map.set(u.taskId, { ...t, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId }); });
+      updates.forEach(u => {
+        const t = map.get(u.taskId);
+        if (t) map.set(u.taskId, { ...t, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId });
+      });
       return [...map.values()];
     });
-    // Also update allTaskMapRef immediately
+
+    // Sync allTaskMapRef immediately
     updates.forEach(u => {
       const existing = allTaskMapRef.current.get(u.taskId);
-      // NEW
       if (existing) allTaskMapRef.current.set(u.taskId, { ...existing, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId });
     });
 
@@ -2629,9 +1230,10 @@ export default function TasksPage() {
     try {
       const { writeBatch: _wb, doc: _doc } = await import("firebase/firestore");
       const batch = _wb(firebaseDb);
-
-      // NEW — persist priority to Firestore too
-      updates.forEach(u => batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), { order: u.order, priority: u.priority, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }));
+      updates.forEach(u => batch.update(
+        _doc(firebaseDb, "cowork_tasks", u.taskId),
+        { order: u.order, priority: u.priority, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }
+      ));
       await batch.commit();
     } catch (e) { console.error("[drag] batch update:", e.message); }
   }, []);
@@ -2644,17 +1246,18 @@ export default function TasksPage() {
     const label = p === 1 ? "P1 — Highest" : p === 2 ? "P2 — High" : p === 10 ? "P10 — Lowest" : `P${p} — Medium`;
 
     // Optimistic update — change local state immediately, no reload needed
-    setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: p } : t));
-    setSelectedTask(prev => prev?.taskId === taskId ? { ...prev, priority: p } : prev);
+    // Also clear `order` so the priority-based sort takes effect instantly
+    setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: p, order: undefined } : t));
+    setSelectedTask(prev => prev?.taskId === taskId ? { ...prev, priority: p, order: undefined } : prev);
     // Also update allTaskMap so TblRow subtask sort sees the new priority instantly
     setAllTaskMap(prev => {
       const next = new Map(prev);
       const existing = next.get(taskId);
-      if (existing) next.set(taskId, { ...existing, priority: p });
+      if (existing) next.set(taskId, { ...existing, priority: p, order: undefined });
       return next;
     });
     if (allTaskMapRef.current?.has(taskId)) {
-      allTaskMapRef.current.set(taskId, { ...allTaskMapRef.current.get(taskId), priority: p });
+      allTaskMapRef.current.set(taskId, { ...allTaskMapRef.current.get(taskId), priority: p, order: undefined });
     }
 
     // Show top-right toast
@@ -2881,6 +1484,7 @@ export default function TasksPage() {
   const lastMsgTimesRef = useRef({});
   // Keep a ref-copy of allTaskMap so setupChatCountListeners never needs it as a dep
   const allTaskMapRef = useRef(new Map());
+  const visibleTaskListRef = useRef([]); // tracks current rendered flat list for drag-drop
   const latestTaskIdRef = useRef(null); // tracks last clicked task to discard stale responses
   // ── Background chat prefetch cache ──
   const chatCacheRef = useRef({});        // taskId -> messages[]
@@ -3400,6 +2004,10 @@ export default function TasksPage() {
     try {
       if (type === "confirm") await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
       if (type === "start") await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
+      if (type === "confirm_and_start") {
+        await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+        await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
+      }
       // FIXED: Added approve_tl action
       if (type === "approve_tl") await apiFetch(`/cowork/task/${tid}/approve`, { method: "POST" });
       if (type === "third_party_complete") await apiFetch(`/cowork/task/${tid}/third-party-complete`, { method: "POST" });
@@ -4163,16 +2771,44 @@ export default function TasksPage() {
     done: rootOnlyTasks.filter(t => t.status === "done").length,
   };
 
+  const doExport = () => {
+    const allRows = [];
+    const esc = v => {
+      if (v == null) return "";
+      const s = String(v).trim();
+      return (s.includes(",") || s.includes('"') || s.includes("\n")) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const fmtDate = d => { try { const dt = new Date(d); return isNaN(dt) ? "" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); } catch { return ""; } };
+    const stLabel = s => ({ open: "Not Started", confirmed: "Confirmed", in_progress: "In Progress", done: "Done", pending_tl_approval: "Pending TL Approval" }[s] || s || "");
+    const prLabel = p => ({ high: "Urgent", medium: "Normal", low: "Lowest" }[p] || p || "Normal");
+    const cpLabel = s => ({ submitted: "Awaiting TL Review", tl_approved: "TL Approved", tl_rejected: "TL Rejected", ceo_approved: "CEO Approved", ceo_rejected: "CEO Rejected" }[s] || s || "");
+    const addRow = (t, depth) => {
+      const ids = t.assigneeIds || [];
+      const names = ids.map(id => employeeMap.get(id) || t.assigneeNameMap?.[id] || id).join("; ") || "Unassigned";
+      const depts = [...new Set(ids.map(id => employeeMapFull.get(id)?.department || "").filter(Boolean))].join("; ") || t.department || "";
+      allRows.push([t.taskId || "", depth === 0 ? "Task" : `Subtask(L${depth})`, "  ".repeat(depth) + (t.title || ""), t.description || "", stLabel(t.status), prLabel(t.priority), names, depts, fmtDate(t.startDate), fmtDate(t.dueDate), (t.progressPercent ?? 0) + "%", cpLabel(t.completionStatus), t.createdByName || t.createdBy || "", t.parentTaskId || "", (t.subtaskIds || []).length]);
+      (t.subtaskIds || []).forEach(sid => { const sub = allTaskMap.get(sid); if (sub) addRow(sub, depth + 1); });
+    };
+    allTasks.filter(t => !t.parentTaskId).forEach(t => addRow(t, 0));
+    if (!allRows.length) { alert("No tasks to export."); return; }
+    const HEADERS = ["Task ID", "Type", "Title", "Description", "Status", "Priority", "Assigned To", "Department", "Start Date", "Due Date", "Progress", "Completion Status", "Created By", "Parent Task ID", "Subtask Count"];
+    const csv = [HEADERS, ...allRows].map(r => r.map(esc).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const now = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "-");
+    const a = document.createElement("a"); a.href = url; a.download = `Tasks_Export_${now}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
   const employeeGroups = buildEmployeeGroups();
 
   // Styles
   const STYLES = `
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     @keyframes timerPulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.75); } }
     @keyframes timerToastIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
     :root {
-      --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       --mono: 'IBM Plex Mono', ui-monospace, monospace;
       --p: #4F46E5; --p-mid: #4338CA; --p-lt: #EEF2FF; --p-glow: rgba(79,70,229,0.12);
       --surface: #FFFFFF; --bg: #F3F4F6; --bg2: #E5E7EB;
@@ -4371,8 +3007,26 @@ export default function TasksPage() {
     .gv-bubble-wrapper:hover .gv-delete-msg { display:flex; }
     .gv-delete-msg:hover { background:#FEE2E2; color:var(--danger); }
     .gv-sys-msg { text-align:center; padding:4px 12px; font-size:10px; color:var(--text-4); font-style:italic; }
-    .gv-input-bar { border-top:1px solid var(--border); background:var(--surface); flex-shrink:0; padding:6px 12px; padding-bottom:max(6px, env(safe-area-inset-bottom)); }
+    .gv-input-bar { border-top:1px solid var(--border); background:var(--surface); flex-shrink:0; padding:4px 8px; padding-bottom:max(4px, env(safe-area-inset-bottom)); }
     /* (base input bar CSS: now handled by edit-16 block) */
+
+    /* ── Compact input bar height fix ── */
+.gv-input-bar textarea,
+.gv-input-bar input[type="text"],
+.gv-input-bar [contenteditable] {
+  min-height: 36px !important;
+  max-height: 80px !important;
+  padding: 6px 8px !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+.gv-input-bar > div { min-height: unset !important; }
+.gv-input-bar > div > div:has(textarea),
+.gv-input-bar > div > div:has(input),
+.gv-input-bar > div > div:has([contenteditable]) {
+  min-height: unset !important;
+  padding: 2px 6px 2px 8px !important;
+}
 
     /* ═══ COL 3 — RIGHT PANEL ═══ */
 .gv-right-area { display:flex; height:100%; flex-shrink:0; width:360px; }    .gv-toolbar { width:38px; min-width:38px; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; align-items:center; padding:8px 0; gap:3px; }
@@ -4612,7 +3266,7 @@ export default function TasksPage() {
     .gv-lp-title { font-size:20px; font-weight:700; letter-spacing:-0.01em; color:#0F172A; }
     .gv-search-box { padding:7px 12px; border-radius:10px; border:1px solid #E5E7EB; background:#F8F9FB; max-width:280px; }
     .gv-search-box input { font-size:12px; }
-    .gv-new-btn { padding:7px 14px; border-radius:10px; font-size:12px; font-weight:600; background:linear-gradient(135deg,#5B5EF4,#7C3AED); box-shadow:0 2px 8px rgba(91,94,244,0.28); }
+    
 
     /* — Stats / filter chips bar — Image 2 pill style — */
     .gv-stats { padding:10px 14px; gap:8px; border-bottom:1px solid #F1F2F6; background:#fff; }
@@ -5373,7 +4027,7 @@ em-emoji-picker,
     /* Timer column: horizontal layout, circular button */
     /* (timer width: in edit-18) */
     .gv-tbl-row .col-timer > div { flex-direction: row !important; gap: 5px !important; }
-    .gv-tbl-row .col-timer button { border-radius: 50% !important; width: 26px !important; height: 26px !important; }
+    .gv-tbl-row .col-timer button { border-radius: 50% !important; width: 38px !important; height: 38px !important; }
 
     /* Subtask row: no border at all */
     .gv-tbl-row.subtask-row { border: none !important; box-shadow: none !important; }
@@ -5397,10 +4051,44 @@ em-emoji-picker,
       overflow-y: auto !important;
     }
 
+
+    /* === Priority context menu === */
+.gv-pri-ctx {
+  position: fixed; z-index: 9999;
+  background: #fff; border: 1px solid #E5E7EB; border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14);
+  padding: 6px; min-width: 160px;
+  animation: ctx-in 0.12s ease;
+}
+.gv-pri-ctx-title {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: #94A3B8;
+  padding: 4px 10px 8px; border-bottom: 1px solid #F1F5F9; margin-bottom: 4px;
+}
+.gv-pri-ctx-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 500; color: #374151;
+  transition: background 0.1s; border: none; background: none;
+  width: 100%; font-family: var(--font); text-align: left;
+}
+.gv-pri-ctx-item:hover { background: #F5F4FF; color: #1B4F8A; }
+.gv-pri-ctx-item.active { background: #EBF2FA; color: #1B4F8A; font-weight: 700; }
+
+/* === Task row separation — card with clear borders === */
+.gv-tbl-row {
+  border: 1px solid #E8EBF0 !important;
+  border-bottom: 1px solid #E8EBF0 !important;
+  background: #fff !important;
+}
+.gv-tbl-row:nth-child(even) { background: #FAFBFD !important; }
+.gv-tbl-row:hover { background: #F5F7FF !important; border-color: #C7D2FE !important; }
+.gv-tbl-row.selected { background: #EBF2FA !important; border-color: #93C5FD !important; border-left: 3px solid #1B4F8A !important; }
+
     /* Timeline/Kanban placeholder views */
     .gv-timeline-view, .gv-kanban-view {
       flex: 1; display: flex; flex-direction: column;
-      padding: 20px; overflow-y: auto;
+      
     }
     .gv-kanban-board {
       display: flex; gap: 12px; flex: 1;
@@ -5486,6 +4174,73 @@ em-emoji-picker,
       .gv-root { padding:0; gap:0; background:#fff; }
       .gv-list-panel, .gv-chat, .gv-detail { border-radius:0; border-left:none !important; border-right:none !important; box-shadow:none; margin-left:0; }
       .gv-chat-hero { display:none; }
+    }
+
+    /* ════════════════════════════════════════════════════════════════════
+       ✦ FLAT / SIMPLE OVERRIDE — removes cartoon look (must be last to win)
+       ════════════════════════════════════════════════════════════════════ */
+    .gv-root { background:#F5F6FA !important; }
+    .gv-list-panel, .gv-chat, .gv-detail {
+      border-radius:8px !important;
+      box-shadow:none !important;
+      border:1px solid #E5E7EB !important;
+    }
+    .gv-tbl-row::before { display:none !important; }
+    .gv-tbl-row {
+      border:1px solid #E5E7EB !important;
+      border-radius:6px !important;
+      background:#fff !important;
+      box-shadow:none !important;
+      margin:4px 10px !important;
+      min-height:50px !important;
+      padding:8px 6px 8px 12px !important;
+      transform:none !important;
+      transition:background 0.12s, border-color 0.12s !important;
+    }
+    .gv-tbl-row:nth-child(even) { background:#fff !important; }
+    .gv-tbl-row:hover {
+      background:#F8FAFC !important;
+      border-color:#D7DDE8 !important;
+      transform:none !important;
+      box-shadow:none !important;
+    }
+    .gv-tbl-row.selected {
+      background:#F0F5FF !important;
+      border-color:#C7D2FE !important;
+      border-left:3px solid #1B4F8A !important;
+      box-shadow:none !important;
+    }
+    .gv-tbl-row.subtask-row {
+      border:1px solid #EEF1F5 !important;
+      background:#FCFCFD !important;
+      box-shadow:none !important;
+    }
+    .gv-tbl-row.subtask-row::before,
+    .gv-tbl-row.subtask-row::after { display:none !important; }
+    .gv-grp-count {
+      background:#F1F5F9 !important;
+      color:#475569 !important;
+      font-weight:600 !important;
+      border:1px solid #E5E7EB !important;
+    }
+    .gv-stat { border-radius:6px !important; }
+    .gv-stat.active-tab { background:#1B4F8A !important; border-color:#1B4F8A !important; }
+    .gv-msg-group.me .gv-bubble {
+      background:#1B4F8A !important;
+      box-shadow:none !important;
+    }
+    .gv-tool-btn { box-shadow:none !important; border-radius:6px !important; }
+    .gv-tool-btn.active {
+      background:#EBF2FA !important;
+      color:#1B4F8A !important;
+      border-color:#C7D2FE !important;
+      box-shadow:none !important;
+    }
+    .gv-tool-btn.active::after { display:none !important; }
+    .gv-chat-team-avatars .gv-team-av,
+    .gv-chat-team-avatars .gv-chat-team-more {
+      background:#1B4F8A !important;
+      box-shadow:none !important;
     }
   `;
 
@@ -5623,13 +4378,15 @@ em-emoji-picker,
           const filteredRoots = rootTasks.filter(t => {
             const q = listSearch.toLowerCase();
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
+
             const matchSt = viewFilter === "completed"
-              ? true  // matchView already handles done-only filter
+              ? true
               : activeStatTab === "all"
-                ? t.status !== "done"
+                ? true  // show ALL including done — user wants to see completed tasks
                 : (activeStatTab === "open" && ["open", "pending_deadline_approval", "deadline_approved"].includes(t.status))
                 || (activeStatTab === "in_progress" && (t.status === "in_progress" || t.status === "confirmed"))
                 || (activeStatTab === "done" && t.status === "done");
+
             // Department filter — checks assignee's dept from full employee record
             const matchDept = !filterDept || (() => {
               const dl = filterDept.toLowerCase();
@@ -5702,20 +4459,31 @@ em-emoji-picker,
             return matchQ && matchSt && matchDept && matchEmp && matchDate && matchView && (isGoalView ? true : !t.isGoal);
           });
 
-          // Sort: if ANY task has order set, sort all by order (use priority*1000+created as fallback)
-          // This ensures drag order is always respected even for mixed old/new tasks
-          const hasOrderSet = filteredRoots.some(t => t.order !== undefined);
-          filteredRoots.sort((a, b) => {
-            if (hasOrderSet) {
-              // tasks with order set sort by order; tasks without order go to end sorted by priority
-              const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
-              const bo = b.order !== undefined ? b.order : 90000 + (b.priority ?? 5) * 1000;
-              if (ao !== bo) return ao - bo;
+          // Priority is POSITIONAL — drag-drop sets it (P1=top, P5+=bottom)
+          // Tasks sort by priority so drag-drop reorders are immediately visible.
+          const getCreatedMs = (t) => {
+            if (t?.createdAt?.seconds) return t.createdAt.seconds * 1000;
+            if (typeof t?.createdAt === "number") return t.createdAt;
+            if (typeof t?.createdAt === "string") {
+              const ms = new Date(t.createdAt).getTime();
+              return isNaN(ms) ? 0 : ms;
             }
-            const pa = a.priority ?? 5, pb = b.priority ?? 5;
-            if (pa !== pb) return pa - pb;
-            return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+            return 0;
+          };
+
+          filteredRoots.sort((a, b) => {
+            // Prefer explicit `order` (set by drag-drop), else use priority
+            const ao = a.order !== undefined ? a.order : (Number(a.priority ?? 5)) * 1000;
+            const bo = b.order !== undefined ? b.order : (Number(b.priority ?? 5)) * 1000;
+            if (ao !== bo) return ao - bo;
+            // Same priority bucket → newest first
+            return getCreatedMs(b) - getCreatedMs(a);
           });
+
+          // Store for drag-drop reference
+          visibleTaskListRef.current = filteredRoots;
+
+
 
           const AvatarStack = ({ t }) => {
             const ids = t.assigneeIds || [];
@@ -5837,9 +4605,10 @@ em-emoji-picker,
                     e.preventDefault();
                     e.currentTarget.classList.remove("gv-drag-over");
                     document.querySelectorAll(".gv-dragging").forEach(el => el.classList.remove("gv-dragging"));
-                    const dropTarget = t.taskId;
+                    const dragId = dragTaskIdRef.current;
                     dragOverIdRef.current = null;
-                    handleDrop(dropTarget);
+                    dragTaskIdRef.current = null;
+                    handleDrop(t.taskId, dragId);
                   }}
                   onDragEnd={e => {
                     e.currentTarget.classList.remove("gv-dragging");
@@ -5890,15 +4659,40 @@ em-emoji-picker,
                       </span>
                     )}
                     {/* Assigned to: show assignee names */}
+
                     {(t.assigneeIds || []).length > 0 && (
-                      <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, color: "var(--text-4)", fontWeight: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
-                        {(t.assigneeIds || []).slice(0, 2).map((id, i) => {
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+                        {(t.assigneeIds || []).slice(0, 3).map((id, i) => {
                           const nm = employeeMap?.get(id) || t.assigneeNameMap?.[id] || (t.assigneeNames || [])[i] || id;
-                          return <span key={id} style={{ color: "#64748B" }}>{i > 0 ? ", " : ""}{nm.split(" ")[0]}</span>;
+                          const picUrl = employeeMapFull?.get(id)?.profilePicUrl || "";
+                          const [c1, c2] = getAvatarColors(nm || id);
+                          const initials = (nm || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+                          return (
+                            <span key={id} style={{
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              background: "#F1F5F9", borderRadius: 99,
+                              padding: "1px 7px 1px 2px",
+                              border: "1px solid #E2E8F0",
+                              fontSize: 10, fontWeight: 500, color: "#374151",
+                              whiteSpace: "nowrap", flexShrink: 0,
+                            }}>
+                              {picUrl ? (
+                                <img src={picUrl} alt={nm} style={{ width: 16, height: 16, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+                              ) : (
+                                <span style={{ width: 16, height: 16, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 7, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                  {initials}
+                                </span>
+                              )}
+                              {nm}
+                            </span>
+                          );
                         })}
-                        {(t.assigneeIds || []).length > 2 && <span style={{ color: "#94A3B8" }}> +{t.assigneeIds.length - 2}</span>}
-                      </span>
+                        {(t.assigneeIds || []).length > 3 && (
+                          <span style={{ fontSize: 9, color: "#94A3B8", fontWeight: 600, background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 99, padding: "1px 6px" }}>
+                            +{t.assigneeIds.length - 3} more
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="col-timer" onClick={e => e.stopPropagation()}>
@@ -5952,7 +4746,7 @@ em-emoji-picker,
                                 else handleTimerStart(t.taskId, t.title);
                               }}
                               style={{
-                                width: 28, height: 28, borderRadius: 99, border: "1.5px solid",
+                                width: 38, height: 38, borderRadius: 99, border: "1.5px solid",
                                 borderColor: timerBlocked ? "#FDE68A" : isRunning ? "#BBF7D0" : "#E2E8F0",
                                 background: timerBlocked ? "#FFFBEB" : isRunning ? "#DCFCE7" : "#F8FAFC",
                                 color: timerBlocked ? "#D97706" : isRunning ? "#16A34A" : "#94A3B8",
@@ -5966,8 +4760,8 @@ em-emoji-picker,
                               title={timerBlocked ? "Waiting for deadline approval" : isRunning ? "Pause" : (hasTime ? "Resume" : "Start")}
                             >
                               {isRunning
-                                ? <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg>
-                                : <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
+                                ? <svg width="15" height="15" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="1.5" width="3" height="9" rx="1" /><rect x="7" y="1.5" width="3" height="9" rx="1" /></svg>
+                                : <svg width="15" height="15" viewBox="0 0 12 12" fill="currentColor"><path d="M2.5 1.5l8 4.5-8 4.5V1.5z" /></svg>
                               }
                             </button>
                           )}
@@ -6050,7 +4844,23 @@ em-emoji-picker,
                   </div>
                   <div className="col-pri">{t.priority && <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: p.color, background: p.bg, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}><span style={{ fontSize: 9 }}>⚑</span> {p.label}</span>}</div>
                   <div className="col-date">
-                    {(t.startDate || t.dueDate) ? (
+                    {(t.deadlineWindowSecs > 0) ? (() => {
+                      const _mine = getDisplaySeconds ? getDisplaySeconds(t.taskId) : 0;
+                      const _watched = assigneeAllTimers?.get(t.taskId)?.displaySeconds || 0;
+                      const secs = _mine || _watched;
+                      if (!secs) return <span style={{ fontSize: 11, color: "var(--border2)" }}>—</span>;
+                      const h = Math.floor(secs / 3600);
+                      const m = Math.floor((secs % 3600) / 60);
+                      const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                      return (
+                        <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.7 }}>
+                            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                          </svg>
+                          {label}
+                        </span>
+                      );
+                    })() : (t.startDate || t.dueDate) ? (
                       <span style={{ fontSize: 11, color: dl.status === "overdue" ? "var(--danger)" : dl.status === "near" ? "var(--warn)" : "#64748B", fontWeight: dl.status !== "safe" ? 600 : 500, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.85 }}>
                           <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -6176,7 +4986,7 @@ em-emoji-picker,
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2L3 5.5l4 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                       All Tasks
                     </button>
-                    <span className="gv-lp-title" style={{ fontSize: 14 }}>Tasks</span>
+                    <span className="gv-lp-title" style={{ fontSize: 14 }}>Task</span>
                     <div className="gv-search-box" style={{ maxWidth: 180 }}>
                       <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
                       <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search..." />
@@ -6184,61 +4994,279 @@ em-emoji-picker,
                   </>
                 ) : (
                   <>
-                    <span className="gv-lp-title">{isGoalView ? "🎯 Goal Tasks" : "Tasks"}</span>
+                    <span className="gv-lp-title">{isGoalView ? "🎯 Goal Tasks" : "Tasks Overview"}</span>
                     <div className="gv-search-box">
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
                       <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder={isGoalView ? "Search goal tasks..." : "Search tasks..."} />
                     </div>
-                    {(isCEO || isTL) && !isGoalView && topTab !== "selftasks" && <button className="gv-new-btn" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Task</button>}
-                    {(isCEO || isTL) && isGoalView && <button className="gv-new-btn" style={{ background: "#7E22CE" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}><svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg> Add Goal</button>}
-                    {!isGoalView && topTab === "selftasks" && (
-                      <button className="gv-new-btn" onClick={() => setActiveModal({ type: "self_assign" })} style={{ background: "#7C3AED" }}>
-                        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-                        Assign to Self
-                      </button>
-                    )}
+
                   </>
                 )}
               </div>
 
-              {/* === Top tabs — hidden in goal view === */}
-              {!isGoalView && (
-                <div className="gv-img2-toptabs">
-                  <button type="button" className={`gv-img2-toptab ${topTab === "my" ? "active" : ""}`} onClick={() => setTopTab("my")}>My Tasks</button>
-                  <button type="button" className={`gv-img2-toptab ${topTab === "timeline" ? "active" : ""}`} onClick={() => setTopTab("timeline")}>Timeline</button>
-                  <button type="button" className={`gv-img2-toptab ${topTab === "kanban" ? "active" : ""}`} onClick={() => setTopTab("kanban")}>Kanban</button>
-                  <button type="button" className={`gv-img2-toptab ${topTab === "selftasks" ? "active" : ""}`} onClick={() => setTopTab("selftasks")} style={{ color: topTab === "selftasks" ? "#7C3AED" : undefined, borderColor: topTab === "selftasks" ? "#7C3AED" : undefined }}>👤 Self Tasks</button>
+              {/* === Section tabs: Assigned / Created / Self Tasks === */}
+              {/* === Section tabs — goal view shows its own tabs, regular view shows Assigned/Created/Self === */}
+              {isGoalView ? (
+                <div style={{
+                  display: "flex", alignItems: "center", borderBottom: "1px solid #E5E7EB",
+                  background: "#fff", flexShrink: 0, padding: "0 16px",
+                }}>
+                  {[
+                    { key: "assigned", label: "Assigned to Me" },
+                    { key: "created", label: "Created by Me" },
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setTaskSection(tab.key)}
+                      style={{
+                        padding: "10px 14px", border: "none",
+                        borderBottom: `2px solid ${taskSection === tab.key ? "#1B4F8A" : "transparent"}`,
+                        background: "transparent", fontFamily: "var(--font)",
+                        fontSize: 13, fontWeight: taskSection === tab.key ? 600 : 400,
+                        color: taskSection === tab.key ? "#1B4F8A" : "#6B7280",
+                        cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                  <div style={{ flex: 1 }} />
+                  {/* + New Goal button always visible for CEO/TL in goal view */}
+                  {(isCEO || isTL) && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}
+                      title="Create new goal task"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        height: 30, padding: "0 12px",
+                        border: "none", borderRadius: 6,
+                        background: "#1B4F8A", color: "#fff",
+                        fontSize: 12, fontWeight: 600,
+                        fontFamily: "var(--font)", cursor: "pointer", flexShrink: 0,
+                        transition: "background 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#163E6E"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#1B4F8A"; }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M6 1.5v9M1.5 6h9" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                      + New Goal
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  display: "flex", alignItems: "center", borderBottom: "1px solid #E5E7EB",
+                  background: "#fff", flexShrink: 0, padding: "0 16px",
+                }}>
+                  {[
+                    { key: "assigned", label: "Assigned to Me" },
+                    { key: "created", label: "Created by Me" },
+                    { key: "self", label: "Self Tasks" },
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setTaskSection(tab.key)}
+                      style={{
+                        padding: "10px 14px",
+                        border: "none",
+                        borderBottom: `2px solid ${taskSection === tab.key ? "#1B4F8A" : "transparent"}`,
+                        background: "transparent",
+                        fontFamily: "var(--font)",
+                        fontSize: 13,
+                        fontWeight: taskSection === tab.key ? 600 : 400,
+                        color: taskSection === tab.key ? "#1B4F8A" : "#6B7280",
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                  <div style={{ flex: 1 }} />
+                  {(isCEO || isTL) && taskSection === "created" && (
+                    <button
+                      onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
+                      title="Create new task"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5,
+                        height: 30, padding: "0 12px",
+                        border: "none", borderRadius: 6,
+                        background: "#1B4F8A", color: "#fff",
+                        fontSize: 12, fontWeight: 600,
+                        fontFamily: "var(--font)", cursor: "pointer",
+                        flexShrink: 0, marginRight: 8,
+                        transition: "background 0.15s",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#163E6E"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#1B4F8A"; }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M6 1.5v9M1.5 6h9" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                      New
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setFilterOpen(o => !o)}
+                    title="Filters"
+                    style={{
+                      width: 30, height: 30,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      border: `1px solid ${filterOpen || (filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo || viewFilter) ? "#1B4F8A" : "#D1D5DB"}`,
+                      borderRadius: 6,
+                      background: filterOpen ? "#EBF2FA" : "#fff",
+                      cursor: "pointer", position: "relative", flexShrink: 0,
+                      color: filterOpen ? "#1B4F8A" : "#6B7280", transition: "all 0.15s",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                    {(filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo || viewFilter) && (
+                      <span style={{ position: "absolute", top: 4, right: 4, width: 5, height: 5, borderRadius: "50%", background: "#1B4F8A" }} />
+                    )}
+                  </button>
                 </div>
               )}
 
-              {/* === Image-2 filter pills row: All / Due Today N / Due This Week N / Overdue N / Completed N / Filters === */}
-              {(() => {
-                const baseTasks = allTasks.filter(t => !t.parentTaskId && (isGoalView ? t.isGoal : true));
-                const now = Date.now();
-                const todayS = new Date(); todayS.setHours(0, 0, 0, 0);
-                const todayE = new Date(); todayE.setHours(23, 59, 59, 999);
-                const weekE = new Date(); weekE.setDate(weekE.getDate() + 7); weekE.setHours(23, 59, 59, 999);
-                const cntToday = baseTasks.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS.getTime() && m <= todayE.getTime(); }).length;
-                const cntWeek = baseTasks.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS.getTime() && m <= weekE.getTime(); }).length;
-                const cntOverdue = baseTasks.filter(t => { if (t.status === "done") return false; const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m < now; }).length;
-                const cntDone = baseTasks.filter(t => t.status === "done").length;
-                const pills = [
-                  { key: "", label: "All", count: null, color: null },
-                  { key: "today", label: "Due Today", count: cntToday, color: "#5B5EF4" },
-                  { key: "week", label: "Due This Week", count: cntWeek, color: "#5B5EF4" },
-                  { key: "overdue", label: "Overdue", count: cntOverdue, color: "#EF4444" },
-                  { key: "completed", label: "Completed", count: cntDone, color: "#16A34A" },
-                ];
-                return (
-                  <div className="gv-img2-pillrow">
-                    <div style={{ flex: 1 }} />
-                    <button type="button" className={`gv-img2-pill gv-img2-filters-btn ${filterOpen ? "active" : ""}`} onClick={() => setFilterOpen(o => !o)}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-                      Filters {filterOpen ? "▴" : "▾"}
-                    </button>
-                  </div>
-                );
-              })()}
+              {/* === Filter bar === */}
+              {!isGoalView && (
+                <>
+
+
+                  {/* Expanded filter panel — only visible when filterOpen */}
+                  {filterOpen && (
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "8px 14px", borderBottom: "1px solid #E5E7EB",
+                      background: "#F8F9FB", flexShrink: 0, flexWrap: "wrap",
+                    }}>
+                      {/* Status filter */}
+                      <select
+                        value={viewFilter}
+                        onChange={e => setViewFilter(e.target.value)}
+                        style={{
+                          padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                          fontSize: 12, fontFamily: "var(--font)", color: "#374151",
+                          background: "#fff", cursor: "pointer", outline: "none",
+                        }}
+                      >
+                        <option value="">All Statuses</option>
+                        <option value="today">Due Today</option>
+                        <option value="week">Due This Week</option>
+                        <option value="overdue">Overdue</option>
+                        <option value="completed">Completed</option>
+                      </select>
+
+                      {/* Person filter */}
+                      <select
+                        value={filterEmployee}
+                        onChange={e => setFilterEmployee(e.target.value)}
+                        style={{
+                          padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                          fontSize: 12, fontFamily: "var(--font)", color: "#374151",
+                          background: "#fff", cursor: "pointer", outline: "none", maxWidth: 150,
+                        }}
+                      >
+                        <option value="">All People</option>
+                        {(() => {
+                          const seen = new Set();
+                          const opts = [];
+                          allTasks.forEach(t => (t.assigneeIds || []).forEach(aid => {
+                            if (!seen.has(aid)) {
+                              seen.add(aid);
+                              opts.push({ id: aid, name: employeeMap?.get(aid) || t.assigneeNameMap?.[aid] || aid });
+                            }
+                          }));
+                          return opts.sort((a, b) => a.name.localeCompare(b.name))
+                            .map(o => <option key={o.id} value={o.name}>{o.name}</option>);
+                        })()}
+                      </select>
+
+                      {/* Deadline filter */}
+                      <select
+                        value={filterDeadline}
+                        onChange={e => setFilterDeadline(e.target.value)}
+                        style={{
+                          padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                          fontSize: 12, fontFamily: "var(--font)", color: "#374151",
+                          background: "#fff", cursor: "pointer", outline: "none",
+                        }}
+                      >
+                        <option value="">All Deadlines</option>
+                        <option value="tomorrow">Tomorrow</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                      </select>
+
+
+
+                      {/* Department filter */}
+                      <select
+                        value={filterDept}
+                        onChange={e => setFilterDept(e.target.value)}
+                        style={{
+                          padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                          fontSize: 12, fontFamily: "var(--font)", color: "#374151",
+                          background: "#fff", cursor: "pointer", outline: "none",
+                        }}
+                      >
+                        <option value="">All Departments</option>
+                        {(() => {
+                          const deptSet = new Set();
+                          allTasks.forEach(t => {
+                            if (t.department) deptSet.add(t.department);
+                            (t.assigneeIds || []).forEach(aid => {
+                              const emp = employeeMapFull.get(aid);
+                              if (emp?.department) deptSet.add(emp.department);
+                            });
+                          });
+                          return Array.from(deptSet).sort().map(d => <option key={d} value={d}>{d}</option>);
+                        })()}
+                      </select>
+
+                      {/* Divider */}
+                      <div style={{ flex: 1 }} />
+
+                      {/* Clear */}
+                      {(filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo || viewFilter) && (
+                        <button
+                          onClick={() => { setFilterDept(""); setFilterEmployee(""); setFilterDeadline(""); setFilterDateFrom(""); setFilterDateTo(""); setViewFilter(""); }}
+                          style={{
+                            padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                            fontSize: 12, fontFamily: "var(--font)", color: "#6B7280",
+                            background: "#fff", cursor: "pointer",
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
+
+                      {/* Export CSV */}
+                      <button
+                        onClick={doExport}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 5,
+                          padding: "5px 10px", border: "1px solid #D1D5DB", borderRadius: 6,
+                          fontSize: 12, fontFamily: "var(--font)", color: "#374151",
+                          background: "#fff", cursor: "pointer",
+                        }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Export
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Task.Co-style project info — hidden in goal view */}
               {!isCompact && !isGoalView && (
@@ -6254,251 +5282,7 @@ em-emoji-picker,
                 </div>
               )}
               {/* ── FILTER BAR (new — sits between project info and stats tabs) ── */}
-              {(() => {
-                const hasFilter = !!(filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo);
-                const clearAll = () => { setFilterDept(""); setFilterEmployee(""); setFilterDeadline(""); setFilterDateFrom(""); setFilterDateTo(""); };
-                // ── CSV Export ──
-                const doExport = () => {
-                  const allRows = [];
-                  const esc = v => {
-                    if (v == null) return "";
-                    const s = String(v).trim();
-                    return (s.includes(",") || s.includes('"') || s.includes("\n")) ? `"${s.replace(/"/g, '""')}"` : s;
-                  };
-                  const fmtDate = d => { try { const dt = new Date(d); return isNaN(dt) ? "" : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); } catch { return ""; } };
-                  const stLabel = s => ({ open: "Not Started", confirmed: "Confirmed", in_progress: "In Progress", done: "Done", pending_tl_approval: "Pending TL Approval" }[s] || s || "");
-                  const prLabel = p => ({ high: "Urgent", medium: "Normal", low: "Lowest" }[p] || p || "Normal");
-                  const cpLabel = s => ({ submitted: "Awaiting TL Review", tl_approved: "TL Approved", tl_rejected: "TL Rejected", ceo_approved: "CEO Approved", ceo_rejected: "CEO Rejected" }[s] || s || "");
-                  const addRow = (t, depth) => {
-                    const ids = t.assigneeIds || [];
-                    const names = ids.map(id => employeeMap.get(id) || t.assigneeNameMap?.[id] || id).join("; ") || "Unassigned";
-                    const depts = [...new Set(ids.map(id => employeeMapFull.get(id)?.department || "").filter(Boolean))].join("; ") || t.department || "";
-                    allRows.push([t.taskId || "", depth === 0 ? "Task" : `Subtask(L${depth})`, "  ".repeat(depth) + (t.title || ""), t.description || "", stLabel(t.status), prLabel(t.priority), names, depts, fmtDate(t.startDate), fmtDate(t.dueDate), (t.progressPercent ?? 0) + "%", cpLabel(t.completionStatus), t.createdByName || t.createdBy || "", t.parentTaskId || "", (t.subtaskIds || []).length]);
-                    (t.subtaskIds || []).forEach(sid => { const sub = allTaskMap.get(sid); if (sub) addRow(sub, depth + 1); });
-                  };
-                  allTasks.filter(t => !t.parentTaskId).forEach(t => addRow(t, 0));
-                  if (!allRows.length) { alert("No tasks to export."); return; }
-                  const HEADERS = ["Task ID", "Type", "Title", "Description", "Status", "Assigned To", "Department", "Start Date", "Due Date", "Progress", "Completion Status", "Created By", "Parent Task ID", "Subtask Count"];
-                  const csv = [HEADERS, ...allRows].map(r => r.map(esc).join(",")).join("\n");
-                  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-                  const url = URL.createObjectURL(blob);
-                  const now = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "2-digit", day: "2-digit" }).replace(/\//g, "-");
-                  const a = document.createElement("a"); a.href = url; a.download = `Tasks_Export_${now}.csv`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-                };
-                return (
-                  <div className="gv-legacy-filterbar" style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, display: filterOpen ? "block" : "none" }}>
-                    {/* Quick filter pills row — All / Due Today / Due This Week / Overdue / Completed */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px", flexWrap: "wrap", borderBottom: "1px dashed var(--border)" }}>
-                      {(() => {
-                        const baseTasks2 = allTasks.filter(t => !t.parentTaskId);
-                        const now2 = Date.now();
-                        const todayS2 = new Date(); todayS2.setHours(0, 0, 0, 0);
-                        const todayE2 = new Date(); todayE2.setHours(23, 59, 59, 999);
-                        const weekE2 = new Date(); weekE2.setDate(weekE2.getDate() + 7); weekE2.setHours(23, 59, 59, 999);
-                        const c1 = baseTasks2.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS2.getTime() && m <= todayE2.getTime(); }).length;
-                        const c2 = baseTasks2.filter(t => { const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m >= todayS2.getTime() && m <= weekE2.getTime(); }).length;
-                        const c3 = baseTasks2.filter(t => { if (t.status === "done") return false; const d = t.dueDate || t.startDate; if (!d) return false; const m = new Date(d).getTime(); return !isNaN(m) && m < now2; }).length;
-                        const c4 = baseTasks2.filter(t => t.status === "done").length;
-                        const pills2 = [
-                          { key: "", label: "All", count: null, color: null },
-                          { key: "today", label: "Due Today", count: c1, color: "#5B5EF4" },
-                          { key: "week", label: "Due This Week", count: c2, color: "#5B5EF4" },
-                          { key: "overdue", label: "Overdue", count: c3, color: "#EF4444" },
-                          { key: "completed", label: "Completed", count: c4, color: "#16A34A" },
-                        ];
-                        return pills2.map(p => {
-                          const active = viewFilter === p.key;
-                          return (
-                            <button type="button" key={p.key || "all"}
-                              className={`gv-img2-pill ${active ? "active" : ""}`}
-                              onClick={() => setViewFilter(p.key)}
-                              style={!active && p.color ? { color: p.color } : undefined}>
-                              {p.label}
-                              {p.count != null && p.count > 0 && <span className="gv-img2-pill-count">{p.count}</span>}
-                            </button>
-                          );
-                        });
-                      })()}
-                    </div>
 
-                    {/* Single filter bar: Dept pills | Person | Deadline | Export */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", flexWrap: "wrap" }}>
-
-                      {/* ── Person dropdown ── */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Person</span>
-                        <select value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}
-                          style={{ padding: "4px 8px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 11, fontWeight: 500, color: filterEmployee ? "var(--p)" : "var(--text-2)", fontFamily: "var(--font)", outline: "none", background: "#fff", cursor: "pointer", maxWidth: 130 }}
-                        >
-                          <option value="">All people</option>
-                          {(() => {
-                            const seen = new Set(); const opts = [];
-                            allTasks.forEach(t => (t.assigneeIds || []).forEach(aid => {
-                              if (!seen.has(aid)) { seen.add(aid); opts.push({ id: aid, name: employeeMap?.get(aid) || t.assigneeNameMap?.[aid] || aid }); }
-                            }));
-                            return opts.sort((a, b) => a.name.localeCompare(b.name)).map(o => <option key={o.id} value={o.name}>{o.name}</option>);
-                          })()}
-                        </select>
-                      </div>
-
-                      {/* divider */}
-                      <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
-
-                      {/* ── Deadline pills ── */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Deadline</span>
-                        <div style={{ display: "flex", gap: 4 }}>
-                          {[{ key: "tomorrow", label: "Tomorrow" }, { key: "week", label: "Week" }, { key: "month", label: "Month" }].map(({ key, label }) => {
-                            const active = filterDeadline === key;
-                            return (
-                              <button key={key} onClick={() => setFilterDeadline(active ? "" : key)}
-                                style={{
-                                  padding: "4px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", whiteSpace: "nowrap", transition: "all 0.12s",
-                                  background: active ? "var(--p)" : "#fff", color: active ? "#fff" : "var(--text-2)",
-                                  border: active ? "1.5px solid var(--p)" : "1.5px solid var(--border)",
-                                }}
-                              >{label}</button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* divider */}
-                      <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0 }} />
-
-                      {hasFilter && <button onClick={clearAll} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: 11, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, whiteSpace: "nowrap", flexShrink: 0 }}>Clear</button>}
-
-                      {/* ── Group by: Person (default) / Status ── */}
-                      <div style={{
-                        display: "inline-flex", alignItems: "center",
-                        border: "1px solid var(--border)", borderRadius: 7,
-                        overflow: "hidden", flexShrink: 0,
-                      }}
-                        title="Group tasks by person (drag to reorder within a person's group) or by status"
-                      >
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-4)", padding: "0 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                          Group
-                        </span>
-                        {[
-                          { key: "person", label: "Person" },
-                          { key: "status", label: "Status" },
-                        ].map(({ key, label }) => {
-                          const active = groupByMode === key;
-                          return (
-                            <button
-                              key={key}
-                              onClick={() => setGroupByMode(key)}
-                              style={{
-                                padding: "5px 10px",
-                                border: "none",
-                                borderLeft: "1px solid var(--border)",
-                                background: active ? "var(--p)" : "var(--surface)",
-                                color: active ? "#fff" : "var(--text-2)",
-                                fontSize: 11, fontWeight: 600, cursor: "pointer",
-                                fontFamily: "var(--font)", transition: "all 0.12s",
-                              }}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* ── Export CSV ── */}
-                      <button onClick={doExport}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 12px", border: "1px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text-2)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "var(--font)", flexShrink: 0, whiteSpace: "nowrap" }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                        Export CSV
-                      </button>
-                    </div>
-                    {/* Row 2: Expanded filter panel — department pills + other inputs */}
-                    {filterOpen && (() => {
-                      // ── Derive available departments from tasks that have at least one assignee
-                      // Only include departments from tasks assigned by CEO or TL
-                      const deptSet = new Set();
-                      allTasks.filter(t => !t.parentTaskId).forEach(t => {
-                        const isFromCeoOrTl = t.assignedByRole === "ceo" || t.assignedByRole === "tl" || t.createdByCeo === true || t.createdByTl === true || t.assignedBy === employeeId;
-                        if (!isFromCeoOrTl && role !== "tl") return;
-                        // Check task-level department field
-                        if (t.department) deptSet.add(t.department);
-                        // Check each assignee\'s department from employeeMapFull
-                        (t.assigneeIds || []).forEach(aid => {
-                          const emp = employeeMapFull.get(aid);
-                          if (emp?.department) deptSet.add(emp.department);
-                        });
-                      });
-                      const availableDepts = ["All", ...Array.from(deptSet).sort()];
-
-                      // Department icon map — SVG paths keyed by lowercase dept name fragments
-                      const getDeptIcon = (name) => {
-                        const n = name.toLowerCase();
-                        if (n.includes("hr") || n.includes("human")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-                        );
-                        if (n.includes("account") || n.includes("finance") || n.includes("accounts")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
-                        );
-                        if (n.includes("design") || n.includes("creative")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /><circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /><circle cx="8.5" cy="7.5" r=".5" fill="currentColor" /><circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" /></svg>
-                        );
-                        if (n.includes("it") || n.includes("tech") || n.includes("engineer") || n.includes("dev")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-                        );
-                        if (n.includes("sales") || n.includes("marketing")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></svg>
-                        );
-                        if (n.includes("production") || n.includes("manufactur") || n.includes("operation")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
-                        );
-                        if (n.includes("manage") || n.includes("admin")) return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
-                        );
-                        // Default generic dept icon
-                        return (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
-                        );
-                      };
-
-                      const deptScrollRef = { current: null };
-                      return (
-                        <div style={{ padding: "8px 10px 10px", borderTop: "1px solid var(--border)" }}>
-                          {/* ── Department pill row ──────────────────── */}
-                          <div style={{ marginBottom: 10 }}>
-                            <label style={{ display: "block", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-4)", marginBottom: 6 }}>Department</label>
-                            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
-                              {availableDepts.map(dept => {
-                                const isAll = dept === "All";
-                                const active = isAll ? !filterDept : filterDept === dept;
-                                return (
-                                  <button
-                                    key={dept}
-                                    onClick={() => setFilterDept(isAll ? "" : (filterDept === dept ? "" : dept))}
-                                    style={{
-                                      display: "inline-flex", alignItems: "center", gap: 5,
-                                      padding: "5px 12px", borderRadius: 99, flexShrink: 0,
-                                      border: active ? "1.5px solid var(--p)" : "1.5px solid var(--border)",
-                                      background: active ? "var(--p)" : "var(--surface)",
-                                      color: active ? "#fff" : "var(--text-2)",
-                                      fontSize: 11, fontWeight: 600, cursor: "pointer",
-                                      fontFamily: "var(--font)", transition: "all 0.14s",
-                                      boxShadow: active ? "0 1px 6px var(--p-glow)" : "none",
-                                    }}
-                                  >
-                                    {!isAll && <span style={{ opacity: active ? 1 : 0.6 }}>{getDeptIcon(dept)}</span>}
-                                    {dept}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          {/* Person Name and Deadline pills are in the always-visible filter bar above */}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })()}
               <div className="gv-stats">
                 {[{ key: "all", l: "ALL", v: stats.total, c: "#5B5EF4" }, { key: "open", l: "OPEN", v: stats.open, c: "#EF4444" }, { key: "in_progress", l: "ACTIVE", v: stats.active, c: "#8B5CF6" }, { key: "done", l: "DONE", v: stats.done, c: "#16A34A" }].map(s => (
                   <div key={s.key} className={`gv-stat${activeStatTab === s.key ? " active-tab" : ""}`} onClick={() => setActiveStatTab(s.key)}>
@@ -6509,210 +5293,9 @@ em-emoji-picker,
               </div>
               <div className="gv-list-body">
                 {/* Timeline View */}
-                {topTab === "timeline" && (
-                  <div className="gv-timeline-view">
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 12 }}>Timeline</div>
-                    {allTasks.filter(t => !t.parentTaskId).map(t => {
-                      const st = STATUS[t.status] || STATUS.open;
-                      const pri = getPriDisplay(t.priority);
-                      const hasDue = !!t.dueDate;
-                      const daysLeft = hasDue ? Math.ceil((new Date(t.dueDate).getTime() - Date.now()) / 86400000) : null;
-                      const barWidth = hasDue ? Math.max(15, Math.min(80, 30 + (daysLeft || 0) * 5)) : 40;
-                      const barColor = t.status === "done" ? "#22C55E" : t.status === "in_progress" ? "#8B5CF6" : daysLeft !== null && daysLeft < 0 ? "#EF4444" : "#5B5EF4";
-                      return (
-                        <div key={t.taskId} className="gv-tl-row" onClick={() => handleSelectNode(t)} style={{ cursor: "pointer" }}>
-                          <span style={{ width: 140, flexShrink: 0, fontSize: 11, fontWeight: 600, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
-                          <div style={{ flex: 1, position: "relative", height: 28 }}>
-                            <div className="gv-tl-bar" style={{ width: barWidth + "%", background: barColor, position: "absolute", left: 0, top: 2 }}>
-                              {st.label}
-                            </div>
-                          </div>
-                          <span style={{ fontSize: 10, color: "#64748B", flexShrink: 0, width: 70, textAlign: "right" }}>
-                            {hasDue ? new Date(t.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "No date"}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    {allTasks.filter(t => !t.parentTaskId).length === 0 && (
-                      <div style={{ textAlign: "center", padding: 40, color: "#94A3B8", fontSize: 13 }}>No tasks to display</div>
-                    )}
-                  </div>
-                )}
-
-                {/* Kanban View */}
-                {topTab === "kanban" && (
-                  <div className="gv-kanban-view">
-                    <div className="gv-kanban-board">
-                      {[
-                        { key: "open", label: "Not Started", color: "#D97706", bg: "#FEF3C7" },
-                        { key: "confirmed", label: "Confirmed", color: "#5B5EF4", bg: "#EEF2FF" },
-                        { key: "in_progress", label: "In Progress", color: "#8B5CF6", bg: "#F5F3FF" },
-                        { key: "done", label: "Done", color: "#16A34A", bg: "#F0FDF4" },
-                      ].map(col => {
-                        const colTasks = allTasks.filter(t => !t.parentTaskId && (
-                          col.key === "open" ? ["open", "pending_deadline_approval", "deadline_approved", "pending_employee_deadline_confirmation"].includes(t.status)
-                            : col.key === "confirmed" ? t.status === "confirmed"
-                              : col.key === "in_progress" ? t.status === "in_progress"
-                                : t.status === "done"
-                        ));
-                        return (
-                          <div key={col.key} className="gv-kanban-col">
-                            <div className="gv-kanban-col-head" style={{ color: col.color }}>
-                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: col.color }} />
-                              {col.label}
-                              <span style={{ fontSize: 10, fontWeight: 700, background: col.bg, color: col.color, padding: "1px 6px", borderRadius: 99, marginLeft: "auto" }}>{colTasks.length}</span>
-                            </div>
-                            <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
-                              {colTasks.map(t => {
-                                const pri = getPriDisplay(t.priority);
-                                return (
-                                  <div key={t.taskId} className="gv-kanban-card" onClick={() => handleSelectNode(t)}>
-                                    <div style={{ fontSize: 12, fontWeight: 600, color: "#0F172A", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#64748B" }}>
-                                      {t.priority && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 99, color: pri.color, background: pri.bg }}>{pri.label}</span>}
-                                      {t.dueDate && <span>{new Date(t.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                              {colTasks.length === 0 && <div style={{ padding: "16px 12px", fontSize: 11, color: "#CBD5E1", textAlign: "center", fontStyle: "italic" }}>No tasks</div>}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                  </div>
-                )}
 
 
-                {/* ── Self Tasks Tab View ── */}
-                {topTab === "selftasks" && (() => {
-                  console.log("[SelfTasks] allTasks count:", allTasks.length, "employeeId:", employeeId, "role:", role);
-                  console.log("[SelfTasks] tasks with approverId==me:", allTasks.filter(t => t.approverId === employeeId).map(t => t.title));
-                  // Tasks I need to approve (X role)
-                  // X (approver): tasks where I am the approver, not yet approved
-                  const needsMyApproval = allTasks.filter(t =>
-                    t.status !== "cancelled" &&
-                    t.status !== "done" &&
-                    t.selfAssignApproved !== true &&
-                    (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
-                  );
-                  // Y (creator): tasks I self-assigned to myself
-                  const myOwnTasks = allTasks.filter(t =>
-                    t.status !== "cancelled" &&
-                    t.isSelfAssigned === true &&
-                    (t.assigneeIds || []).includes(employeeId) &&
-                    t.approverId !== employeeId
-                  );
-
-                  const TaskCard = ({ t, accentColor, showParent }) => {
-                    const isApproved = t.selfAssignApproved === true;
-                    const parent = showParent ? allTasks.find(p => p.taskId === t.parentTaskId) : null;
-                    return (
-                      <div onClick={() => handleSelectNode(t)}
-                        style={{ background: "#fff", border: `1px solid ${selectedTask?.taskId === t.taskId ? accentColor : "#E5E7EB"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", borderLeft: `3px solid ${isApproved ? "#16A34A" : accentColor}`, transition: "all 0.1s", display: "flex", alignItems: "center", gap: 12 }}
-                        onMouseEnter={e => e.currentTarget.style.background = "#FAFAFA"}
-                        onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                        {/* Avatar */}
-                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: isApproved ? "#DCFCE7" : "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}>
-                          {isApproved ? "✅" : "👤"}
-                        </div>
-                        {/* Content */}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          {parent && <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 2 }}>↳ {parent.title}</div>}
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>{t.title}</div>
-                          <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#64748B", flexWrap: "wrap" }}>
-                            {t.assignedByName && <span>By <strong style={{ color: "#374151" }}>{t.assignedByName}</strong></span>}
-                            {t.approverName && <span>· Approver <strong style={{ color: accentColor }}>{t.approverName}</strong></span>}
-                            {t.fixedDeadline && <span>· 📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>}
-                          </div>
-                        </div>
-                        {/* Status badge */}
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 99, flexShrink: 0, background: isApproved ? "#DCFCE7" : "#F5F3FF", color: isApproved ? "#15803D" : accentColor, border: `1px solid ${isApproved ? "#86EFAC" : "#E9D5FF"}` }}>
-                          {isApproved ? "✓ Approved" : "⏳ Pending"}
-                        </span>
-                      </div>
-                    );
-                  };
-
-                  return (
-                    <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: 16, overflowY: "auto", flex: 1 }}>
-
-                      {needsMyApproval.length === 0 && myOwnTasks.length === 0 && (
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-                          <div style={{ fontSize: 28, marginBottom: 8 }}>👤</div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#64748B" }}>No self-assigned tasks</div>
-                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, marginBottom: 16 }}>Use "Assign to Self" to create one</div>
-                          <button className="gv-new-btn" onClick={() => setActiveModal({ type: "self_assign" })} style={{ background: "#7C3AED", padding: "9px 20px", fontSize: 13 }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-                            Assign to Self
-                          </button>
-                        </div>
-                      )}
-
-                      {/* ── SECTION 1: Needs Your Approval (X sees this) ── */}
-                      {needsMyApproval.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#DC2626", display: "inline-block" }} />
-                            Needs Your Approval
-                            <span style={{ fontSize: 10, background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 99, padding: "0 6px", fontWeight: 700 }}>{needsMyApproval.length}</span>
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {needsMyApproval.map(t => (
-                              <div key={t.taskId} style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", borderLeft: "3px solid #DC2626" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 14 }}>👤</div>
-                                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => handleSelectNode(t)}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                                    <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
-                                      By <strong style={{ color: "#374151" }}>{t.assignedByName}</strong>
-                                      {t.approverName && <> · Approver <strong style={{ color: "#DC2626" }}>{t.approverName}</strong></>}
-                                      {t.fixedDeadline && <> · 📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
-                                    </div>
-                                  </div>
-                                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 99, flexShrink: 0, background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA" }}>⏳ Pending</span>
-                                </div>
-                                {/* Compact action buttons */}
-                                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }} onClick={e => e.stopPropagation()}>
-                                  <button onClick={async () => { try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
-                                    style={{ padding: "6px 16px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}>
-                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                                    Approve
-                                  </button>
-                                  <button onClick={async () => { const r = prompt("Rejection reason (optional):"); if (r === null) return; try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
-                                    style={{ padding: "6px 16px", background: "#fff", color: "#DC2626", border: "1.5px solid #FECACA", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                                    ✕ Reject
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* ── SECTION 2: My Self-Assigned Tasks (Y sees this) ── */}
-                      {myOwnTasks.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7C3AED", display: "inline-block" }} />
-                            My Self-Assigned Tasks
-                            <span style={{ fontSize: 10, background: "#F5F3FF", color: "#7C3AED", border: "1px solid #DDD6FE", borderRadius: 99, padding: "0 6px", fontWeight: 700 }}>{myOwnTasks.length}</span>
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {myOwnTasks.map(t => (
-                              <TaskCard key={t.taskId} t={t} accentColor="#7C3AED" showParent={!!t.parentTaskId} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
-                  );
-                })()}
-
-                {topTab === "my" && tasksLoading ? (
+                {tasksLoading ? (
                   <div style={{ padding: "14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
                     {[1, 2, 3, 4].map(i => (<div key={i} className="gv-skel-row"><div className="gv-skeleton gv-skel-circle" /><div className="gv-skel-lines"><div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} /><div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} /></div></div>))}
                   </div>
@@ -6759,146 +5342,448 @@ em-emoji-picker,
                       return true;
                     });
 
-                    // Render table rows + column header for a list of tasks inside a section.
-                    // Two modes: "status" (original) and "person" (new, grouped by assignee).
-                    // Person-mode is collapsed-by-default and supports drag-reorder within each group.
-                    const renderTaskGroup = (tasks, sectionKey) => {
-                      if (groupByMode === "flat") {
-                        return tasks.map(t => <TblRow key={t.taskId} t={t} />);
-                      }
-                      if (groupByMode === "person") {
-                        // ── Group by assignee (one bucket per employee; Unassigned bucket last) ──
-                        const UNASSIGNED = "__unassigned__";
-                        const buckets = new Map(); // id → { name, picUrl, tasks: [] }
-                        tasks.forEach(t => {
-                          const ids = (t.assigneeIds || []);
-                          if (ids.length === 0) {
-                            if (!buckets.has(UNASSIGNED)) buckets.set(UNASSIGNED, { name: "Unassigned", picUrl: null, tasks: [] });
-                            buckets.get(UNASSIGNED).tasks.push(t);
-                            return;
-                          }
-                          ids.forEach(aid => {
-                            const name = employeeMap.get(aid) || t.assigneeNameMap?.[aid] || `Employee ${aid}`;
-                            const picUrl = employeeMapFull?.get(aid)?.profilePicUrl || null;
-                            if (!buckets.has(aid)) buckets.set(aid, { name, picUrl, tasks: [] });
-                            buckets.get(aid).tasks.push(t);
-                          });
-                        });
-                        // Sort tasks inside each bucket by `order` (drag result) then priority
-                        buckets.forEach(b => {
-                          b.tasks.sort((a, b2) => {
-                            const ao = a.order !== undefined ? a.order : 90000 + (a.priority ?? 5) * 1000;
-                            const bo = b2.order !== undefined ? b2.order : 90000 + (b2.priority ?? 5) * 1000;
-                            return ao - bo;
-                          });
-                        });
-                        // Sort buckets alphabetically (Unassigned always last)
-                        const sortedBuckets = [...buckets.entries()].sort((a, b) => {
-                          if (a[0] === UNASSIGNED) return 1;
-                          if (b[0] === UNASSIGNED) return -1;
-                          return a[1].name.localeCompare(b[1].name);
-                        });
 
-                        return sortedBuckets.map(([aid, bucket]) => {
-                          const key = `person_${sectionKey}_${aid}`;
-                          // Collapsed by default: if the key ISN'T in collapsedGroups, treat as collapsed
-                          // We invert the meaning of collapsedGroups for person-mode so defaults are correct.
-                          const expanded = collapsedGroups.has(key);
-                          const toggle = () => setCollapsedGroups(prev => {
-                            const n = new Set(prev);
-                            n.has(key) ? n.delete(key) : n.add(key);
-                            return n;
-                          });
-                          return (
-                            <div key={key} className="gv-tbl-group" style={{ borderBottom: "1px solid var(--border)" }}>
-                              <div
-                                onClick={toggle}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 10,
-                                  padding: "10px 14px",
-                                  cursor: "pointer", userSelect: "none",
-                                  background: expanded ? "var(--p-lt)" : "var(--surface)",
-                                  borderLeft: expanded ? "3px solid var(--p)" : "3px solid transparent",
-                                  transition: "background 0.12s, border-left-color 0.12s",
-                                }}
-                              >
-                                <GwAvatar name={bucket.name} size={26} url={bucket.picUrl} />
-                                <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "var(--text-1)" }}>
-                                  {bucket.name}
+                    // ─── helpers ───────────────────────────────────────────────
+                    const timeAgo = (ts) => {
+                      if (!ts) return null;
+                      const secs = Math.floor((Date.now() - (ts?.seconds ? ts.seconds * 1000 : new Date(ts).getTime())) / 1000);
+                      if (secs < 60) return "just now";
+                      if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+                      if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+                      if (secs < 604800) return `${Math.floor(secs / 86400)}d ago`;
+                      return `${Math.floor(secs / 604800)}w ago`;
+                    };
+
+                    const fmtShortDate = (d) => {
+                      if (!d) return null;
+                      try { return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }); } catch { return null; }
+                    };
+
+                    const isOverdue = (d) => {
+                      if (!d) return false;
+                      return new Date(d) < new Date() && new Date(d).toDateString() !== new Date().toDateString();
+                    };
+
+                    const isDueToday = (d) => {
+                      if (!d) return false;
+                      return new Date(d).toDateString() === new Date().toDateString();
+                    };
+
+                    const avatarInitials = (name) => {
+                      if (!name) return "?";
+                      const parts = name.trim().split(" ");
+                      return parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name[0].toUpperCase();
+                    };
+
+                    const avatarColor = (name) => {
+                      const colors = ["#1B4F8A", "#0F766E", "#7C3AED", "#B45309", "#0369A1", "#6D28D9", "#047857", "#9A3412"];
+                      if (!name) return colors[0];
+                      return colors[name.charCodeAt(0) % colors.length];
+                    };
+
+                    // ─── TaskRow component ──────────────────────────────────────
+                    const TaskRow = ({ t, depth = 0, section, allTaskMap, employeeMap, employeeId, onSelect, selectedId, expandedIds, toggleExpand }) => {
+                      const isSelected = selectedId === t.taskId;
+                      const hasSubtasks = (t.subtaskIds || []).length > 0;
+                      const isExpanded = expandedIds?.has(t.taskId);
+                      const st = STATUS[t.status] || STATUS.open;
+                      const assigneeIds = t.assigneeIds || [];
+                      const dueDate = t.dueDate || t.fixedDeadline || t.deadline;
+                      const overdue = dueDate && new Date(dueDate) < new Date() && new Date(dueDate).toDateString() !== new Date().toDateString();
+                      const dueToday = dueDate && new Date(dueDate).toDateString() === new Date().toDateString();
+                      const dueDateStr = dueDate ? (() => { try { return new Date(dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); } catch { return null; } })() : null;
+
+                      const getPrior = (p) => {
+                        if (p === "high") return { label: "P1", color: "#DC2626" };
+                        if (p === "medium") return { label: "P3", color: "#D97706" };
+                        if (p === "low") return { label: "P5", color: "#16A34A" };
+                        const n = Number(p);
+                        if (!n || isNaN(n)) return { label: "—", color: "#94A3B8" };
+                        const palette = ["#DC2626", "#EA580C", "#D97706", "#CA8A04", "#2563EB", "#7C3AED", "#059669", "#0891B2", "#64748B", "#16A34A"];
+                        return { label: `P${n}`, color: palette[Math.min(n - 1, palette.length - 1)] };
+                      };
+                      const prior = getPrior(t.priority);
+
+                      const fmtTs = (ts) => {
+                        if (!ts) return null;
+                        const ms = ts?.seconds ? ts.seconds * 1000 : new Date(ts).getTime();
+                        if (!ms || isNaN(ms)) return null;
+                        return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                      };
+
+                      const timeAgoStr = t.createdAt ? (() => {
+                        const ms = t.createdAt?.seconds ? t.createdAt.seconds * 1000 : new Date(t.createdAt).getTime();
+                        const secs = Math.floor((Date.now() - ms) / 1000);
+                        if (secs < 60) return "just now";
+                        if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+                        if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+                        return `${Math.floor(secs / 86400)}d ago`;
+                      })() : null;
+
+                      const assignedByName = t.assignedByName
+                        || (t.assignedBy ? (typeof employeeMap?.get === "function" ? employeeMap.get(t.assignedBy) : null) : null)
+                        || null;
+
+                      const compMap = {
+                        submitted: { label: "Submitted · Awaiting Review", color: "#D97706" },
+                        tl_approved: { label: "TL Approved", color: "#5B5EF4" },
+                        tl_rejected: { label: "TL Rejected — Needs Revision", color: "#DC2626" },
+                        tl_final_approved: { label: "✅ Approved & Complete", color: "#16A34A" },
+                        ceo_approved: { label: "✅ CEO Approved & Complete", color: "#16A34A" },
+                        ceo_rejected: { label: "CEO Rejected", color: "#DC2626" },
+                      };
+                      const comp = t.completionStatus ? compMap[t.completionStatus] : null;
+
+                      const workedSecs = t.timerTotalSeconds || t.workedSeconds || 0;
+                      const workedStr = workedSecs >= 60 ? (() => {
+                        const h = Math.floor(workedSecs / 3600), m = Math.floor((workedSecs % 3600) / 60);
+                        return h > 0 ? `${h}h ${m}m` : `${m}m`;
+                      })() : null;
+
+                      const lastChatMs = (() => {
+                        if (!t.lastChatAt) return null;
+                        if (t.lastChatAt?.seconds) return t.lastChatAt.seconds * 1000;
+                        if (typeof t.lastChatAt === "number") return t.lastChatAt;
+                        if (typeof t.lastChatAt === "string") return new Date(t.lastChatAt).getTime();
+                        return null;
+                      })();
+                      const lastChatStr = lastChatMs ? (() => {
+                        const diff = Math.floor((Date.now() - lastChatMs) / 60000);
+                        if (diff < 1) return "just now";
+                        if (diff < 60) return `${diff}m ago`;
+                        if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+                        return `${Math.floor(diff / 1440)}d ago`;
+                      })() : null;
+
+                      // dot separator helper
+                      const Dot = () => <span style={{ color: "#D1D5DB", fontSize: 10, margin: "0 2px" }}>·</span>;
+
+                      return (
+                        <div style={{ borderBottom: "1.5px solid #F0F2F7" }}>
+
+                          <div
+                            onClick={() => onSelect(t)}
+                            draggable={!!(isCEO || isTL)}
+                            onDragStart={e => {
+                              if (!isCEO && !isTL) { e.preventDefault(); return; }
+                              dragTaskIdRef.current = t.taskId;
+                              dragOverIdRef.current = null;
+                              e.dataTransfer.effectAllowed = "move";
+                              const ghost = document.createElement("div");
+                              ghost.textContent = "↕ " + (t.title || "Task");
+                              ghost.style.cssText = "position:fixed;top:-999px;left:-999px;background:#1B4F8A;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;font-family:inherit;white-space:nowrap;pointer-events:none;";
+                              document.body.appendChild(ghost);
+                              e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 16);
+                              setTimeout(() => ghost.remove(), 100);
+                              e.currentTarget.style.opacity = "0.4";
+                            }}
+                            onDragOver={e => {
+                              e.preventDefault();
+                              if (!isCEO && !isTL) return;
+                              if (dragTaskIdRef.current === t.taskId) return;
+                              e.dataTransfer.dropEffect = "move";
+                              if (dragOverIdRef.current !== t.taskId) {
+                                document.querySelectorAll(".taskrow-drag-over").forEach(el => {
+                                  el.style.borderTop = "";
+                                  el.classList.remove("taskrow-drag-over");
+                                });
+                                dragOverIdRef.current = t.taskId;
+                                e.currentTarget.style.borderTop = "3px solid #1B4F8A";
+                                e.currentTarget.classList.add("taskrow-drag-over");
+                              }
+                            }}
+                            onDragLeave={e => {
+                              if (!e.currentTarget.contains(e.relatedTarget)) {
+                                e.currentTarget.style.borderTop = "";
+                                e.currentTarget.classList.remove("taskrow-drag-over");
+                                if (dragOverIdRef.current === t.taskId) dragOverIdRef.current = null;
+                              }
+                            }}
+                            onDrop={e => {
+                              e.preventDefault();
+                              e.currentTarget.style.borderTop = "";
+                              e.currentTarget.classList.remove("taskrow-drag-over");
+                              document.querySelectorAll(".taskrow-drag-over").forEach(el => {
+                                el.style.borderTop = "";
+                                el.classList.remove("taskrow-drag-over");
+                              });
+                              const dragId = dragTaskIdRef.current;
+                              dragOverIdRef.current = null;
+                              dragTaskIdRef.current = null;
+                              if (!dragId || dragId === t.taskId) return;
+                              handleDrop(t.taskId, dragId);
+                            }}
+                            onDragEnd={e => {
+                              e.currentTarget.style.opacity = "1";
+                              e.currentTarget.style.borderTop = "";
+                              document.querySelectorAll(".taskrow-drag-over").forEach(el => {
+                                el.style.borderTop = "";
+                                el.classList.remove("taskrow-drag-over");
+                              });
+                              dragTaskIdRef.current = null;
+                              dragOverIdRef.current = null;
+                            }}
+                            style={{
+                              display: "flex", alignItems: "flex-start", gap: 8,
+                              padding: `9px 12px 9px ${12 + depth * 18}px`,
+                              background: isSelected ? "#F0F5FF" : "#fff",
+                              border: isSelected ? "1px solid #C7D2FE" : "1px solid #E5E7EB",
+                              borderLeft: isSelected ? "3px solid #1B4F8A" : "3px solid transparent",
+                              borderRadius: 6,
+                              margin: "0 10px 6px",
+                              cursor: (isCEO || isTL) ? "grab" : "pointer",
+                              transition: "background 0.12s, border-color 0.12s",
+                            }}
+                            onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.background = "#F8FAFC"; e.currentTarget.style.borderColor = "#D7DDE8"; } }}
+                            onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#E5E7EB"; } }}
+                          >
+
+
+                            {/* Expand chevron */}
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); if (hasSubtasks) toggleExpand?.(t.taskId); }}
+                              style={{
+                                width: 16, height: 16, marginTop: 3, flexShrink: 0,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                background: "none", border: "none",
+                                cursor: hasSubtasks ? "pointer" : "default",
+                                color: hasSubtasks ? "#94A3B8" : "transparent", padding: 0,
+                                transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s",
+                              }}
+                            >
+                              <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                                <path d="M2.5 1.5l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+
+                            {/* Content */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+
+                              {/* ROW 1: title + priority + type badges */}
+                              <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginBottom: 2, flexWrap: "wrap" }}>
+                                {depth > 0 && <span style={{ fontSize: 10, color: "#CBD5E1", flexShrink: 0 }}>↳</span>}
+                                <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? "#1B4F8A" : "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {t.title}
                                 </span>
-                                <span style={{
-                                  fontSize: 10, fontWeight: 700,
-                                  padding: "2px 8px", borderRadius: 99,
-                                  background: expanded ? "var(--p)" : "var(--bg)",
-                                  color: expanded ? "#fff" : "var(--text-3)",
-                                }}>
-                                  {bucket.tasks.length}
+                                <span
+                                  title={`Priority ${prior.label} — drag tasks to reorder`}
+                                  style={{ fontSize: 10, fontWeight: 700, color: prior.color, flexShrink: 0, padding: "1px 6px", borderRadius: 4, background: prior.color + "14", border: `1px solid ${prior.color}33` }}
+                                >
+                                  {prior.label}
                                 </span>
-                                <span style={{
-                                  width: 22, height: 22, borderRadius: 5,
-                                  display: "flex", alignItems: "center", justifyContent: "center",
-                                  color: "var(--text-3)",
-                                  transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-                                  transition: "transform 0.15s",
-                                }}>
-                                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                                    <path d="M2.5 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                  </svg>
-                                </span>
+                                {hasSubtasks && <span style={{ fontSize: 10, color: "#94A3B8", flexShrink: 0 }}>{(t.subtaskIds || []).length} sub</span>}
+                                {t.isRepeat && <span style={{ fontSize: 9, fontWeight: 700, color: "#1D4ED8", background: "#EFF6FF", padding: "1px 5px", borderRadius: 3 }}>🔁 Repeat</span>}
+                                {t.isThirdParty && <span style={{ fontSize: 9, fontWeight: 700, color: "#6D28D9", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>🔗 3rd Party</span>}
+                                {t.isGoal && <span style={{ fontSize: 9, fontWeight: 700, color: "#7E22CE", background: "#FDF4FF", padding: "1px 5px", borderRadius: 3 }}>🎯 Goal</span>}
+                                {t.isSelfAssigned && <span style={{ fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>SELF</span>}
                               </div>
-                              {expanded && (
-                                <>
-                                  <div className="gv-tbl-head">
-                                    <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
-                                    <div className="col-name">Task Name</div>
-                                    <div className="col-timer">Timer</div>
-                                    <div className="col-desc">Description</div>
-                                    <div className="col-people">People</div>
-                                    <div className="col-pri">Priority</div>
-                                    <div className="col-date">Timeline</div>
-                                    <div className="col-status">Status</div>
-                                    <div className="col-act" />
-                                  </div>
-                                  {bucket.tasks.map(t => <TblRow key={t.taskId} t={t} />)}
-                                </>
+
+                              {/* ROW 2: description (only if exists, 1 truncated line) */}
+                              {t.description && (
+                                <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 3, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {t.description.replace(/<[^>]*>/g, "").slice(0, 140)}
+                                </div>
+                              )}
+
+                              {/* ROW 3: all meta inline — assigned by/to · time · dept · worked · last msg · due · completion */}
+                              <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", lineHeight: 1.6 }}>
+
+                                {/* Assigned by (assigned tab) */}
+                                {section === "assigned" && assignedByName && (
+                                  <>
+                                    <span style={{ fontSize: 10, color: "#6B7280" }}>
+                                      by <strong style={{ color: "#374151", fontWeight: 600 }}>{assignedByName}</strong>
+                                    </span>
+                                    <Dot />
+                                  </>
+                                )}
+
+                                {/* Assigned to label (created tab) */}
+                                {section === "created" && assigneeIds.length > 0 && (
+                                  <>
+                                    <span style={{ fontSize: 10, color: "#6B7280" }}>to:</span>
+                                    <span style={{ marginLeft: 3 }} />
+                                  </>
+                                )}
+
+                                {/* Assignee avatars + full names inline */}
+                                {section !== "assigned" && assigneeIds.length > 0 && (
+                                  <>
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                                      {assigneeIds.slice(0, 3).map((aid, i) => {
+                                        const nm = (typeof employeeMap?.get === "function" ? employeeMap.get(aid) : null)
+                                          || t.assigneeNameMap?.[aid] || (t.assigneeNames || [])[i] || aid;
+                                        const empFull = (typeof employeeMapFull?.get === "function" ? employeeMapFull.get(aid) : null) || {};
+                                        const picUrl = empFull.profilePicUrl || empFull.photoURL || "";
+                                        const [c1, c2] = getAvatarColors(nm || aid);
+                                        const initials = (nm || "?").split(" ").filter(Boolean).slice(0, 2).map(s => s[0]).join("").toUpperCase();
+                                        return (
+                                          <span key={aid} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, color: "#374151" }}>
+                                            {picUrl
+                                              ? <img src={picUrl} alt={nm} style={{ width: 14, height: 14, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: "1px solid #E5E7EB" }} />
+                                              : <span style={{ width: 14, height: 14, borderRadius: "50%", background: `linear-gradient(135deg,${c1},${c2})`, color: "#fff", fontSize: 6, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{initials}</span>
+                                            }
+                                            {nm}{i < Math.min(assigneeIds.length, 3) - 1 && <span style={{ color: "#D1D5DB" }}>,</span>}
+                                          </span>
+                                        );
+                                      })}
+                                      {assigneeIds.length > 3 && <span style={{ fontSize: 10, color: "#9CA3AF" }}>+{assigneeIds.length - 3}</span>}
+                                    </span>
+                                    <Dot />
+                                  </>
+                                )}
+
+                                {/* Time ago */}
+                                {timeAgoStr && <><span style={{ fontSize: 10, color: "#C0C8D8" }}>{timeAgoStr}</span><Dot /></>}
+
+                                {/* Department */}
+                                {t.department && <><span style={{ fontSize: 10, color: "#94A3B8" }}>{t.department}</span><Dot /></>}
+
+                                {/* Timer worked */}
+                                {workedStr && <><span style={{ fontSize: 10, color: "#6B7280" }}>⏱ {workedStr}</span><Dot /></>}
+
+                                {/* Last chat */}
+                                {lastChatStr && <><span style={{ fontSize: 10, color: "#94A3B8" }}>💬 {lastChatStr}</span><Dot /></>}
+
+                                {/* Due date — inline, coloured — only for deadline tasks */}
+                                {dueDateStr && t.status !== "done" && !t.deadlineWindowSecs && (
+                                  <span style={{ fontSize: 10, fontWeight: overdue || dueToday ? 600 : 400, color: overdue ? "#EF4444" : dueToday ? "#F59E0B" : "#9CA3AF" }}>
+                                    {overdue ? `⚠ Overdue · ${dueDateStr}` : dueToday ? `📅 Due today` : `📅 ${dueDateStr}`}
+                                  </span>
+                                )}
+
+
+                                <div className="col-timer" onClick={e => e.stopPropagation()}>
+                                  {t.deadlineWindowSecs > 0 && (() => {
+                                    const isRunning = timerActiveTaskId === t.taskId;
+                                    const isAssigneeOfThis = (t.assigneeIds || []).includes(employeeId);
+                                    const _mine = getDisplaySeconds ? getDisplaySeconds(t.taskId) : 0;
+                                    const _watched = assigneeAllTimers?.get(t.taskId)?.displaySeconds || 0;
+                                    const secs = _mine || _watched;
+                                    const total = t.deadlineWindowSecs || 0;
+                                    const isOver = total > 0 && secs >= total;
+                                    const h = Math.floor(secs / 3600);
+                                    const m = Math.floor((secs % 3600) / 60);
+                                    const workedStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+                                    return (
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }} onClick={e => e.stopPropagation()}>
+                                        {isAssigneeOfThis && t.status === "in_progress" && (
+                                          <button
+                                            type="button"
+                                            title={isRunning ? "Pause" : "Resume"}
+                                            onClick={() => isRunning
+                                              ? handleTimerPause?.(t.taskId, t.title)
+                                              : handleTimerStart?.(t.taskId, t.title)
+                                            }
+                                            style={{
+                                              width: 18, height: 18, borderRadius: "50%", border: "none",
+                                              background: isRunning ? "#DCFCE7" : "#EBF2FA",
+                                              color: isRunning ? "#16A34A" : "#1B4F8A",
+                                              cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                              flexShrink: 0, padding: 0,
+                                            }}
+                                          >
+                                            {isRunning ? (
+                                              <svg width="7" height="7" viewBox="0 0 12 12" fill="currentColor">
+                                                <rect x="2" y="1.5" width="3" height="9" rx="1" />
+                                                <rect x="7" y="1.5" width="3" height="9" rx="1" />
+                                              </svg>
+                                            ) : (
+                                              <svg width="7" height="7" viewBox="0 0 12 12" fill="currentColor">
+                                                <path d="M2.5 1.5l8 4.5-8 4.5V1.5z" />
+                                              </svg>
+                                            )}
+                                          </button>
+                                        )}
+                                        {secs > 0 && (
+                                          <span style={{ fontSize: 10, color: isOver ? "#DC2626" : "#6B7280" }}>
+                                            ⏱ {workedStr}{total > 0 ? ` / ${Math.floor(total / 3600) > 0 ? `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m` : `${Math.floor(total / 60)}m`}` : ""}
+                                          </span>
+                                        )}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+
+                              </div>
+
+                              {/* ROW 4: completion/submission status — only when exists, very compact */}
+                              {comp && (
+                                <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 10, fontWeight: 600, color: comp.color }}>
+                                    {comp.label}
+                                  </span>
+                                  {t.submittedAt && (
+                                    <span style={{ fontSize: 10, color: "#9CA3AF" }}>{fmtTs(t.submittedAt)}</span>
+                                  )}
+                                  {/* Rejection reason inline */}
+                                  {(t.completionStatus === "tl_rejected" && t.tlReview?.rejectionReason) && (
+                                    <span style={{ fontSize: 10, color: "#DC2626" }}>· "{t.tlReview.rejectionReason}"</span>
+                                  )}
+                                  {(t.completionStatus === "ceo_rejected" && t.ceoReview?.rejectionReason) && (
+                                    <span style={{ fontSize: 10, color: "#DC2626" }}>· "{t.ceoReview.rejectionReason}"</span>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          );
-                        });
-                      }
 
-                      // ── Status-mode (original behavior) ──
-                      return STATUS_GROUPS_TABLE.map(grp => {
-                        const grpTasks = tasks.filter(t => t.status === grp.key);
-                        if (!grpTasks.length) return null;
-                        const collapsed = collapsedGroups.has(`${sectionKey}_${grp.key}`);
-                        return (
-                          <div key={grp.key} className="gv-tbl-group">
-                            <div className="gv-grp-header" onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); const k = `${sectionKey}_${grp.key}`; n.has(k) ? n.delete(k) : n.add(k); return n; })}>
-                              <span className="gv-grp-badge" style={{ color: grp.color, background: grp.bg, border: `1px solid ${grp.color}33` }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: grp.dot, display: "inline-block" }} />{grp.label}</span>
-                              <span className="gv-grp-count">{grpTasks.length}</span>
-                              <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ marginLeft: "auto", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--text-4)" }}><path d="M2 3.5l3.5 4 3.5-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                            </div>
-                            {!collapsed && (
-                              <>
-                                <div className="gv-tbl-head">
-                                  <div style={{ width: 20 }} /><div style={{ width: 26 }} /><div style={{ width: 20 }} />
-                                  <div className="col-name">Task Name</div>
-                                  <div className="col-timer">Timer</div>
-                                  <div className="col-desc">Description</div>
-                                  <div className="col-people">People</div>
-                                  <div className="col-pri">Priority</div>
-                                  <div className="col-date">Timeline</div>
-                                  <div className="col-status">Status</div>
-                                  <div className="col-act" />
-                                </div>
-                                {grpTasks.map(t => <TblRow key={t.taskId} t={t} />)}
-                              </>
-                            )}
+                            {/* Right: status badge */}
+                            <span style={{
+                              fontSize: 11, fontWeight: 500,
+                              color: st.color, background: st.bg,
+                              padding: "3px 9px", borderRadius: 5,
+                              border: `1px solid ${st.color}22`,
+                              whiteSpace: "nowrap", flexShrink: 0, marginTop: 1,
+                            }}>{st.label}</span>
                           </div>
-                        );
-                      });
+
+                          {/* Subtasks recursive */}
+                          {hasSubtasks && isExpanded && (
+                            <div>
+                              {(t.subtaskIds || []).map(sid => {
+                                const sub = allTaskMap?.get(sid);
+                                if (!sub) return null;
+                                return (
+                                  <TaskRow
+                                    key={sub.taskId} t={sub} depth={depth + 1} section={section}
+                                    allTaskMap={allTaskMap} employeeMap={employeeMap}
+                                    employeeId={employeeId} onSelect={onSelect}
+                                    selectedId={selectedId} expandedIds={expandedIds} toggleExpand={toggleExpand}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
                     };
+
+                    // ─── renderTaskGroup ────────────────────────────────────────
+                    const renderTaskGroup = (tasks, section) => {
+                      if (!tasks || tasks.length === 0) return null;
+                      const roots = tasks.filter(t => !t.parentTaskId);
+                      return (
+                        <div style={{ background: "#fff" }}>
+                          {roots.map(t => (
+                            <TaskRow
+                              key={t.taskId}
+                              t={t}
+                              depth={0}
+                              section={section}
+                              allTaskMap={allTaskMap}
+                              employeeMap={employeeMap}
+                              employeeId={employeeId}
+                              onSelect={handleSelectNode}
+                              selectedId={task?.taskId}
+                              expandedIds={expandedIds}
+                              toggleExpand={toggleExpand}
+                            />
+                          ))}
+                        </div>
+                      );
+                    };
+
 
                     // Section box wrapper with title + minimize/maximize
                     const SectionBox = ({ sectionKey, title, icon, accentColor, accentBg, tasks, count }) => {
@@ -6962,17 +5847,6 @@ em-emoji-picker,
                           {/* Section body — hidden when minimized */}
                           {!sectionCollapsed && (
                             <>
-                              {/* Column headers */}
-                              <div className="gv-col-header">
-                                {canDrag && <div style={{ width: 18, flexShrink: 0 }} />}
-                                <div style={{ width: 16, flexShrink: 0 }} />
-                                <div className="col-label col-label-name">Task</div>
-                                <div className="col-label col-label-timer">Timer</div>
-                                <div className="col-label col-label-pri">Priority</div>
-                                <div className="col-label col-label-date">Deadline</div>
-                                <div className="col-label col-label-status">Status</div>
-                                <div className="col-label col-label-act" />
-                              </div>
                               {renderTaskGroup(tasks, sectionKey)}
                             </>
                           )}
@@ -6983,83 +5857,226 @@ em-emoji-picker,
                     return (
                       <>
                         {isGoalView ? (
-                          // ── Goal view: flat list, no sections ──
                           <>
-                            {filteredRoots.length === 0 ? (
-                              <div style={{ textAlign: "center", padding: "60px 20px" }}>
-                                <div style={{ fontSize: 32, marginBottom: 12 }}>🎯</div>
-                                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-1)", marginBottom: 6 }}>No goal tasks yet</div>
-                                <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 20 }}>Create your first goal task to start tracking progress</div>
-                                {(isCEO || isTL) && <button className="gv-new-btn" style={{ background: "#7E22CE", margin: "0 auto" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}>+ Add Goal Task</button>}
-                              </div>
-                            ) : (
-                              <SectionBox
-                                sectionKey="goals"
-                                title="All Goal Tasks"
-                                icon="🎯"
-                                accentColor="#7E22CE"
-                                accentBg="#F5F3FF"
-                                tasks={filteredRoots}
-                                count={filteredRoots.length}
-                              />
-                            )}
-                            {filteredRoots.length > 0 && (isCEO || isTL) && (
-                              <button type="button" className="gv-img2-add-another" style={{ borderColor: "#7E22CE22", color: "#7E22CE" }} onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                                </svg>
-                                Add Goal Task
-                              </button>
-                            )}
+                            {(() => {
+                              const goalAssigned = filteredRoots.filter(t =>
+                                (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId
+                              );
+                              const goalCreated = filteredRoots.filter(t =>
+                                t.assignedBy === employeeId
+                              );
+                              const activeGoalTasks = taskSection === "assigned" ? goalAssigned
+                                : taskSection === "created" ? goalCreated
+                                  : filteredRoots;
+                              return (
+                                <div>
+                                  {activeGoalTasks.length === 0 ? (
+                                    <div style={{ textAlign: "center", padding: "50px 20px" }}>
+                                      <div style={{ fontSize: 32, marginBottom: 10 }}>🎯</div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                                        {taskSection === "assigned" ? "No goal tasks assigned to you" : "No goal tasks created yet"}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 16 }}>
+                                        {taskSection === "assigned" ? "Goal tasks assigned to you will appear here." : "Click + New Goal to create your first goal task."}
+                                      </div>
+                                      {(isCEO || isTL) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}
+                                          style={{
+                                            display: "inline-flex", alignItems: "center", gap: 6,
+                                            padding: "8px 18px", border: "none", borderRadius: 7,
+                                            background: "#1B4F8A", color: "#fff",
+                                            fontSize: 13, fontWeight: 600,
+                                            fontFamily: "var(--font)", cursor: "pointer",
+                                          }}
+                                        >
+                                          + New Goal Task
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <div style={{ padding: "8px 0" }}>
+                                        {renderTaskGroup(activeGoalTasks, taskSection)}
+                                      </div>
+                                      {/* Add another goal task — always visible for CEO/TL */}
+                                      {(isCEO || isTL) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveModal({ type: "add_goal_task", taskId: null, task: null })}
+                                          style={{
+                                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                            width: "calc(100% - 24px)", margin: "4px 12px 16px",
+                                            padding: "10px 14px",
+                                            background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
+                                            color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
+                                            cursor: "pointer", transition: "all 0.15s",
+                                          }}
+                                          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
+                                          onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
+                                        >
+                                          + New Goal Task
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+
+                                </div>
+                              );
+                            })()}
                           </>
                         ) : (
-                          // ── Regular view: Assigned / Created / Other sections ──
                           <>
-                            {/* Section A: Assigned to me by others */}
-                            {assignedToMe.length > 0 && (
-                              <SectionBox
-                                sectionKey="assigned"
-                                title="Assigned to me"
-                                icon="📥"
-                                accentColor="#5B5EF4"
-                                accentBg="#F5F3FF"
-                                tasks={assignedToMe}
-                                count={assignedToMe.length}
-                              />
+                            {/* Assigned to Me */}
+                            {taskSection === "assigned" && (
+                              assignedToMe.length === 0 ? (
+                                <div className="gv-empty">
+                                  <div className="gv-empty-icon">📥</div>
+                                  <p className="gv-empty-t">No assigned tasks</p>
+                                  <p className="gv-empty-s">Tasks assigned to you will appear here</p>
+                                </div>
+                              ) : (
+                                <>
+                                  {renderTaskGroup(assignedToMe, "assigned")}
+                                  {(isCEO || isTL) && taskSection === "created" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
+                                      style={{
+                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                        width: "calc(100% - 24px)", margin: "8px 12px 16px",
+                                        padding: "12px 14px",
+                                        background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
+                                        color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
+                                        cursor: "pointer", transition: "all 0.15s",
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
+                                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
+                                    >
+                                      + New Task
+                                    </button>
+                                  )}
+                                </>
+                              )
                             )}
-                            {/* Section B: Created by me */}
-                            {createdByMe.length > 0 && (
-                              <SectionBox
-                                sectionKey="created"
-                                title="Created by me"
-                                icon="✏️"
-                                accentColor="#0891B2"
-                                accentBg="#F0F9FF"
-                                tasks={createdByMe}
-                                count={createdByMe.length}
-                              />
+
+                            {/* Created by Me */}
+                            {taskSection === "created" && (
+                              createdByMe.length === 0 ? (
+                                <div className="gv-empty">
+                                  <div className="gv-empty-icon">✏️</div>
+                                  <p className="gv-empty-t">No tasks created yet</p>
+                                  <p className="gv-empty-s">Tasks you create will appear here</p>
+                                </div>
+                              ) : (
+                                <>
+                                  {renderTaskGroup(createdByMe, "created")}
+                                  {(isCEO || isTL) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
+                                      style={{
+                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                        width: "calc(100% - 24px)", margin: "8px 12px 16px",
+                                        padding: "12px 14px",
+                                        background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
+                                        color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
+                                        cursor: "pointer", transition: "all 0.15s",
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
+                                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
+                                    >
+                                      + New Task
+                                    </button>
+                                  )}
+                                </>
+                              )
                             )}
-                            {/* Section C: Other tasks (only when "All Tasks" is selected) */}
-                            {topTab === "all" && otherTasks.length > 0 && (
-                              <SectionBox
-                                sectionKey="other"
-                                title="Other tasks"
-                                icon="📋"
-                                accentColor="#F59E0B"
-                                accentBg="#FFFBEB"
-                                tasks={otherTasks}
-                                count={otherTasks.length}
-                              />
-                            )}
-                            {/* === Image-2: "+ Add Another Task" footer card === */}
-                            {(isCEO || isTL) && (
-                              <button type="button" className="gv-img2-add-another" onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                                </svg>
-                                Add Another Task
-                              </button>
-                            )}
+
+                            {/* Self Tasks */}
+                            {taskSection === "self" && (() => {
+                              const needsMyApproval = allTasks.filter(t =>
+                                t.status !== "cancelled" && t.status !== "done" &&
+                                t.selfAssignApproved !== true &&
+                                (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
+                              );
+                              const myOwnTasks = allTasks.filter(t =>
+                                t.status !== "cancelled" && t.isSelfAssigned === true &&
+                                (t.assigneeIds || []).includes(employeeId) && t.approverId !== employeeId
+                              );
+                              return (
+                                <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+                                  {needsMyApproval.length === 0 && myOwnTasks.length === 0 && (
+                                    <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                                      <div style={{ fontSize: 28, marginBottom: 8 }}>👤</div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#64748B" }}>No self-assigned tasks</div>
+                                      <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, marginBottom: 16 }}>Use "Assign to Self" to create one</div>
+                                      <button className="gv-new-btn" onClick={() => setActiveModal({ type: "self_assign" })} style={{ background: "#1B4F8A", margin: "0 auto" }}>
+                                        Assign to Self
+                                      </button>
+                                    </div>
+                                  )}
+                                  {needsMyApproval.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #E5E7EB" }}>
+                                        Needs Your Approval ({needsMyApproval.length})
+                                      </div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                        {needsMyApproval.map(t => (
+                                          <div key={t.taskId} style={{ background: "#fff", border: "1px solid #E5E7EB", borderLeft: "3px solid #DC2626", borderRadius: 6, padding: "10px 12px" }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                              <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => handleSelectNode(t)}>
+                                                <div style={{ fontSize: 12, fontWeight: 600, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                                  By <strong>{t.assignedByName}</strong>
+                                                  {t.approverName && <> · Approver <strong style={{ color: "#DC2626" }}>{t.approverName}</strong></>}
+                                                </div>
+                                              </div>
+                                              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                                <button onClick={async () => { try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                                  style={{ padding: "4px 10px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                                  Approve
+                                                </button>
+                                                <button onClick={async () => { const r = prompt("Rejection reason:"); if (r === null) return; try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                                  style={{ padding: "4px 10px", background: "#fff", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                                  Reject
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {myOwnTasks.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #E5E7EB" }}>
+                                        My Self-Assigned Tasks ({myOwnTasks.length})
+                                      </div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                        {myOwnTasks.map(t => {
+                                          const sst = STATUS[t.status] || STATUS.open;
+                                          return (
+                                            <div key={t.taskId} onClick={() => handleSelectNode(t)}
+                                              style={{ background: "#fff", border: "1px solid #E5E7EB", borderLeft: "3px solid #1B4F8A", borderRadius: 6, padding: "10px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+                                              <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: 12, fontWeight: 600, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
+                                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                                  {t.approverName && <>Approver: <strong>{t.approverName}</strong></>}
+                                                  {t.fixedDeadline && <> · {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                                </div>
+                                              </div>
+                                              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: sst.color, background: sst.bg, flexShrink: 0 }}>{sst.label}</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </>
                         )}
                       </>
@@ -7237,36 +6254,24 @@ em-emoji-picker,
                 {/* "Chat with team" avatar strip -- Image-2 style (desktop only) */}
                 {/* Image-2 OUTER TABS: Chat / Activity / Files / Details (now BEFORE team strip) */}
                 <div className="gv-img2-tabs">
-                  <button type="button" className={`gv-img2-tab ${rightPanel === null ? "active" : ""}`} onClick={() => setRightPanel(null)}>Chat</button>
-                  <button type="button" className={`gv-img2-tab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => setRightPanel("reports")}>Activity</button>
-                  <button type="button" className={`gv-img2-tab ${rightPanel === "files" ? "active" : ""}`} onClick={() => setRightPanel("files")}>Files</button>
-                  <button type="button" className={`gv-img2-tab ${rightPanel === "info" ? "active" : ""}`} onClick={() => setRightPanel("info")}>Details</button>
+                  {task?.isGoal ? (
+                    <>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => setRightPanel("reports")}>Activity</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === null ? "active" : ""}`} onClick={() => setRightPanel(null)}>Chat</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "files" ? "active" : ""}`} onClick={() => setRightPanel("files")}>Files</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "info" ? "active" : ""}`} onClick={() => setRightPanel("info")}>Details</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === null ? "active" : ""}`} onClick={() => setRightPanel(null)}>Chat</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "reports" ? "active" : ""}`} onClick={() => setRightPanel("reports")}>Activity</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "files" ? "active" : ""}`} onClick={() => setRightPanel("files")}>Files</button>
+                      <button type="button" className={`gv-img2-tab ${rightPanel === "info" ? "active" : ""}`} onClick={() => setRightPanel("info")}>Details</button>
+                    </>
+                  )}
                 </div>
 
-                {(task.assigneeIds?.length > 0 || task.assignedBy) && (() => {
-                  const memberIds = Array.from(new Set([...(task.assigneeIds || []), ...(task.assignedBy ? [task.assignedBy] : [])])).filter(Boolean);
-                  const visible = memberIds.slice(0, 4);
-                  const extra = Math.max(0, memberIds.length - visible.length);
-                  return (
-                    <div className="gv-chat-team-strip gv-desk-only">
-                      <div className="gv-chat-team-avatars">
-                        {visible.map((id) => {
-                          const fullEmp = (typeof employeeMapFull?.get === "function" ? employeeMapFull.get(id) : null) || {};
-                          const nm = fullEmp.name || (typeof employeeMap?.get === "function" ? employeeMap.get(id) : null) || task.assigneeNameMap?.[id] || id;
-                          const pic = fullEmp.profilePicUrl || fullEmp.photoURL || "";
-                          const initials = (nm || "U").split(" ").filter(Boolean).slice(0, 2).map(s => s[0]).join("").toUpperCase() || "U";
-                          return (
-                            <div key={id} className="gv-team-av" title={nm}>
-                              {pic ? <img src={pic} alt={nm} /> : initials}
-                            </div>
-                          );
-                        })}
-                        {extra > 0 && <div className="gv-chat-team-more">+{extra}</div>}
-                      </div>
-                      <span className="gv-chat-team-label">Chat with team</span>
-                    </div>
-                  );
-                })()}
+                
               </>
             ) : (
               <div className="gv-chat-head">
@@ -7279,48 +6284,56 @@ em-emoji-picker,
             {/* === Image-2: chat content shows ONLY when no detail tab is active === */}
             {(rightPanel === null) && (<>
 
-              {/* ── QUICK TOUR — shows on new open tasks so employee knows the flow ── */}
+              <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
+
+              {/* ── TASK GUIDE — formal info strip for new open tasks ── */}
               {task && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
                 <div style={{
-                  flexShrink: 0, padding: "10px 14px 8px",
-                  background: (task.hasTimer === true) ? "linear-gradient(135deg,#EFF6FF,#F0FDF4)" : "linear-gradient(135deg,#F0FDF4,#EEF2FF)",
-                  borderBottom: "1px solid #E5E7EB",
+                  flexShrink: 0, padding: "12px 16px",
+                  background: "#fff",
+                  borderBottom: "1px solid #F1F5F9",
+                  borderLeft: "3px solid #1B4F8A",
                 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#1B4F8A", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10 }}>
                     How this task works
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 0, overflowX: "auto" }}>
                     {(task.isSelfAssigned ? [
-                      // Self-assigned: approver approves → work → submit
-                      { emoji: "⏳", label: "Awaiting Approval", active: true },
-                      { emoji: "▶", label: "Start Work", active: false },
-                      { emoji: "🏁", label: "Submit", active: false },
+                      { label: "Awaiting Approval", active: true },
+                      { label: "Start Work", active: false },
+                      { label: "Submit", active: false },
                     ] : task.hasTimer === true ? [
-                      // Timer ON: employee proposes deadline → TL approves → confirm → start
-                      { emoji: "📅", label: "Set Deadline", active: true },
-                      { emoji: "⏳", label: "TL Approves", active: false },
-                      { emoji: "✅", label: "Confirm Task", active: false },
-                      { emoji: "▶", label: "Start Work", active: false },
+                      { label: "Set Deadline", active: true },
+                      { label: "TL Approves", active: false },
+                      { label: "Start Work", active: false },
                     ] : [
-                      // Timer OFF: fixed deadline set → confirm → work → submit
-                      { emoji: "✅", label: "Confirm Task", active: true },
-                      { emoji: "▶", label: "Start Work", active: false },
-                      { emoji: "🏁", label: "Submit", active: false },
+                      { label: "Confirm & Start", active: true },
+                      { label: "Submit", active: false },
                     ]).map((step, i, arr) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
                         <div style={{
-                          display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-                          padding: "4px 8px", borderRadius: 8,
-                          background: step.active ? "#4F46E5" : "transparent",
-                          minWidth: 56,
+                          display: "flex", flexDirection: "row", alignItems: "center", gap: 6,
+                          padding: "5px 10px",
+                          background: step.active ? "#EBF2FA" : "transparent",
+                          borderRadius: 5,
+                          border: step.active ? "1px solid #BFDBFE" : "1px solid transparent",
+                          minWidth: 0,
                         }}>
-                          <span style={{ fontSize: 16 }}>{step.emoji}</span>
-                          <span style={{ fontSize: 9, fontWeight: step.active ? 700 : 500, color: step.active ? "#fff" : "#9CA3AF", whiteSpace: "nowrap" }}>
+                          <span style={{
+                            width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                            background: step.active ? "#1B4F8A" : "#F1F5F9",
+                            color: step.active ? "#fff" : "#94A3B8",
+                            fontSize: 9, fontWeight: 700,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>{i + 1}</span>
+                          <span style={{ fontSize: 11, fontWeight: step.active ? 600 : 400, color: step.active ? "#1B4F8A" : "#6B7280", whiteSpace: "nowrap" }}>
                             {step.label}
                           </span>
                         </div>
                         {i < arr.length - 1 && (
-                          <div style={{ width: 20, height: 1, background: "#D1D5DB", flexShrink: 0 }} />
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, margin: "0 2px", color: "#D1D5DB" }}>
+                            <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
                         )}
                       </div>
                     ))}
@@ -7362,198 +6375,153 @@ em-emoji-picker,
                   return `${Math.round(over / 86400)}d over`;
                 })() : "";
 
-                // Don't show if task is in_progress/done (already working)
-                if (["in_progress", "done"].includes(status)) return null;
+                // Don't show if task is confirmed/in_progress/done (already started or working)
+                if (["confirmed", "in_progress", "done"].includes(status)) return null;
 
                 return (
-                  <div style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", background: "var(--surface)", padding: "10px 14px" }}>
-                    {/* Step: confirmed → Start Working */}
-                    {isConfirmed && !isStarted && status === "confirmed" && (
-                      <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                          <span style={{ fontSize: 14 }}>▶</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Ready to Start</span>
-                        </div>
-                        {task.dueDate && (
-                          <div style={{ fontSize: 11, color: "#64748B", marginBottom: 8 }}>
-                            Deadline: <strong>{fmtLiveDeadlineDateTime(task, getTimerSession ? getTimerSession(task.taskId) : null) || ""}</strong>
-                          </div>
-                        )}
-                        <button className="gv-wf-btn gv-wf-start" disabled={actionBusy} onClick={() => handleAction("start")}
-                          style={{ width: "100%", marginBottom: 0 }}>
-                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 2l7 4-7 4V2z" fill="currentColor" /></svg>
-                          Start Working
-                        </button>
-                      </div>
-                    )}
+                  <div style={{ flexShrink: 0, borderBottom: "1px solid #F1F5F9", background: "#fff" }}>
 
-                    {/* Step: dueDate set → Confirm */}
+                    {/* Step: deadline approved (timer task) → Confirm & Start */}
                     {hasDueDate && !isPendingApproval && (
-                      <div style={{ background: deadlinePassed ? "#FEF2F2" : "#F0FDF4", border: `1.5px solid ${deadlinePassed ? "#FECDD3" : "#BBF7D0"}`, borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ fontSize: 14 }}>{deadlinePassed ? "⚠️" : "✓"}</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: deadlinePassed ? "#991B1B" : "#166534" }}>
-                            {deadlinePassed ? "Deadline Passed — Confirm Task" : "Deadline Approved"}
-                          </span>
+                      <div style={{ padding: "10px 16px", borderLeft: `3px solid ${deadlinePassed ? "#DC2626" : "#16A34A"}` }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: deadlinePassed ? "#DC2626" : "#111827", marginBottom: 4 }}>
+                          {deadlinePassed ? "Deadline passed — start to continue" : "Deadline approved — ready to start"}
                         </div>
                         {(_fWindow > 0) && (
-                          <div style={{
-                            fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8,
-                            background: deadlinePassed ? "#FEE2E2" : _fTimerStarted ? "#DCFCE7" : "#F1F5F9",
-                            color: deadlinePassed ? "#B91C1C" : _fTimerStarted ? "#166534" : "#64748B"
-                          }}>
+                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
                             {!_fTimerStarted
-                              ? `⏱ ${_fWindow < 3600 ? Math.round(_fWindow / 60) + "m" : _fWindow < 86400 ? Math.round(_fWindow / 3600) + "h" : Math.round(_fWindow / 86400) + "d"} asked — starts when timer runs`
+                              ? `${_fWindow < 3600 ? Math.round(_fWindow / 60) + " min" : _fWindow < 86400 ? Math.round(_fWindow / 3600) + "h" : Math.round(_fWindow / 86400) + "d"} approved — countdown begins when you start`
                               : deadlinePassed
-                                ? `⚠ ${passedStr}`
+                                ? `Exceeded by ${passedStr}`
                                 : (() => {
                                   const rem = _fWindow - _fWorked;
-                                  return rem < 3600 ? `⏱ ${Math.round(rem / 60)}m left` : rem < 86400 ? `⏱ ${Math.round(rem / 3600)}h left` : `⏱ ${Math.round(rem / 86400)}d left`;
+                                  return `${rem < 3600 ? Math.round(rem / 60) + " min" : rem < 86400 ? Math.round(rem / 3600) + "h" : Math.round(rem / 86400) + "d"} remaining`;
                                 })()
                             }
                           </div>
                         )}
-                        <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
-                          style={{ width: "100%", marginBottom: 0 }}>
-                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                          Confirm &amp; Accept Task
+                        <button disabled={actionBusy} onClick={() => handleAction("confirm_and_start")}
+                          style={{ padding: "5px 14px", border: `1px solid ${deadlinePassed ? "#DC2626" : "#16A34A"}`, borderRadius: 5, background: deadlinePassed ? "#DC2626" : "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: actionBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: actionBusy ? 0.5 : 1 }}>
+                          {actionBusy ? "Starting…" : "▶ Confirm & Start"}
                         </button>
                       </div>
                     )}
 
-                    {/* Step 1a: No-timer task — fixed deadline set by CEO/TL, confirm directly */}
+                    {/* Step 1a: No-timer task — confirm & start directly */}
                     {!hasDueDate && status === "open" && task.hasTimer === false && !task.isSelfAssigned && (
-                      <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ fontSize: 16 }}>📅</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>Deadline Task — Confirm to Begin</span>
+                      <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderLeft: "3px solid #16A34A" }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Ready to start</div>
+                          <div style={{ fontSize: 11, color: "#6B7280" }}>Tap to confirm and begin working on this task.</div>
                         </div>
-                        <div style={{ fontSize: 11, color: "#64748B", marginBottom: 10, lineHeight: 1.5 }}>
-                          This task has a fixed deadline set by your manager. Confirm the task to begin working.
-                        </div>
-                        <button className="gv-wf-btn gv-wf-confirm" disabled={actionBusy} onClick={() => handleAction("confirm")}
-                          style={{ width: "100%", marginBottom: 0 }}>
-                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                          ✓ Confirm &amp; Accept Task
+                        <button disabled={actionBusy} onClick={() => handleAction("confirm_and_start")}
+                          style={{ flexShrink: 0, padding: "6px 16px", border: "none", borderRadius: 6, background: "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: actionBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: actionBusy ? 0.5 : 1 }}>
+                          {actionBusy ? "Starting…" : "▶ Confirm & Start"}
                         </button>
                       </div>
                     )}
 
                     {/* Self-assigned task: waiting for approver */}
                     {task.isSelfAssigned && status === "open" && task.selfAssignApproved !== true && (
-                      <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ fontSize: 16 }}>⏳</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>Waiting for Approval</span>
-                        </div>
-                        <div style={{ fontSize: 11, color: "#6D28D9", lineHeight: 1.5 }}>
-                          This is a self-assigned task. <strong>{task.approverName || "Your approver"}</strong> needs to approve it before you can begin work.
+                      <div style={{ padding: "10px 16px", borderLeft: "3px solid #9CA3AF" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Awaiting approval</div>
+                        <div style={{ fontSize: 11, color: "#6B7280" }}>
+                          <strong style={{ color: "#374151" }}>{task.approverName || "Your approver"}</strong> must approve this self-assigned task before you can begin.
                         </div>
                       </div>
                     )}
 
-                    {/* Step 1b: Timer task — employee proposes deadline → TL approves */}
+                    {/* Step 1b: Timer task — employee proposes duration */}
                     {!hasDueDate && status === "open" && task.hasTimer === true && (
-                      <div style={{ background: "#F8FAFC", border: "1.5px solid #E2E8F0", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EFF6FF", border: "2px solid #3B82F6", color: "#3B82F6", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>1</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#1E293B" }}>Set Your Deadline</span>
-                        </div>
+                      <div style={{ padding: "10px 16px", borderLeft: "3px solid #1B4F8A" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Set your deadline</div>
                         {task.deadlineProposalRejected && (
-                          <div style={{ background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, padding: "6px 8px", marginBottom: 8, fontSize: 11, color: "#991B1B" }}>
-                            ❌ <strong>Rejected:</strong> {task.deadlineRejectionReason || "Please propose a new deadline."}
+                          <div style={{ fontSize: 11, color: "#DC2626", marginBottom: 8 }}>
+                            Rejected: {task.deadlineRejectionReason || "Please propose a new duration."}
                           </div>
                         )}
-                        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                        {!task.deadlineProposalRejected && (
+                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                            Enter how long you need. Your manager will approve before the timer starts.
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                           <input type="number" min="1" max="999" placeholder="e.g. 4"
                             value={df.proposedDurationVal || ""}
                             onChange={e => df.setDurationVal?.(e.target.value)}
-                            style={{ flex: 1, padding: "6px 8px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                            style={{ width: 80, padding: "5px 8px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", outline: "none", color: "#111827" }} />
                           <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
-                            style={{ width: 72, padding: "6px 4px", border: "1.5px solid #E2E8F0", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
+                            style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
                             <option value="minutes">min</option>
                             <option value="hours">hrs</option>
                             <option value="days">days</option>
                           </select>
+                          <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                            style={{ padding: "5px 14px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#fff", color: "#1B4F8A", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
+                            {df.proposing ? "Submitting…" : "Submit for Approval"}
+                          </button>
                         </div>
-                        <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
-                          className="gv-wf-btn gv-wf-confirm" style={{ width: "100%", marginBottom: 0, opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
-                          {df.proposing ? "Submitting…" : "⏱ Submit Deadline for Approval"}
-                        </button>
                       </div>
                     )}
 
                     {/* Step 2a: awaiting TL approval */}
                     {status === "pending_deadline_approval" && (
-                      <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#FEF3C7", border: "2px solid #D97706", color: "#D97706", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>2</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#92400E" }}>⏳ Awaiting Approval</span>
-                        </div>
-                        {task.proposedDeadline && <div style={{ fontSize: 11, fontWeight: 600, color: "#78350F", background: "#FEF9C3", padding: "3px 8px", borderRadius: 6, display: "inline-block" }}>
+                      <div style={{ padding: "10px 16px", borderLeft: "3px solid #D97706" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Waiting for approval</div>
+                        <div style={{ fontSize: 11, color: "#6B7280" }}>
                           {(() => {
                             const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
                             const delta = Number(task.pendingExtensionSecs) || 0;
                             const total = Number(task.deadlineWindowSecs) || 0;
-                            if (delta > 0) return `⏱ +${fmt(delta)} extra requested`;
-                            return `⏱ ${fmt(total)} requested`;
+                            return delta > 0
+                              ? `Your request for +${fmt(delta)} extra time is pending. You can discuss in the Draft Chat meanwhile.`
+                              : `Your request for ${fmt(total)} is pending. You can discuss in the Draft Chat meanwhile.`;
                           })()}
-                        </div>}
+                        </div>
                       </div>
                     )}
 
                     {/* Step 2b: TL counter-proposed — employee must respond */}
                     {status === "pending_employee_deadline_confirmation" && (
-                      <div style={{ background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                          <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#EDE9FE", border: "2px solid #7C3AED", color: "#7C3AED", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>⏱</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#5B21B6" }}>TL Suggested a Duration</span>
+                      <div style={{ padding: "10px 16px", borderLeft: "3px solid #7C3AED" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>
+                          {task.tlCounterDeadlineByName || "Your TL"} suggested a duration
                         </div>
-                        {(task.tlCounterWindowSecs || task.tlCounterDeadline) && (
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#4C1D95", marginBottom: 2 }}>
-                            {(() => {
-                              const w = task.tlCounterWindowSecs ||
-                                (task.tlCounterDeadlineAt?.seconds
-                                  ? Math.max(0, Math.round((new Date(task.tlCounterDeadline).getTime() - task.tlCounterDeadlineAt.seconds * 1000) / 1000))
-                                  : 0);
-                              if (w <= 0) return "⏱ Duration set";
-                              if (w < 3600) return `⏱ ${Math.round(w / 60)}m to complete`;
-                              if (w < 86400) return `⏱ ${Math.round(w / 3600)}h to complete`;
-                              return `⏱ ${Math.round(w / 86400)}d to complete`;
-                            })()}
-                          </div>
-                        )}
-                        <div style={{ fontSize: 10, color: "#7C3AED", marginBottom: 8 }}>
-                          ⏸ Countdown starts when you press Play — not now
+                        <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                          {(() => {
+                            const w = task.tlCounterWindowSecs || 0;
+                            const dur = w <= 0 ? "a duration" : w < 3600 ? `${Math.round(w / 60)} min` : w < 86400 ? `${Math.round(w / 3600)}h` : `${Math.round(w / 86400)}d`;
+                            return `${dur} — countdown starts when you press the timer, not now.`;
+                          })()}
+                          {task.tlCounterDeadlineMessage && (
+                            <span style={{ display: "block", marginTop: 4, color: "#374151", fontStyle: "italic" }}>
+                              "{task.tlCounterDeadlineMessage}"
+                            </span>
+                          )}
                         </div>
-                        {task.tlCounterDeadlineMessage && (
-                          <div style={{ fontSize: 11, color: "#6D28D9", background: "#EDE9FE", borderRadius: 6, padding: "4px 7px", marginBottom: 8, fontStyle: "italic" }}>
-                            "{task.tlCounterDeadlineMessage}"
-                          </div>
-                        )}
                         {!showRejectCounterInput ? (
                           <div style={{ display: "flex", gap: 6 }}>
                             <button onClick={() => handleRespondToCounter(true)} disabled={respondBusy}
-                              style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #BBF7D0", background: "#DCFCE7", color: "#166534", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: respondBusy ? 0.5 : 1 }}>
-                              ✓ Accept
+                              style={{ padding: "5px 14px", border: "1px solid #16A34A", borderRadius: 5, background: "#fff", color: "#16A34A", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: respondBusy ? 0.5 : 1 }}>
+                              Accept
                             </button>
                             <button onClick={() => setShowRejectCounterInput(true)} disabled={respondBusy}
-                              style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                              ✕ Reject
+                              style={{ padding: "5px 14px", border: "1px solid #D1D5DB", borderRadius: 5, background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                              Reject
                             </button>
                           </div>
                         ) : (
                           <div>
                             <textarea value={rejectCounterReason} onChange={e => setRejectCounterReason(e.target.value)}
-                              placeholder="Why are you rejecting this date?…"
-                              style={{ width: "100%", padding: "6px 8px", border: "1.5px solid #FECDD3", borderRadius: 7, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
+                              placeholder="Reason for rejecting…"
+                              style={{ width: "100%", padding: "6px 8px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 11, fontFamily: "inherit", resize: "none", minHeight: 44, outline: "none", boxSizing: "border-box", marginBottom: 6, color: "#111827" }} />
                             <div style={{ display: "flex", gap: 6 }}>
                               <button onClick={() => handleRespondToCounter(false)} disabled={!rejectCounterReason.trim() || respondBusy}
-                                style={{ flex: 1, padding: "6px", borderRadius: 7, border: "1.5px solid #FECDD3", background: "#FFF1F2", color: "#991B1B", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: !rejectCounterReason.trim() || respondBusy ? 0.5 : 1 }}>
+                                style={{ padding: "5px 14px", border: "1px solid #DC2626", borderRadius: 5, background: "#fff", color: "#DC2626", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", opacity: !rejectCounterReason.trim() || respondBusy ? 0.5 : 1 }}>
                                 {respondBusy ? "…" : "Send"}
                               </button>
                               <button onClick={() => { setShowRejectCounterInput(false); setRejectCounterReason(""); }}
-                                style={{ padding: "6px 10px", borderRadius: 7, border: "1.5px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                                style={{ padding: "5px 10px", border: "1px solid #E5E7EB", borderRadius: 5, background: "#fff", color: "#6B7280", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                                 Cancel
                               </button>
                             </div>
@@ -7561,6 +6529,7 @@ em-emoji-picker,
                         )}
                       </div>
                     )}
+
                   </div>
                 );
               })()}
@@ -7966,6 +6935,7 @@ em-emoji-picker,
                       onSend={chatTabMode === "draft" ? handleSendDraftChat : handleSendChat}
                       placeholder={chatTabMode === "draft" ? `Draft: ${task.title}…` : `Chat in ${task.title}…`}
                       disabled={chatTabMode === "draft" && ["confirmed", "in_progress", "done"].includes(task?.status)}
+                      style={{ minHeight: "unset", maxHeight: 80 }}
                     />
                     {chatTabMode === "draft" && ["confirmed", "in_progress", "done"].includes(task?.status) && (
                       <div style={{ padding: "6px 12px", background: "#FFFBEB", borderTop: "1px solid #FDE68A", fontSize: 10, color: "#92400E", display: "flex", alignItems: "center", gap: 5 }}>
@@ -7981,7 +6951,10 @@ em-emoji-picker,
 
             {/* === Image-2: inline detail/activity render inside chat sidebar === */}
             {task && !task.isFolder && rightPanel && (
-              <div className="gv-chat-inline-detail" style={{ flex: 1, overflow: "auto", background: "#fff", display: "flex", flexDirection: "column" }}>
+              <div className="gv-chat-inline-detail" style={{ flex: 1, background: "#fff", display: "flex", flexDirection: "column" }}>
+
+                <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
+
                 {rightPanel === "files" ? (
                   filesLoading ? (
                     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: 40 }}><GwSpinner /></div>
@@ -8175,11 +7148,14 @@ em-emoji-picker,
                   <span className="gv-badge" style={{ color: pri.color, background: pri.bg, borderColor: `${pri.color}22` }}><span className="gv-badge-dot" style={{ background: pri.dot }} />{pri.label}</span>
                 </div>
                 <div className="gv-detail-tabs">
-                  <button className={`gv-dtab ${mobDetailPanel === "info" ? "active" : ""}`} onClick={() => setMobDetailPanel("info")}>ℹ️ Info</button>
-                  {!task.isFolder && (
+                  {!task.isFolder && task.isGoal && (
+                    <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>Activity</button>
+                  )}
+                  <button className={`gv-dtab ${mobDetailPanel === "info" ? "active" : ""}`} onClick={() => setMobDetailPanel("info")}>Details</button>
+                  {!task.isFolder && !task.isGoal && (
                     <button className={`gv-dtab ${mobDetailPanel === "reports" ? "active" : ""}`} onClick={() => setMobDetailPanel("reports")}>
-                      {task.isThirdParty ? "🔗 Timeline" : task.isGoal ? "🎯 Goal" : task.isRepeat ? "🔁 Submissions" : "📊 Reports"}
-                      {!task.isThirdParty && !task.isGoal && !task.isRepeat && (task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
+                      {task.isThirdParty ? "Timeline" : task.isRepeat ? "Submissions" : "Reports"}
+                      {!task.isThirdParty && !task.isRepeat && (task.dailyReportCount || 0) > 0 && <span className="gv-dtab-ct">{task.dailyReportCount}</span>}
                     </button>
                   )}
                   {task.isFolder && (
@@ -8651,6 +7627,70 @@ em-emoji-picker,
       {activeModal?.type === "submit_completion" && <SubmitCompletionModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "review_completion" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="review_completion" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "ceo_review" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="ceo_review" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
+
+      {priCtxMenu && (
+        <div
+          className="gv-pri-ctx"
+          style={{
+            position: "fixed",
+            left: Math.min(priCtxMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 180),
+            top: Math.min(priCtxMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 240),
+            zIndex: 9999,
+            background: "#fff",
+            border: "1px solid #E5E7EB",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(15,23,42,0.14)",
+            padding: 6,
+            minWidth: 168,
+            animation: "ctx-in 0.12s ease",
+            fontFamily: "var(--font)",
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#94A3B8", padding: "4px 10px 8px", borderBottom: "1px solid #F1F5F9", marginBottom: 4 }}>
+            Set Priority
+          </div>
+          {[
+            { p: 1, label: "P1 — Highest", color: "#DC2626", bg: "#FEF2F2" },
+            { p: 2, label: "P2 — High", color: "#EA580C", bg: "#FFF7ED" },
+            { p: 3, label: "P3 — Medium", color: "#D97706", bg: "#FFFBEB" },
+            { p: 4, label: "P4 — Normal", color: "#0369A1", bg: "#EFF6FF" },
+            { p: 5, label: "P5 — Low", color: "#16A34A", bg: "#F0FDF4" },
+          ].map(({ p, label, color, bg }) => {
+            const isActive = Number(priCtxMenu.current) === p;
+            return (
+              <button
+                key={p}
+                onClick={() => { handleUpdatePriority(priCtxMenu.taskId, p); setPriCtxMenu(null); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 9,
+                  width: "100%", padding: "7px 10px",
+                  border: "none", background: isActive ? "#EBF2FA" : "none",
+                  cursor: "pointer", fontSize: 12, fontWeight: isActive ? 700 : 500,
+                  color: isActive ? "#1B4F8A" : "#374151",
+                  textAlign: "left", borderRadius: 6, fontFamily: "var(--font)",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "#F5F7FF"; }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "none"; }}
+              >
+                <span style={{
+                  width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+                  background: bg, color, fontSize: 9, fontWeight: 800,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  border: `1px solid ${color}44`,
+                }}>P{p}</span>
+                {label}
+                {isActive && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ marginLeft: "auto", flexShrink: 0 }}>
+                    <path d="M2 6l3 3 5-5" stroke="#1B4F8A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Delete message confirmation modal */}
       {

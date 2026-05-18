@@ -67,6 +67,17 @@ export default function MediaMessageInput({
     const sourceRef = useRef(null);
     const audioCtxRef = useRef(null);
 
+    // ── Listen for pasted image injected by parent page ──
+  useEffect(() => {
+    const handler = (e) => {
+      const att = e.detail;
+      if (!att?.url) return;
+      setAttachments(prev => [...prev, att]);
+    };
+    window.addEventListener("dm_paste_attachment", handler);
+    return () => window.removeEventListener("dm_paste_attachment", handler);
+  }, []);
+
     const canSend = (text.trim() || attachments.length > 0) && !uploading && !disabled;
 
     useEffect(() => { if (showEmoji) setRecent(getRecent()); }, [showEmoji]);

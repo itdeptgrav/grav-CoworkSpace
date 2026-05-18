@@ -41,8 +41,9 @@ export function ReportCard({ report }) {
 }
 
 /* ─── ReportDateGroup — collapsible date group for daily reports ─── */
-export function ReportDateGroup({ dateLabel, reports }) {
+export function ReportDateGroup({ dateLabel, reports = [] }) {
     const [open, setOpen] = useState(true);
+    if (!reports || !Array.isArray(reports)) return null;
     return (
         <div style={{ marginBottom: 2 }}>
             {/* Date header */}

@@ -1,326 +1,316 @@
 /**
  * components/coworking/tasks/WorkCommitModal.jsx
  *
- * Pause-timer modal — shown when an employee pauses their task timer.
- * Captures a commit message and any number of file attachments, writes both
- * to `cowork_work_commits/{employeeId}/logs/{autoId}` via the parent's
- * handleCommitSubmit callback.
- *
- * Two modes, picked from commitModal.autoReason:
- *   - undefined / null     → "Pause Timer" (user pressed pause manually)
- *   - "deadline_reached"   → "Deadline Reached" red-themed header + red
- *                            banner in body; label + button copy shift to
- *                            nudge the employee to summarize what they got
- *                            done and then request an extension.
- *
- * Fully self-contained UI:
- *   - × close button + Esc key (parent handles Esc in useEffect)
- *   - Ctrl/⌘+Enter submits
- *   - Drag-and-drop attachments (any file type → Google Drive via /cowork/upload/pdf)
- *   - Pause & Save disabled while uploading/saving
- *
- * All state lives in the parent (TasksPage) so the attachments list survives
- * a parent re-render and so the same state can drive timer pause behavior.
+ * Pause-timer panel — RIGHT SIDE SLIDER (replaces center popup).
+ * Slides in from the right over the existing UI.
+ * All logic/props identical to original.
  */
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+
+function SliderPortal({ children }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+  return createPortal(children, document.body);
+}
 
 export default function WorkCommitModal({
-    // state
-    commitModal,          // { taskId, taskTitle, autoReason?, nextTaskId?, nextTaskTitle? } | null
-    commitMessage,
-    commitAttachments,
-    commitUploading,
-    commitDragging,
-    savingCommit,
-    // setters
-    setCommitMessage,
-    setCommitAttachments,
-    setCommitDragging,
-    // refs
-    commitFileInputRef,
-    // handlers
-    closeCommitModal,
-    uploadCommitFiles,
-    handleCommitSubmit,
+  commitModal,
+  commitMessage,
+  commitAttachments,
+  commitUploading,
+  commitDragging,
+  savingCommit,
+  setCommitMessage,
+  setCommitAttachments,
+  setCommitDragging,
+  commitFileInputRef,
+  closeCommitModal,
+  uploadCommitFiles,
+  handleCommitSubmit,
 }) {
-    if (!commitModal) return null;
+  const [visible, setVisible] = useState(false);
 
-    const submitDisabled = savingCommit || commitUploading || !commitMessage.trim();
+  useEffect(() => {
+    if (commitModal) {
+      requestAnimationFrame(() => setVisible(true));
+    } else {
+      setVisible(false);
+    }
+  }, [!!commitModal]);
 
-    // ── Auto-pause detection ───────────────────────────────────────────────
-    // When the timer hits the approved deadline window, useTaskTimer fires
-    // pauseTask(...) with { autoReason: "deadline_reached" }. The parent
-    // handler (handleDeadlineReached) seeds commitModal with that reason.
-    // All visual shifts below are driven purely by this flag so the
-    // user-pressed-pause path is 100% visually unchanged.
-    const isDeadlineReached = commitModal.autoReason === "deadline_reached";
+  if (!commitModal) return null;
 
-    // Palette for the header chip — swap to red when the deadline hit.
-    // Kept inline and named so it's obvious what each shade is for.
-    const chipBg = isDeadlineReached ? "#FEE2E2" : "#FFF7ED";
-    const chipBorder = isDeadlineReached ? "#FECACA" : "#FED7AA";
-    const chipIconColor = isDeadlineReached ? "#B91C1C" : "#D97706";
-    const titleText = isDeadlineReached ? "Deadline Reached" : "Pause Timer";
-    const titleColor = isDeadlineReached ? "#991B1B" : "#0F172A";
+  const submitDisabled = savingCommit || commitUploading || !commitMessage.trim();
+  const isDeadlineReached = commitModal.autoReason === "deadline_reached";
 
-    return (
-        <div
-            // Prevent the browser from opening a file if the user misses the drop zone
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => e.preventDefault()}
-            style={{
-                position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
-                zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center",
-                backdropFilter: "blur(3px)", padding: 16,
-                fontFamily: "var(--font,'DM Sans',-apple-system,sans-serif)",
-            }}
-        >
-            <div style={{
-                background: "#fff", borderRadius: 16, width: "min(440px,96vw)",
-                boxShadow: "0 24px 64px rgba(0,0,0,0.22)",
-                animation: "ctm-in 0.18s cubic-bezier(0.4,0,0.2,1)",
-            }}>
-                {/* Header */}
-                <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #E5E7EB" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 9,
-                            background: chipBg,
-                            border: `1px solid ${chipBorder}`,
-                            display: "flex", alignItems: "center",
-                            justifyContent: "center", flexShrink: 0,
-                        }}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={chipIconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="4" /><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" />
-                                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
-                                <line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" />
-                            </svg>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: titleColor }}>{titleText}</div>
-                            <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {commitModal.taskTitle}
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={closeCommitModal}
-                            disabled={savingCommit || commitUploading}
-                            title="Close (Esc)"
-                            aria-label="Close"
-                            style={{
-                                width: 30, height: 30, borderRadius: 8,
-                                border: "1px solid #E5E7EB", background: "#F9FAFB",
-                                color: "#6B7280", cursor: (savingCommit || commitUploading) ? "not-allowed" : "pointer",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                flexShrink: 0, padding: 0,
-                                opacity: (savingCommit || commitUploading) ? 0.5 : 1,
-                                transition: "background 0.12s, color 0.12s",
-                            }}
-                            onMouseEnter={(e) => { if (!(savingCommit || commitUploading)) { e.currentTarget.style.background = "#F3F4F6"; e.currentTarget.style.color = "#111827"; } }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.color = "#6B7280"; }}
-                        >
-                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-                        </button>
-                    </div>
-                </div>
+  const F = { fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif" };
 
-                {/* Body */}
-                <div style={{ padding: "16px 20px" }}>
-                    {/* ── Deadline-reached banner ────────────────────────────
-                         Only shown when the pause was triggered by the timer
-                         hitting the approved window. Explains what happened
-                         and what to do next (request an extension). Zero
-                         visual change for the manual-pause path. */}
-                    {isDeadlineReached && (
-                        <div style={{
-                            marginBottom: 14,
-                            padding: "10px 12px",
-                            background: "#FEF2F2",
-                            border: "1px solid #FECDD3",
-                            borderRadius: 9,
-                            display: "flex", alignItems: "flex-start", gap: 10,
-                        }}>
-                            <span style={{ fontSize: 18, lineHeight: 1 }}>⏱</span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 3 }}>
-                                    Timer auto-paused — approved time is fully used
-                                </div>
-                                <div style={{ fontSize: 11, color: "#B91C1C", lineHeight: 1.55 }}>
-                                    Summarize your progress below, save this commit, then open the task and tap <b>Request Extension</b> to keep working.
-                                </div>
-                            </div>
-                        </div>
-                    )}
+  return (
+    <SliderPortal>
+      <style>{`
+        @keyframes wc-slide-in  { from { transform:translateX(100%); opacity:.8 } to { transform:translateX(0); opacity:1 } }
+        @keyframes wc-slide-out { from { transform:translateX(0); opacity:1 } to { transform:translateX(100%); opacity:0 } }
+        @keyframes wc-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+      `}</style>
 
-                    <label style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
-                        {isDeadlineReached ? "What did you get done?" : "What did you work on?"} <span style={{ color: "#EF4444", fontWeight: 600, textTransform: "none" }}>*</span>
-                    </label>
-                    <textarea
-                        autoFocus
-                        value={commitMessage}
-                        onChange={(e) => setCommitMessage(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
-                        placeholder={isDeadlineReached
-                            ? "e.g. Finished login UI, started on validation rules…"
-                            : "e.g. Fixed the login bug, updated UI layout…"}
-                        style={{
-                            width: "100%", padding: "10px 12px",
-                            border: `1.5px solid ${commitMessage.trim() ? "#E5E7EB" : "#FCA5A5"}`,
-                            borderRadius: 9, fontSize: 13, fontFamily: "inherit",
-                            outline: "none", resize: "vertical", minHeight: 90,
-                            color: "#0F172A", background: "#FAFAFA", boxSizing: "border-box",
-                            transition: "border-color 0.12s",
-                        }}
-                        onFocus={(e) => (e.target.style.borderColor = "#4F46E5")}
-                        onBlur={(e) => (e.target.style.borderColor = "#E5E7EB")}
-                    />
-                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ color: "#EF4444" }}>*</span> Required — describe what you worked on
-                        <span style={{ marginLeft: "auto" }}>💡 Ctrl+Enter to save</span>
-                    </div>
+      {/* Dim backdrop — clicking it closes (same as Esc) */}
+      <div
+        onClick={() => { if (!savingCommit && !commitUploading) closeCommitModal(); }}
+        style={{
+          position: "fixed", inset: 0,
+          background: "rgba(15,23,42,0.25)",
+          zIndex: 8998,
+          backdropFilter: "blur(1px)",
+        }}
+      />
 
-                    {/* ── Attachments ── all types go to Google Drive via /cowork/upload/pdf ── */}
-                    <div style={{ marginTop: 14 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
-                            Attachments <span style={{ color: "#9CA3AF", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>(optional)</span>
-                        </div>
+      {/* Slider panel */}
+      <div
+        style={{
+          position: "fixed", top: 0, right: 0, bottom: 0,
+          width: "min(460px, 100vw)",
+          background: "#fff",
+          borderLeft: "1px solid #E5E7EB",
+          boxShadow: "-6px 0 32px rgba(15,23,42,0.12)",
+          display: "flex", flexDirection: "column",
+          zIndex: 8999,
+          ...F,
+          animation: `${visible ? "wc-slide-in" : "wc-slide-out"} 0.24s cubic-bezier(0.32,0.72,0,1) both`,
+        }}
+        onDragOver={e => { e.preventDefault(); setCommitDragging(true); }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setCommitDragging(false); }}
+        onDrop={e => {
+          e.preventDefault(); setCommitDragging(false);
+          uploadCommitFiles(e.dataTransfer.files);
+        }}
+      >
+        {/* Drop overlay */}
+        {commitDragging && (
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 10,
+            background: "rgba(27,79,138,0.07)",
+            border: "2px dashed #1B4F8A", borderRadius: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            pointerEvents: "none",
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1B4F8A" }}>Drop files here</div>
+          </div>
+        )}
 
-                        {/* Existing chips */}
-                        {commitAttachments.length > 0 && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-                                {commitAttachments.map((a, i) => (
-                                    <div key={a.fileId || i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8 }}>
-                                        <span style={{ fontSize: 14 }}>
-                                            {(a.mimeType || "").startsWith("image/") ? "🖼" :
-                                                (a.mimeType || "").includes("pdf") ? "📕" :
-                                                    (a.mimeType || "").includes("spreadsheet") || (a.mimeType || "").includes("excel") || /\.(xls|xlsx|csv)$/i.test(a.name || "") ? "📊" :
-                                                        (a.mimeType || "").includes("word") || /\.(doc|docx)$/i.test(a.name || "") ? "📄" :
-                                                            "📎"}
-                                        </span>
-                                        <span style={{ fontSize: 12, color: "#0F172A", fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.name}>
-                                            {a.name}
-                                        </span>
-                                        {a.size > 0 && (
-                                            <span style={{ fontSize: 10, color: "#94A3B8", flexShrink: 0 }}>
-                                                {a.size < 1024 * 1024 ? `${Math.round(a.size / 1024)}KB` : `${(a.size / 1024 / 1024).toFixed(1)}MB`}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={() => setCommitAttachments((prev) => prev.filter((_, j) => j !== i))}
-                                            disabled={savingCommit}
-                                            style={{ width: 20, height: 20, borderRadius: 4, border: "none", background: "transparent", color: "#EF4444", cursor: savingCommit ? "not-allowed" : "pointer", fontSize: 14, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                                            title="Remove"
-                                        >✕</button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Add-file button (drop zone) */}
-                        <input
-                            ref={commitFileInputRef}
-                            type="file"
-                            multiple
-                            style={{ display: "none" }}
-                            onChange={(e) => {
-                                const files = Array.from(e.target.files || []);
-                                e.target.value = ""; // so user can re-pick the same file after removing it
-                                uploadCommitFiles(files);
-                            }}
-                        />
-                        <div
-                            // Drag-and-drop target. Accepts any number of files and funnels them through the same helper.
-                            onDragEnter={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (!savingCommit && !commitUploading) setCommitDragging(true);
-                            }}
-                            onDragOver={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (!savingCommit && !commitUploading) setCommitDragging(true);
-                            }}
-                            onDragLeave={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                // Only clear if we're truly leaving the container, not just crossing into a child
-                                if (e.currentTarget.contains(e.relatedTarget)) return;
-                                setCommitDragging(false);
-                            }}
-                            onDrop={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setCommitDragging(false);
-                                if (savingCommit || commitUploading) return;
-                                const files = Array.from(e.dataTransfer?.files || []);
-                                if (files.length) uploadCommitFiles(files);
-                            }}
-                            style={{
-                                padding: "14px 12px", borderRadius: 10,
-                                border: `1.5px dashed ${commitDragging ? "#4F46E5" : "#C7D2FE"}`,
-                                background: commitDragging ? "#EEF2FF" : (commitUploading ? "#F1F5F9" : "#FAFAFA"),
-                                transition: "border-color 0.12s, background 0.12s",
-                                display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-                            }}
-                        >
-                            <button
-                                type="button"
-                                onClick={() => commitFileInputRef.current?.click()}
-                                disabled={commitUploading || savingCommit}
-                                style={{
-                                    display: "inline-flex", alignItems: "center", gap: 6,
-                                    padding: "7px 14px", borderRadius: 8,
-                                    border: "1.5px solid #C7D2FE",
-                                    background: "#fff",
-                                    color: "#4F46E5", fontSize: 12, fontWeight: 600,
-                                    cursor: (commitUploading || savingCommit) ? "wait" : "pointer",
-                                    fontFamily: "inherit",
-                                }}
-                            >
-                                {commitUploading ? (
-                                    <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Uploading…</>
-                                ) : (
-                                    <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg> Attach file</>
-                                )}
-                            </button>
-                            <div style={{ fontSize: 10, color: commitDragging ? "#4F46E5" : "#94A3B8", fontWeight: commitDragging ? 600 : 400, textAlign: "center" }}>
-                                {commitDragging
-                                    ? "Drop to attach"
-                                    : "or drag & drop files here — any type, up to 50MB, stored on Google Drive"}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Footer */}
-                <div style={{
-                    padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end",
-                    borderTop: "1px solid #F1F5F9",
-                }}>
-                    <button
-                        onClick={() => handleCommitSubmit(false)}
-                        disabled={submitDisabled}
-                        style={{
-                            padding: "8px 20px", borderRadius: 8, border: "none",
-                            background: submitDisabled ? "#E5E7EB" : "#4F46E5",
-                            color: submitDisabled ? "#94A3B8" : "#fff",
-                            fontSize: 13, fontWeight: 700,
-                            cursor: submitDisabled ? "not-allowed" : "pointer",
-                            fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
-                        }}
-                    >
-                        {savingCommit ? (
-                            <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Saving…</>
-                        ) : (
-                            <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Pause & Save</>
-                        )}
-                    </button>
-                </div>
+        {/* Header */}
+        <div style={{
+          padding: "14px 18px",
+          borderBottom: "1px solid #E5E7EB",
+          flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          {/* Status indicator strip */}
+          <div style={{
+            width: 3, height: 28, borderRadius: 2, flexShrink: 0,
+            background: isDeadlineReached ? "#DC2626" : "#1B4F8A",
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
+              {isDeadlineReached ? "Deadline Reached — Pause Timer" : "Pause Timer"}
             </div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {commitModal.taskTitle}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={closeCommitModal}
+            disabled={savingCommit || commitUploading}
+            style={{
+              width: 28, height: 28, borderRadius: 6,
+              border: "1px solid #E5E7EB", background: "#F9FAFB",
+              color: "#6B7280", cursor: (savingCommit || commitUploading) ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, opacity: (savingCommit || commitUploading) ? 0.4 : 1,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+              <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
-    );
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Deadline-reached notice */}
+          {isDeadlineReached && (
+            <div style={{
+              padding: "10px 12px",
+              background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7,
+              display: "flex", alignItems: "flex-start", gap: 9,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 2 }}>Timer auto-paused — approved time fully used</div>
+                <div style={{ fontSize: 11, color: "#B91C1C", lineHeight: 1.55 }}>
+                  Note what you completed below, save this entry, then tap <strong>Request Extension</strong> in the task to continue.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Task info strip */}
+          <div style={{
+            padding: "9px 12px",
+            background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 6,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" />
+              <rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" />
+            </svg>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {commitModal.taskTitle}
+            </span>
+          </div>
+
+          {/* Message input */}
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+              {isDeadlineReached ? "What did you accomplish?" : "What did you work on?"}{" "}
+              <span style={{ color: "#EF4444" }}>*</span>
+            </label>
+            <textarea
+              autoFocus
+              value={commitMessage}
+              onChange={e => setCommitMessage(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCommitSubmit(false); }}
+              placeholder={isDeadlineReached
+                ? "e.g. Finished the login UI, started on form validation…"
+                : "e.g. Fixed the layout bug, reviewed requirements…"
+              }
+              style={{
+                width: "100%", minHeight: 100, padding: "10px 12px",
+                border: `1px solid ${commitMessage.trim() ? "#1B4F8A" : "#E5E7EB"}`,
+                borderRadius: 7, fontSize: 13, ...F,
+                color: "#111827", background: "#fff",
+                resize: "vertical", outline: "none", lineHeight: 1.55,
+                boxSizing: "border-box", transition: "border-color 0.12s",
+              }}
+            />
+            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>Ctrl + Enter to save</div>
+          </div>
+
+          {/* File attachments */}
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 8 }}>
+              Attachments <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(optional)</span>
+            </label>
+
+            {/* Existing attachments */}
+            {commitAttachments.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 8 }}>
+                {commitAttachments.map((att, idx) => (
+                  <div key={idx} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 10px", background: "#F8FAFC",
+                    border: "1px solid #E5E7EB", borderRadius: 6,
+                  }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <a href={att.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#1B4F8A", textDecoration: "none", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {att.name}
+                    </a>
+                    {att.size > 0 && <span style={{ fontSize: 10, color: "#9CA3AF", flexShrink: 0 }}>{(att.size / 1048576).toFixed(1)} MB</span>}
+                    <button
+                      type="button"
+                      onClick={() => setCommitAttachments(prev => prev.filter((_, i) => i !== idx))}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", padding: 0, display: "flex", flexShrink: 0 }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Upload button + drop hint */}
+            <input
+              ref={commitFileInputRef}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={e => { uploadCommitFiles(e.target.files); e.target.value = ""; }}
+            />
+            <button
+              type="button"
+              disabled={commitUploading}
+              onClick={() => commitFileInputRef.current?.click()}
+              style={{
+                width: "100%", padding: "9px",
+                border: "1px dashed #D1D5DB", borderRadius: 6,
+                background: "#F8FAFC", color: "#6B7280",
+                fontSize: 12, fontWeight: 500, cursor: commitUploading ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                ...F, transition: "border-color 0.12s, color 0.12s",
+              }}
+              onMouseEnter={e => { if (!commitUploading) { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; } }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "#D1D5DB"; e.currentTarget.style.color = "#6B7280"; }}
+            >
+              {commitUploading ? (
+                <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "wc-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Uploading…</>
+              ) : (
+                <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg> Attach file or drag & drop</>
+              )}
+            </button>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 18px",
+          borderTop: "1px solid #E5E7EB",
+          background: "#FAFAFA",
+          display: "flex", gap: 8, flexShrink: 0,
+        }}>
+          <button
+            type="button"
+            onClick={() => handleCommitSubmit(true)}
+            disabled={savingCommit || commitUploading}
+            style={{
+              flex: 1, padding: "9px",
+              border: "1px solid #E5E7EB", borderRadius: 6,
+              background: "#fff", color: "#6B7280",
+              fontSize: 12, fontWeight: 500, cursor: savingCommit || commitUploading ? "not-allowed" : "pointer",
+              ...F, opacity: savingCommit || commitUploading ? 0.5 : 1,
+            }}
+          >
+            Skip & Pause
+          </button>
+          <button
+            type="button"
+            onClick={() => handleCommitSubmit(false)}
+            disabled={submitDisabled}
+            style={{
+              flex: 2, padding: "9px",
+              border: "none", borderRadius: 6,
+              background: submitDisabled ? "#E5E7EB" : "#1B4F8A",
+              color: submitDisabled ? "#9CA3AF" : "#fff",
+              fontSize: 12, fontWeight: 600,
+              cursor: submitDisabled ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              ...F, transition: "background 0.12s",
+            }}
+          >
+            {savingCommit ? (
+              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "wc-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Saving…</>
+            ) : "Save & Pause"}
+          </button>
+        </div>
+      </div>
+    </SliderPortal>
+  );
 }

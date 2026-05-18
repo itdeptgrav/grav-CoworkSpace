@@ -1,7 +1,8 @@
 "use client";
 /**
  * app/coworking/direct-messages/page.js
- * All original logic preserved + PDF card UI fixed + design polished
+ * + Copy button on message hover
+ * + Paste image from clipboard auto-upload
  */
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -13,17 +14,13 @@ import {
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
 import { cancelMeet, updateMeet } from "../../../lib/coworkApi";
+
 import MediaMessageInput from "../../../components/coworking/messaging/MediaMessageInput";
-
 import LinkedText from "../../../components/coworking/messaging/LinkedText";
-
 import { GwSpinner } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseDb, firebaseAuth } from "../../../lib/coworkFirebase";
-import {
-  collection as fsCollection, query as fsQuery, where as fsWhere,
-  onSnapshot as fsOnSnapshot, doc as fsDoc, updateDoc as fsUpdateDoc,
-} from "firebase/firestore";
 import DMCallManager, { triggerCall } from "../../../components/coworking/messaging/DMCallManager";
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 async function apiFetch(path, opts = {}) {
   const token = await firebaseAuth.currentUser?.getIdToken();
@@ -36,7 +33,9 @@ async function apiFetch(path, opts = {}) {
   return d;
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
 function convId(a, b) { return [a, b].sort().join("_"); }
 function tsToMs(ts) {
   if (!ts) return 0;
@@ -130,15 +129,11 @@ function Lightbox({ url, onClose, onDl }) {
 
 // ─── PDF / Document attachment card ──────────────────────────────────────────
 function DocCard({ att, isMe, onDl }) {
-  const isPdf = att.type === "pdf";
-  const name = att.name || (isPdf ? "Document.pdf" : "Attachment");
+  const name = att.name || "Attachment";
   const ext = name.split(".").pop()?.toUpperCase() || "FILE";
-
-  // Size display
   const sizeStr = att.bytes ? (att.bytes > 1048576
     ? (att.bytes / 1048576).toFixed(1) + " MB"
-    : (att.bytes / 1024).toFixed(0) + " KB")
-    : null;
+    : (att.bytes / 1024).toFixed(0) + " KB") : null;
 
   return (
     <div style={{
@@ -148,27 +143,19 @@ function DocCard({ att, isMe, onDl }) {
       borderRadius: 12, padding: "10px 12px", marginTop: 4,
       minWidth: 200, maxWidth: 260,
     }}>
-      {/* Icon block */}
-      <div style={{
-        width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-        background: isMe ? "rgba(255,255,255,0.18)" : "#EEF2FF",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 0,
-      }}>
+      <div style={{ width: 40, height: 40, borderRadius: 10, flexShrink: 0, background: isMe ? "rgba(255,255,255,0.18)" : "#EEF2FF", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isMe ? "rgba(255,255,255,0.85)" : "#4F46E5"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
         </svg>
         <span style={{ fontSize: 7, fontWeight: 800, color: isMe ? "rgba(255,255,255,0.7)" : "#4F46E5", letterSpacing: "0.02em", marginTop: -2 }}>{ext.slice(0, 4)}</span>
       </div>
-      {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: isMe ? "rgba(255,255,255,0.95)" : "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
         {sizeStr && <div style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.55)" : "#94A3B8", marginTop: 1 }}>{sizeStr}</div>}
       </div>
-      {/* Actions */}
       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
         <a href={att.url} target="_blank" rel="noopener noreferrer"
-          style={{ width: 28, height: 28, borderRadius: 7, background: isMe ? "rgba(255,255,255,0.14)" : "#E8EEFF", display: "flex", alignItems: "center", justifyContent: "center", border: "none", cursor: "pointer", textDecoration: "none", color: isMe ? "rgba(255,255,255,0.85)" : "#4F46E5" }}
+          style={{ width: 28, height: 28, borderRadius: 7, background: isMe ? "rgba(255,255,255,0.14)" : "#E8EEFF", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", color: isMe ? "rgba(255,255,255,0.85)" : "#4F46E5" }}
           title="Open">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
@@ -186,95 +173,77 @@ function DocCard({ att, isMe, onDl }) {
   );
 }
 
-// ─── Message bubble ───────────────────────────────────────────────────────────
-// ── ThreadRequestCard — shows a request inline in chat ──────────────────────
-const STATUS_COLORS = {
-  pending: { bg: "#FFF7ED", color: "#C2410C", border: "#FED7AA" },
-  approved: { bg: "#F0FDF4", color: "#15803D", border: "#BBF7D0" },
-  rejected: { bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" },
-};
-const PRI_COLORS = {
-  urgent: { bg: "#FEF2F2", color: "#B91C1C" },
-  high: { bg: "#FFF7ED", color: "#C2410C" },
-  medium: { bg: "#FFFBEB", color: "#92400E" },
-  low: { bg: "#F0FDF4", color: "#15803D" },
-};
+// ─── Copy toast ───────────────────────────────────────────────────────────────
+function useCopyToast() {
+  const [visible, setVisible] = useState(false);
+  const timerRef = useRef(null);
+  const show = () => {
+    setVisible(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setVisible(false), 1500);
+  };
+  return { visible, show };
+}
 
-// ── Collapsible requests bar — small pill, expands as floating panel ──────────
+// ─── Request card status/priority colors ──────────────────────────────────────
+const REQ_STATUS_COLORS = {
+  pending: { color: "#D97706", bg: "#FEF3C7", border: "#FDE68A" },
+  approved: { color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0" },
+  rejected: { color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
+};
+const REQ_PRI_COLOR = { urgent: "#DC2626", high: "#D97706", medium: "#6366F1", low: "#6B7280" };
+const REQ_PRI_BG = { urgent: "#FEF2F2", high: "#FEF3C7", medium: "#EEF2FF", low: "#F9FAFB" };
+
+// ─── Collapsible requests bar ─────────────────────────────────────────────────
 function ThreadRequestsBar({ requests, employeeId, employeeName }) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef(null);
-
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
-
   const pending = requests.filter(r => r.status === "pending").length;
-
   return (
     <div ref={panelRef} style={{ position: "relative", flexShrink: 0 }}>
-      {/* Pill trigger */}
-      <button
-        onClick={() => setOpen(p => !p)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: 8,
-          padding: "6px 14px", background: open ? "#FAF5FF" : "#F8FAFC",
-          border: "none", borderBottom: `1px solid ${open ? "#E9D5FF" : "#E5E7EB"}`,
-          cursor: "pointer", fontFamily: "inherit",
-        }}
-      >
+      <button onClick={() => setOpen(p => !p)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", background: open ? "#FAF5FF" : "#F8FAFC", border: "none", borderBottom: `1px solid ${open ? "#E9D5FF" : "#E5E7EB"}`, cursor: "pointer", fontFamily: "inherit" }}>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#7C3AED", flex: 1, textAlign: "left" }}>
-          {requests.length} Request{requests.length !== 1 ? "s" : ""}
-        </span>
-        {pending > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99, background: "#FEF3C7", color: "#D97706", border: "1px solid #FDE68A" }}>
-            {pending} pending
-          </span>
-        )}
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2.5" strokeLinecap="round" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", flexShrink: 0 }}>
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#7C3AED", flex: 1, textAlign: "left" }}>{requests.length} Request{requests.length !== 1 ? "s" : ""}</span>
+        {pending > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 99, background: "#FEF3C7", color: "#D97706", border: "1px solid #FDE68A" }}>{pending} pending</span>}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2.5" strokeLinecap="round" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", flexShrink: 0 }}><polyline points="6 9 12 15 18 9" /></svg>
       </button>
-
-      {/* Floating dropdown panel */}
       {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 200,
-          background: "#fff", border: "1px solid #E9D5FF", borderTop: "none",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-          maxHeight: "60vh", overflowY: "auto",
-          padding: "8px",
-          display: "flex", flexDirection: "column", gap: 6,
-        }}>
-          {requests.map(req => (
-            <ThreadRequestCard key={req.id} req={req} employeeId={employeeId} employeeName={employeeName} />
-          ))}
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 200, background: "#fff", border: "1px solid #E9D5FF", borderTop: "none", boxShadow: "0 8px 24px rgba(0,0,0,0.12)", maxHeight: "60vh", overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {requests.map(req => <ThreadRequestCard key={req.id} req={req} employeeId={employeeId} employeeName={employeeName} />)}
         </div>
       )}
     </div>
   );
 }
 
-
-
-function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null }) {
+// ─── Message Bubble ───────────────────────────────────────────────────────────
+function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
+  const [copyFlash, setCopyFlash] = useState(false);
 
-  // ── Meeting invite card ──────────────────────────────────────────────────────
+  const handleCopy = () => {
+    if (!msg.text) return;
+    navigator.clipboard?.writeText(msg.text).then(() => {
+      setCopyFlash(true);
+      setTimeout(() => setCopyFlash(false), 1200);
+      onCopied?.();
+    });
+  };
+
+  // ── Meeting invite card ───────────────────────────────────────────────────
   if (msg.messageType === "meeting_invite") {
     const md = msg.meetingData || {};
     const isLiveNow = md.dateTime
       ? (Date.now() >= new Date(md.dateTime).getTime() && Date.now() <= new Date(md.dateTime).getTime() + 2 * 3600000)
       : false;
-
     return (
       <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 8 }}>
-        {/* Avatar */}
         <div style={{ width: 28, height: 28, flexShrink: 0 }}>
           {showAvatar && !isMe && (
             msg.senderPicUrl
@@ -282,117 +251,48 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
               : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>{getInit(msg.senderName || "")}</div>
           )}
         </div>
-
-        {/* Invite card */}
         <div style={{ maxWidth: 320, display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
-          {showAvatar && !isMe && (
-            <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>
-          )}
-          <div style={{
-            background: "#fff",
-            border: "2px solid #16A34A",
-            borderRadius: 16,
-            overflow: "hidden",
-            boxShadow: "0 4px 16px rgba(22,163,74,0.15)",
-            width: 300,
-          }}>
-            {/* Green header */}
+          {showAvatar && !isMe && <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>}
+          <div style={{ background: "#fff", border: "2px solid #16A34A", borderRadius: 16, overflow: "hidden", boxShadow: "0 4px 16px rgba(22,163,74,0.15)", width: 300 }}>
             <div style={{ background: isLiveNow ? "#DC2626" : "#16A34A", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 32, height: 32, background: "rgba(255,255,255,0.2)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
-                </svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
               </div>
               <div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", letterSpacing: "0.04em" }}>
-                  {isLiveNow ? "🔴 LIVE NOW" : "📹 MEETING INVITATION"}
-                </div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", letterSpacing: "0.04em" }}>{isLiveNow ? "🔴 LIVE NOW" : "📹 MEETING INVITATION"}</div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)", marginTop: 1 }}>from {msg.senderName}</div>
               </div>
             </div>
-
-            {/* Details */}
             <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{md.meetTitle || "CoWork Meeting"}</div>
-              {md.description && (
-                <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>{md.description}</div>
-              )}
+              {md.description && <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>{md.description}</div>}
               <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, color: "#374151" }}>
-                {md.dateTime && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>📅</span>
-                    <span>{new Date(md.dateTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
-                  </div>
-                )}
-                {/* Meeting code — prominent */}
+                {md.dateTime && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span>📅</span><span>{new Date(md.dateTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span></div>}
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span>🔑</span>
                   <span style={{ fontSize: 11, color: "#9AA0A6" }}>Join Code:</span>
-                  <span style={{
-                    fontFamily: "monospace", fontSize: 18, fontWeight: 900,
-                    color: isLiveNow ? "#DC2626" : "#16A34A",
-                    letterSpacing: 4, background: isLiveNow ? "#FEF2F2" : "#F0FDF4",
-                    padding: "2px 10px", borderRadius: 8,
-                  }}>
-                    {md.joinCode || md.meetId}
-                  </span>
+                  <span style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: isLiveNow ? "#DC2626" : "#16A34A", letterSpacing: 4, background: isLiveNow ? "#FEF2F2" : "#F0FDF4", padding: "2px 10px", borderRadius: 8 }}>{md.joinCode || md.meetId}</span>
                 </div>
               </div>
-
-              {/* Join button */}
-              <a
-                href={`/coworking/cowork-meeting/${md.meetId}`}
-                style={{
-                  display: "block", width: "100%", padding: "10px 0",
-                  background: isLiveNow ? "#DC2626" : "#16A34A",
-                  color: "#fff", border: "none", borderRadius: 10,
-                  fontSize: 13, fontWeight: 700, textAlign: "center",
-                  textDecoration: "none", marginTop: 4,
-                  boxShadow: isLiveNow ? "0 4px 12px rgba(220,38,38,0.35)" : "0 4px 12px rgba(22,163,74,0.3)",
-                }}
-              >
+              <a href={`/coworking/cowork-meeting/${md.meetId}`} style={{ display: "block", width: "100%", padding: "10px 0", background: isLiveNow ? "#DC2626" : "#16A34A", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, textAlign: "center", textDecoration: "none", marginTop: 4 }}>
                 {isLiveNow ? "🔴 Join Live Meeting" : "🎥 Join Meeting"}
               </a>
-
-              {/* Host-only: Summary, Edit, Cancel */}
               {isHost && md.meetId && (
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  {onViewSummary && (
-                    <button onClick={() => onViewSummary(md.meetId, md.meetTitle)}
-                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /></svg>
-                      Summary
-                    </button>
-                  )}
-                  {onEdit && (
-                    <button onClick={() => onEdit({ meetId: md.meetId, title: md.meetTitle, description: md.description, dateTime: md.dateTime, participants: [] })}
-                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                      Edit
-                    </button>
-                  )}
-                  {onCancel && isMe && (
-                    <button onClick={() => onCancel(md.meetId, md.meetTitle)}
-                      style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-                      Cancel
-                    </button>
-                  )}
+                  {onViewSummary && <button onClick={() => onViewSummary(md.meetId, md.meetTitle)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /></svg>Summary</button>}
+                  {onEdit && <button onClick={() => onEdit({ meetId: md.meetId, title: md.meetTitle, description: md.description, dateTime: md.dateTime, participants: [] })} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #E5E7EB", background: "#F9FAFB", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Edit</button>}
+                  {onCancel && isMe && <button onClick={() => onCancel(md.meetId, md.meetTitle)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>Cancel</button>}
                 </div>
               )}
             </div>
           </div>
-
-          {/* Timestamp */}
-          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3, paddingRight: isMe ? 0 : 4, paddingLeft: isMe ? 4 : 0 }}>
-            {fmtTime(msg.createdAt)}
-          </div>
+          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3 }}>{fmtTime(msg.createdAt)}</div>
         </div>
       </div>
     );
   }
-  // ── End meeting invite ───────────────────────────────────────────────────────
 
+  // ── Standard message ──────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
       {/* Avatar */}
@@ -400,54 +300,77 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
         {showAvatar && !isMe && (
           msg.senderPicUrl
             ? <img src={msg.senderPicUrl} alt={msg.senderName} style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }} />
-            : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>
-              {getInit(msg.senderName || "")}
-            </div>
+            : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>{getInit(msg.senderName || "")}</div>
         )}
       </div>
-      {/* Column */}
+
+      {/* Bubble column */}
       <div className="dm-bub-col" style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
         {showAvatar && !isMe && (
           <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>
         )}
-        <div style={{
-          padding: "10px 13px 8px",
-          borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: msg.error ? "#FEF2F2" : isMe ? "linear-gradient(135deg,#1a73e8 0%,#1D4ED8 50%,#4F46E5 100%)" : "#FFFFFF",
-          color: msg.error ? "#DC2626" : isMe ? "#fff" : "#1E293B",
-          border: msg.error ? "1.5px solid #FECACA" : isMe ? "none" : "1.5px solid #EEF2F8",
-          boxShadow: isMe ? "0 3px 12px rgba(26,115,232,0.28)" : "0 1px 4px rgba(15,23,42,0.06)",
-          fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .6 : 1, wordBreak: "break-word",
-        }}>
-          {/* Text */}
-          {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
-          {/* Attachments */}
-          {msg.attachments?.map((a, i) => (
-            <div key={i} style={{ marginTop: msg.text ? 6 : 0 }}>
-              {/* Image */}
-              {a.type === "image" && (
-                <img src={a.url} alt="" onClick={() => onImg(a.url)}
-                  style={{ maxWidth: 220, maxHeight: 165, borderRadius: 10, cursor: "zoom-in", display: "block", marginTop: 2 }} />
-              )}
-              {/* Voice */}
-              {a.type === "voice" && (
-                <div style={{ marginTop: 2 }}>
-                  <audio controls src={a.url} style={{ maxWidth: "100%", height: 34, display: "block" }} />
-                </div>
-              )}
-              {/* PDF / Document — proper card */}
-              {a.type !== "image" && a.type !== "voice" && (
-                <DocCard att={a} isMe={isMe} onDl={onDl} />
-              )}
-            </div>
-          ))}
 
-          {/* Timestamp + ticks */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, marginTop: 6 }}>
-            <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.58)" : "#94A3B8", whiteSpace: "nowrap" }}>{fmtTime(msg.createdAt)}</span>
-            <Ticks status={status} isMe={isMe} />
+        {/* Wrapper for bubble + copy button */}
+        <div className="dm-bubble-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "flex-start", flexDirection: isMe ? "row-reverse" : "row", gap: 4 }}>
+
+          {/* Bubble */}
+          <div style={{
+            padding: "10px 13px 8px",
+            borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+            background: msg.error ? "#FEF2F2" : isMe ? "linear-gradient(135deg,#1a73e8 0%,#1D4ED8 50%,#4F46E5 100%)" : "#FFFFFF",
+            color: msg.error ? "#DC2626" : isMe ? "#fff" : "#1E293B",
+            border: msg.error ? "1.5px solid #FECACA" : isMe ? "none" : "1.5px solid #EEF2F8",
+            boxShadow: isMe ? "0 3px 12px rgba(26,115,232,0.28)" : "0 1px 4px rgba(15,23,42,0.06)",
+            fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .6 : 1, wordBreak: "break-word",
+          }}>
+            {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
+            {msg.attachments?.map((a, i) => (
+              <div key={i} style={{ marginTop: msg.text ? 6 : 0 }}>
+                {a.type === "image" && <img src={a.url} alt="" onClick={() => onImg(a.url)} style={{ maxWidth: 220, maxHeight: 165, borderRadius: 10, cursor: "zoom-in", display: "block", marginTop: 2 }} />}
+                {a.type === "voice" && <div style={{ marginTop: 2 }}><audio controls src={a.url} style={{ maxWidth: "100%", height: 34, display: "block" }} /></div>}
+                {a.type !== "image" && a.type !== "voice" && <DocCard att={a} isMe={isMe} onDl={onDl} />}
+              </div>
+            ))}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, marginTop: 6 }}>
+              <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.58)" : "#94A3B8", whiteSpace: "nowrap" }}>{fmtTime(msg.createdAt)}</span>
+              <Ticks status={status} isMe={isMe} />
+            </div>
           </div>
+
+          {/* Copy button — visible on hover, only for text messages */}
+          {msg.text && (
+            <button
+              className="dm-copy-btn"
+              title={copyFlash ? "Copied!" : "Copy message"}
+              onClick={handleCopy}
+              style={{
+                width: 24, height: 24,
+                borderRadius: 6,
+                border: "1px solid #E2E8F0",
+                background: copyFlash ? "#F0FDF4" : "#fff",
+                color: copyFlash ? "#16A34A" : "#94A3B8",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0, alignSelf: "center",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.07)",
+                transition: "all 0.15s",
+                opacity: 0,
+              }}
+            >
+              {copyFlash ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+              )}
+            </button>
+          )}
         </div>
+
         {msg.error && <div style={{ fontSize: 10, color: "#EF4444", marginTop: 2 }}>Failed to send</div>}
       </div>
     </div>
@@ -456,12 +379,64 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
 
 // ─── Avatar component ─────────────────────────────────────────────────────────
 function Av({ name, size = 40, url }) {
-  if (url) return (
-    <img src={url} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
-  );
+  if (url) return <img src={url} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
   return (
     <div style={{ width: size, height: size, borderRadius: "50%", background: avBg(name || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: size * 0.35, fontWeight: 700, flexShrink: 0, letterSpacing: "0.02em" }}>
       {getInit(name || "")}
+    </div>
+  );
+}
+
+// ─── Request Card ─────────────────────────────────────────────────────────────
+function ThreadRequestCard({ req, employeeId }) {
+  const sc = REQ_STATUS_COLORS[req.status] || REQ_STATUS_COLORS.pending;
+  const isFromMe = req.fromId === employeeId;
+  const isToMe = req.toId === employeeId;
+  const fire = (extra) => window.dispatchEvent(new CustomEvent("openRequestPanel", {
+    detail: { tab: isToMe ? "received" : "sent", requestId: req.id, ...extra }
+  }));
+  return (
+    <div style={{ display: "flex", justifyContent: isFromMe ? "flex-end" : "flex-start", width: "100%", marginBottom: 4 }}>
+      <div style={{ maxWidth: 280, width: "100%", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", border: "1px solid #E2E8F0", background: "#fff" }}>
+        <div style={{ background: "#1E293B", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>Request</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 1 }}>from {req.fromName}</div>
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 99, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}`, flexShrink: 0 }}>{req.status}</span>
+          {req.priority && <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, color: REQ_PRI_COLOR[req.priority], background: REQ_PRI_BG[req.priority], flexShrink: 0 }}>{req.priority}</span>}
+        </div>
+        <div style={{ padding: "10px 14px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{req.subject}</div>
+          {req.message && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>{req.message}</div>}
+          {req.dueDate && <div style={{ fontSize: 11, color: "#D97706", fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
+          {req.type && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "#F1F5F9", color: "#475569", fontWeight: 600, border: "1px solid #E2E8F0", alignSelf: "flex-start" }}>{req.type}</span>}
+          {req.attachments?.length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {req.attachments.map((att, i) => (
+                <a key={i} href={att.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 5, textDecoration: "none", fontWeight: 500 }}>
+                  📎 {(att.name || "File").slice(0, 18)}
+                </a>
+              ))}
+            </div>
+          )}
+          {req.responseMessage && (
+            <div style={{ padding: "5px 9px", background: "#F8FAFC", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "2px solid #CBD5E1" }}>
+              <strong>Response:</strong> {req.responseMessage}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            {isToMe && req.status === "pending" && (
+              <button onClick={() => fire({ openRespond: true })} style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "none", background: "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>✓ Respond</button>
+            )}
+            <button onClick={() => fire({ openChat: true })} style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>💬 Chat</button>
+            <button onClick={() => fire({})} style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>View →</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -474,9 +449,9 @@ export default function DirectMessagesPage() {
   const [meetForm, setMeetForm] = useState({ title: "", dateTime: "", description: "" });
   const [meetBusy, setMeetBusy] = useState(false);
   const [meetError, setMeetError] = useState("");
-  const [summaryModal, setSummaryModal] = useState(null); // { meetId, meetTitle }
-  const [threadRequests, setThreadRequests] = useState([]); // requests linked to this DM thread
-  const [editModal, setEditModal] = useState(null);       // meet object
+  const [summaryModal, setSummaryModal] = useState(null);
+  const [threadRequests, setThreadRequests] = useState([]);
+  const [editModal, setEditModal] = useState(null);
   const [editError, setEditError] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
@@ -486,7 +461,7 @@ export default function DirectMessagesPage() {
   const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedDept, setSelectedDept] = useState("");
-  const [activeTab, setActiveTab] = useState("recents"); // "recents" | "people"
+  const [activeTab, setActiveTab] = useState("recents");
   const [convsLoading, setConvsLoading] = useState(true);
   const [empsLoading, setEmpsLoading] = useState(true);
   const [selectedPerson, setSelectedPerson] = useState(null);
@@ -496,11 +471,21 @@ export default function DirectMessagesPage() {
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [unread, setUnread] = useState({});
 
+  // ── Paste image state ────────────────────────────────────────────────────
+  const [pasteUploading, setPasteUploading] = useState(false);
+  // ── Copy toast ───────────────────────────────────────────────────────────
+  const [copyToast, setCopyToast] = useState(false);
+  const copyToastTimerRef = useRef(null);
+  const showCopyToast = () => {
+    setCopyToast(true);
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+    copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1500);
+  };
+
   const endRef = useRef(null);
   const pendingMapRef = useRef(new Map());
   const activeConv = useRef(null);
 
-  // All unique departments
   const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
 
   useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading]);
@@ -510,9 +495,7 @@ export default function DirectMessagesPage() {
     if (!user || !employeeId) return;
     setEmpsLoading(true);
     getDocs(collection(firebaseDb, "cowork_employees"))
-      .then(snap => setEmployees(
-        snap.docs.map(d => ({ employeeId: d.id, ...d.data() })).filter(e => e.employeeId !== employeeId)
-      ))
+      .then(snap => setEmployees(snap.docs.map(d => ({ employeeId: d.id, ...d.data() })).filter(e => e.employeeId !== employeeId)))
       .catch(console.error).finally(() => setEmpsLoading(false));
   }, [user, employeeId]);
 
@@ -520,29 +503,20 @@ export default function DirectMessagesPage() {
   useEffect(() => {
     if (!user || !employeeId) return;
     setConvsLoading(true);
-    const q = query(
-      collection(firebaseDb, "cowork_direct_messages"),
-      where("participantIds", "array-contains", employeeId)
-    );
+    const q = query(collection(firebaseDb, "cowork_direct_messages"), where("participantIds", "array-contains", employeeId));
     const unsub = onSnapshot(q, async snap => {
-      // Sort client-side — handles docs with missing updatedAt field
-      const convs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const ta = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
-          const tb = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
-          return tb - ta;
-        });
+      const convs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => {
+        const ta = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
+        const tb = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
+        return tb - ta;
+      });
       setConversations(convs);
       setConvsLoading(false);
       const counts = {};
       await Promise.all(convs.map(async conv => {
         if (conv.id === activeConv.current) return;
         try {
-          const ms = await getDocs(query(
-            collection(firebaseDb, "cowork_direct_messages", conv.id, "messages"),
-            where("senderId", "!=", employeeId)
-          ));
+          const ms = await getDocs(query(collection(firebaseDb, "cowork_direct_messages", conv.id, "messages"), where("senderId", "!=", employeeId)));
           const n = ms.docs.filter(d => !(d.data().readBy || []).includes(employeeId)).length;
           if (n > 0) counts[conv.id] = n;
         } catch (_) { }
@@ -558,10 +532,7 @@ export default function DirectMessagesPage() {
     const cid = convId(employeeId, selectedPerson.employeeId);
     activeConv.current = cid;
     setMsgsLoading(true);
-    const q = query(
-      collection(firebaseDb, "cowork_direct_messages", cid, "messages"),
-      orderBy("createdAt", "asc"), limit(100)
-    );
+    const q = query(collection(firebaseDb, "cowork_direct_messages", cid, "messages"), orderBy("createdAt", "asc"), limit(100));
     const unsub = onSnapshot(q, async snap => {
       const incoming = snap.docs.map(d => ({ ...d.data(), id: d.id, createdAt: tsToISO(d.data().createdAt), temp: false, sending: false, error: false }));
       const toRead = snap.docs.filter(d => d.data().senderId !== employeeId && !(d.data().readBy || []).includes(employeeId));
@@ -593,34 +564,21 @@ export default function DirectMessagesPage() {
     return () => { unsub(); activeConv.current = null; };
   }, [selectedPerson, employeeId]);
 
-  // Scroll to last message when: messages change, person selected, or keyboard opens
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, selectedPerson]);
 
-  // Keep the latest message visible when keyboard opens / closes
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
-    const onViewportChange = () => {
-      // Wait for layout to settle, then scroll to last message
-      requestAnimationFrame(() => {
-        endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-      });
-    };
+    const onViewportChange = () => { requestAnimationFrame(() => { endRef.current?.scrollIntoView({ behavior: "auto", block: "end" }); }); };
     window.visualViewport.addEventListener("resize", onViewportChange);
     return () => window.visualViewport.removeEventListener("resize", onViewportChange);
   }, []);
 
-  // When user taps the input, scroll to last message right away
   useEffect(() => {
     const onFocusIn = (e) => {
       const t = e.target;
       if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) {
-        // Slight delay so the keyboard has time to start opening
-        setTimeout(() => {
-          endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-        }, 100);
-        setTimeout(() => {
-          endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-        }, 350);
+        setTimeout(() => { endRef.current?.scrollIntoView({ behavior: "auto", block: "end" }); }, 100);
+        setTimeout(() => { endRef.current?.scrollIntoView({ behavior: "auto", block: "end" }); }, 350);
       }
     };
     document.addEventListener("focusin", onFocusIn);
@@ -636,46 +594,47 @@ export default function DirectMessagesPage() {
     const opt = { messageId: tempId, threadType: "direct", threadId: cid, senderId: employeeId, senderName: employeeName, text: text || "", attachments: attachments || [], messageType: rt, type: rt, readBy: [employeeId], status: "sending", temp: true, sending: true, error: false, createdAt: new Date().toISOString() };
     setMessages(prev => [...prev, opt]);
     try {
-      // Write DIRECTLY to Firestore — guarantees participantIds is set for both users
       const messageId = crypto.randomUUID();
       pendingMapRef.current.set(tempId, messageId);
       const convRef = doc(firebaseDb, "cowork_direct_messages", cid);
       const msgsRef = collection(firebaseDb, "cowork_direct_messages", cid, "messages");
-      // Create conv doc with participantIds if it doesn't exist
       const snap = await getDoc(convRef);
       if (!snap.exists()) {
-        await setDoc(convRef, {
-          conversationId: cid,
-          participantIds: [employeeId, selectedPerson.employeeId].sort(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await setDoc(convRef, { conversationId: cid, participantIds: [employeeId, selectedPerson.employeeId].sort(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       }
-      // Write message
       const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
-      await setDoc(doc(msgsRef, messageId), {
-        messageId, threadType: "direct", threadId: cid,
-        senderId: employeeId, senderName: employeeName,
-        text: text || "", attachments: cleanAtts,
-        messageType: rt, type: rt,
-        readBy: [employeeId], status: "sent",
-        createdAt: serverTimestamp(),
-      });
-      // Update conversation preview
+      await setDoc(doc(msgsRef, messageId), { messageId, threadType: "direct", threadId: cid, senderId: employeeId, senderName: employeeName, text: text || "", attachments: cleanAtts, messageType: rt, type: rt, readBy: [employeeId], status: "sent", createdAt: serverTimestamp() });
       const preview = rt === "image" ? "📷 Photo" : rt === "pdf" ? "📄 Document" : rt === "voice" ? "🎤 Voice" : (text || "").slice(0, 80);
-      await updateDoc(convRef, {
-        lastMessage: { text: preview, senderId: employeeId, senderName: employeeName, messageType: rt, sentAt: serverTimestamp() },
-        updatedAt: serverTimestamp(),
-      });
-      // Fire backend for FCM push + email ONLY (non-blocking)
-      apiFetch("/direct-message/notify", {
-        method: "POST",
-        body: JSON.stringify({ toEmployeeId: selectedPerson.employeeId, text: text || "", messageType: rt }),
-      }).catch(() => { });
+      await updateDoc(convRef, { lastMessage: { text: preview, senderId: employeeId, senderName: employeeName, messageType: rt, sentAt: serverTimestamp() }, updatedAt: serverTimestamp() });
+      apiFetch("/direct-message/notify", { method: "POST", body: JSON.stringify({ toEmployeeId: selectedPerson.employeeId, text: text || "", messageType: rt }) }).catch(() => { });
     } catch (err) {
       console.error("send:", err);
       pendingMapRef.current.delete(tempId);
       setMessages(prev => prev.map(m => m.messageId === tempId ? { ...m, sending: false, error: true, status: "error" } : m));
+    }
+  };
+
+  // ── Paste image handler — uploads and adds to input as preview, not auto-sent ──
+  const handlePaste = async (e) => {
+    if (!selectedPerson || !employeeId) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItem = items.find(it => it.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    setPasteUploading(true);
+    try {
+      const { uploadImage } = await import("../../../lib/mediaUploadApi");
+      const result = await uploadImage(file, "cowork-dm");
+      // Dispatch a custom event so MediaMessageInput can pick up the attachment
+      window.dispatchEvent(new CustomEvent("dm_paste_attachment", {
+        detail: { type: "image", url: result.url, name: "pasted_image.png" }
+      }));
+    } catch (err) {
+      console.error("paste upload failed:", err);
+    } finally {
+      setPasteUploading(false);
     }
   };
 
@@ -695,7 +654,7 @@ export default function DirectMessagesPage() {
     a.click(); document.body.removeChild(a);
   };
 
-  // ── Thread request listener — MUST be before any early return (Rules of Hooks)
+  // ── Thread request listener ───────────────────────────────────────────────
   useEffect(() => {
     if (!employeeId || !selectedPerson?.employeeId) { setThreadRequests([]); return; }
     const cid = convId(employeeId, selectedPerson.employeeId);
@@ -709,7 +668,6 @@ export default function DirectMessagesPage() {
 
   if (loading || !user) return null;
 
-  // Derived data
   const empMap = Object.fromEntries(employees.map(e => [e.employeeId, e]));
   const filteredEmps = employees.filter(e => {
     const q = search.toLowerCase();
@@ -728,7 +686,6 @@ export default function DirectMessagesPage() {
   });
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
 
-  // Group messages with date separators
   const withSep = [];
   let lastDate = null;
   messages.forEach((msg, i) => {
@@ -747,15 +704,11 @@ export default function DirectMessagesPage() {
   });
 
   const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
-
   const handleCancelMeet = async (meetId, meetTitle) => {
     if (!window.confirm(`Cancel meeting "${meetTitle}"? This cannot be undone.`)) return;
     setCancellingId(meetId);
-    try { await cancelMeet(meetId); }
-    catch (e) { alert(e.message || "Failed to cancel meeting"); }
-    finally { setCancellingId(null); }
+    try { await cancelMeet(meetId); } catch (e) { alert(e.message || "Failed to cancel meeting"); } finally { setCancellingId(null); }
   };
-
   const handleEditSave = async (updated) => {
     if (!editModal) return;
     setEditError("");
@@ -763,54 +716,28 @@ export default function DirectMessagesPage() {
     if (!updated.dateTime) { setEditError("Date and time is required."); return; }
     setEditSaving(true);
     try {
-      await updateMeet(editModal.meetId, {
-        title: updated.title.trim(), description: updated.description || "",
-        dateTime: updated.dateTime, googleMeetLink: updated.googleMeetLink || null,
-        participants: updated.participants || [],
-      });
+      await updateMeet(editModal.meetId, { title: updated.title.trim(), description: updated.description || "", dateTime: updated.dateTime, googleMeetLink: updated.googleMeetLink || null, participants: updated.participants || [] });
       setEditModal(null);
-    } catch (e) { setEditError(e.message || "Failed to save."); }
-    finally { setEditSaving(false); }
+    } catch (e) { setEditError(e.message || "Failed to save."); } finally { setEditSaving(false); }
   };
-
   const handleCreateMeeting = async () => {
     if (!meetForm.title.trim()) { setMeetError("Title is required"); return; }
     if (!meetForm.dateTime) { setMeetError("Date and time is required"); return; }
     if (!selectedPerson) return;
     setMeetBusy(true); setMeetError("");
     try {
-      const result = await apiFetch("/schedule-meet/create", {
-        method: "POST",
-        body: JSON.stringify({
-          title: meetForm.title.trim(),
-          description: meetForm.description.trim() || "",
-          dateTime: meetForm.dateTime,
-          googleMeetLink: null,
-          participants: [selectedPerson.employeeId],
-        }),
-      });
+      const result = await apiFetch("/schedule-meet/create", { method: "POST", body: JSON.stringify({ title: meetForm.title.trim(), description: meetForm.description.trim() || "", dateTime: meetForm.dateTime, googleMeetLink: null, participants: [selectedPerson.employeeId] }) });
       const meetId = result?.meet?.meetId || result?.meetId;
       const joinCode = result?.meet?.joinCode || result?.joinCode || "";
-      // Send invite message in this conversation
       const cid = convId(employeeId, selectedPerson.employeeId);
       const convRef = doc(firebaseDb, "cowork_direct_messages", cid);
       const msgsRef = collection(convRef, "messages");
       const msgId = crypto.randomUUID();
-      await setDoc(doc(msgsRef, msgId), {
-        messageId: msgId, senderId: employeeId, senderName: employeeName,
-        text: `Meeting Invitation: ${meetForm.title.trim()}`,
-        messageType: "meeting_invite", type: "meeting_invite",
-        meetingData: { meetId, joinCode, meetTitle: meetForm.title.trim(), description: meetForm.description.trim(), dateTime: meetForm.dateTime },
-        readBy: [employeeId], createdAt: serverTimestamp(),
-      });
-      await updateDoc(convRef, {
-        lastMessage: { text: `📹 Meeting invite: ${meetForm.title.trim()}`, senderId: employeeId, senderName: employeeName, messageType: "meeting_invite", sentAt: serverTimestamp() },
-        updatedAt: serverTimestamp(),
-      });
+      await setDoc(doc(msgsRef, msgId), { messageId: msgId, senderId: employeeId, senderName: employeeName, text: `Meeting Invitation: ${meetForm.title.trim()}`, messageType: "meeting_invite", type: "meeting_invite", meetingData: { meetId, joinCode, meetTitle: meetForm.title.trim(), description: meetForm.description.trim(), dateTime: meetForm.dateTime }, readBy: [employeeId], createdAt: serverTimestamp() });
+      await updateDoc(convRef, { lastMessage: { text: `📹 Meeting invite: ${meetForm.title.trim()}`, senderId: employeeId, senderName: employeeName, messageType: "meeting_invite", sentAt: serverTimestamp() }, updatedAt: serverTimestamp() });
       setShowMeetModal(false);
       setMeetForm({ title: "", dateTime: "", description: "" });
-    } catch (e) { setMeetError(e.message); }
-    finally { setMeetBusy(false); }
+    } catch (e) { setMeetError(e.message); } finally { setMeetBusy(false); }
   };
 
   const roleChip = r => r === "ceo" ? { bg: "#FEF3C7", color: "#92400E", label: "CEO" }
@@ -822,12 +749,25 @@ export default function DirectMessagesPage() {
       <style>{CSS}</style>
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} onDl={() => dlFile(lightbox)} />}
 
+      {/* Copy toast */}
+      {copyToast && (
+        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#1E293B", color: "#fff", padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.2)", pointerEvents: "none", animation: "dm-toast-in 0.15s ease" }}>
+          ✓ Copied to clipboard
+        </div>
+      )}
+
+      {/* Paste uploading indicator */}
+      {pasteUploading && (
+        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#1B4F8A", color: "#fff", padding: "8px 18px", borderRadius: 8, fontSize: 12, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.2)", pointerEvents: "none", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "dm-spin 0.7s linear infinite" }} />
+          Uploading pasted image…
+        </div>
+      )}
+
       <div className="dm-root">
 
         {/* ══════════════ SIDEBAR ══════════════ */}
         <div className={`dm-left${mobileChatOpen ? " mob-gone" : ""}`}>
-
-          {/* Header */}
           <div className="dm-lhead">
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ width: 36, height: 36, borderRadius: 11, background: "linear-gradient(135deg,#1a73e8,#4F46E5)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -835,112 +775,85 @@ export default function DirectMessagesPage() {
               </div>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.03em", display: "flex", alignItems: "center", gap: 7 }}>
-                  Messages
-                  {totalUnread > 0 && <Badge n={totalUnread} />}
+                  Messages {totalUnread > 0 && <Badge n={totalUnread} />}
                 </div>
                 <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500, marginTop: 1 }}>Direct conversations</div>
               </div>
             </div>
           </div>
 
-          {/* Search */}
           <div className="dm-search-wrap">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <input className="dm-search-in" placeholder="Search name or department…" value={search} onChange={e => setSearch(e.target.value)} />
             {search && <button className="dm-search-clr" onClick={() => setSearch("")}>&#215;</button>}
           </div>
 
-          {/* Department chips */}
           {allDepts.length > 0 && (
             <div className="dm-dept-row">
               <button className={`dm-chip${!selectedDept ? " on" : ""}`} onClick={() => setSelectedDept("")}>All</button>
-              {allDepts.map(d => (
-                <button key={d} className={`dm-chip${selectedDept === d ? " on" : ""}`} onClick={() => setSelectedDept(p => p === d ? "" : d)}>{d}</button>
-              ))}
+              {allDepts.map(d => <button key={d} className={`dm-chip${selectedDept === d ? " on" : ""}`} onClick={() => setSelectedDept(p => p === d ? "" : d)}>{d}</button>)}
             </div>
           )}
 
-          {/* Tabs */}
           <div className="dm-tabs">
-            <button className={`dm-tab${activeTab === "recents" ? " on" : ""}`} onClick={() => setActiveTab("recents")}>
-              Recent {totalUnread > 0 && <span className="dm-tab-bdg">{totalUnread}</span>}
-            </button>
-            <button className={`dm-tab${activeTab === "people" ? " on" : ""}`} onClick={() => setActiveTab("people")}>
-              People <span className="dm-tab-cnt">{filteredEmps.length}</span>
-            </button>
+            <button className={`dm-tab${activeTab === "recents" ? " on" : ""}`} onClick={() => setActiveTab("recents")}>Recent {totalUnread > 0 && <span className="dm-tab-bdg">{totalUnread}</span>}</button>
+            <button className={`dm-tab${activeTab === "people" ? " on" : ""}`} onClick={() => setActiveTab("people")}>People <span className="dm-tab-cnt">{filteredEmps.length}</span></button>
           </div>
 
-          {/* ── Recents tab ── */}
           {activeTab === "recents" && (
             <div className="dm-list">
-              {convsLoading ? (
-                <div className="dm-center"><GwSpinner size={22} /></div>
-              ) : filteredConvs.length === 0 ? (
-                <div className="dm-empty-s">
-                  <div style={{ fontSize: 28, opacity: .3, marginBottom: 6 }}>&#128172;</div>
-                  <div style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>No conversations yet</div>
-                </div>
-              ) : filteredConvs.map(conv => {
-                const oid = conv.participantIds?.find(id => id !== employeeId) || "";
-                const other = empMap[oid];
-                const name = other?.name || oid;
-                const lm = conv.lastMessage;
-                const prev = lm?.messageType === "image" ? "&#128247; Photo"
-                  : lm?.messageType === "pdf" ? "&#128196; Document"
-                    : lm?.messageType === "voice" ? "&#127908; Voice"
-                      : lm?.text?.slice(0, 46) || "No messages yet";
-                const n = unread[conv.id] || 0;
-                const isAct = selectedPerson?.employeeId === oid;
-                return (
-                  <div key={conv.id} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(other)} role="button">
-                    <div style={{ position: "relative", flexShrink: 0 }}>
-                      <Av name={name} size={42} url={other?.profilePicUrl || ""} />
-                      {n > 0 && <div className="dm-av-dot" />}
-                    </div>
-                    <div className="dm-row-info">
-                      <div className="dm-row-name" style={{ fontWeight: n > 0 ? 700 : 600 }}>{name}</div>
-                      <div className="dm-row-prev" style={{ fontWeight: n > 0 ? 600 : 400, color: n > 0 ? "#374151" : "#94A3B8" }} dangerouslySetInnerHTML={{ __html: prev }} />
-                      {other?.department && <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 1, fontWeight: 500 }}>{other.department}</div>}
-                    </div>
-                    <div className="dm-row-r">
-                      <span className="dm-row-ts" style={{ color: n > 0 ? "#1a73e8" : "#CBD5E1" }}>{fmtConv(lm?.sentAt || conv.updatedAt)}</span>
-                      <Badge n={n} />
-                    </div>
-                  </div>
-                );
-              })}
+              {convsLoading ? <div className="dm-center"><GwSpinner size={22} /></div>
+                : filteredConvs.length === 0 ? <div className="dm-empty-s"><div style={{ fontSize: 28, opacity: .3, marginBottom: 6 }}>&#128172;</div><div style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>No conversations yet</div></div>
+                  : filteredConvs.map(conv => {
+                    const oid = conv.participantIds?.find(id => id !== employeeId) || "";
+                    const other = empMap[oid];
+                    const name = other?.name || oid;
+                    const lm = conv.lastMessage;
+                    const prev = lm?.messageType === "image" ? "&#128247; Photo" : lm?.messageType === "pdf" ? "&#128196; Document" : lm?.messageType === "voice" ? "&#127908; Voice" : lm?.text?.slice(0, 46) || "No messages yet";
+                    const n = unread[conv.id] || 0;
+                    const isAct = selectedPerson?.employeeId === oid;
+                    return (
+                      <div key={conv.id} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(other)} role="button">
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <Av name={name} size={42} url={other?.profilePicUrl || ""} />
+                          {n > 0 && <div className="dm-av-dot" />}
+                        </div>
+                        <div className="dm-row-info">
+                          <div className="dm-row-name" style={{ fontWeight: n > 0 ? 700 : 600 }}>{name}</div>
+                          <div className="dm-row-prev" style={{ fontWeight: n > 0 ? 600 : 400, color: n > 0 ? "#374151" : "#94A3B8" }} dangerouslySetInnerHTML={{ __html: prev }} />
+                          {other?.department && <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 1, fontWeight: 500 }}>{other.department}</div>}
+                        </div>
+                        <div className="dm-row-r">
+                          <span className="dm-row-ts" style={{ color: n > 0 ? "#1a73e8" : "#CBD5E1" }}>{fmtConv(lm?.sentAt || conv.updatedAt)}</span>
+                          <Badge n={n} />
+                        </div>
+                      </div>
+                    );
+                  })}
             </div>
           )}
 
-          {/* ── People tab ── */}
           {activeTab === "people" && (
             <div className="dm-list">
-              {empsLoading ? (
-                <div className="dm-center"><GwSpinner size={22} /></div>
-              ) : filteredEmps.length === 0 ? (
-                <div className="dm-empty-s">
-                  <div style={{ fontSize: 28, opacity: .3, marginBottom: 6 }}>&#128101;</div>
-                  <div style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>No employees found</div>
-                </div>
-              ) : filteredEmps.map(emp => {
-                const rc = roleChip(emp.role);
-                const isAct = selectedPerson?.employeeId === emp.employeeId;
-                return (
-                  <div key={emp.employeeId} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(emp)} role="button">
-                    <Av name={emp.name || emp.employeeId} size={38} url={emp.profilePicUrl || ""} />
-                    <div className="dm-row-info">
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div className="dm-row-name">{emp.name || emp.employeeId}</div>
-                        <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 99, background: rc.bg, color: rc.color, flexShrink: 0 }}>{rc.label}</span>
+              {empsLoading ? <div className="dm-center"><GwSpinner size={22} /></div>
+                : filteredEmps.length === 0 ? <div className="dm-empty-s"><div style={{ fontSize: 28, opacity: .3, marginBottom: 6 }}>&#128101;</div><div style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>No employees found</div></div>
+                  : filteredEmps.map(emp => {
+                    const rc = roleChip(emp.role);
+                    const isAct = selectedPerson?.employeeId === emp.employeeId;
+                    return (
+                      <div key={emp.employeeId} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(emp)} role="button">
+                        <Av name={emp.name || emp.employeeId} size={38} url={emp.profilePicUrl || ""} />
+                        <div className="dm-row-info">
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div className="dm-row-name">{emp.name || emp.employeeId}</div>
+                            <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 6px", borderRadius: 99, background: rc.bg, color: rc.color, flexShrink: 0 }}>{rc.label}</span>
+                          </div>
+                          {emp.department && <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500, marginTop: 2 }}>{emp.department}</div>}
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M9 18l6-6-6-6" /></svg>
                       </div>
-                      {emp.department && <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500, marginTop: 2 }}>{emp.department}</div>}
-                    </div>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M9 18l6-6-6-6" /></svg>
-                  </div>
-                );
-              })}
+                    );
+                  })}
             </div>
           )}
         </div>
@@ -975,198 +888,147 @@ export default function DirectMessagesPage() {
                     <span className="dm-pill mono">{selectedPerson.employeeId}</span>
                   </div>
                 </div>
-
-                {/* Audio Call button */}
-                <button
-                  className="dm-head-call"
-                  onClick={() => {
-                    const cid = convId(employeeId, selectedPerson.employeeId);
-                    const socket = (typeof window !== "undefined") ? require("../../../lib/coworkSocket").getCoworkSocket(employeeId) : null;
-                    if (socket) socket.emit("call_invite", { toEmployeeId: selectedPerson.employeeId, fromEmployeeId: employeeId, fromName: employeeName, convId: cid });
-                    router.push(`/coworking/audio-call/${cid}`);
-                  }}
-                  title="Audio call"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 8.63 19.79 19.79 0 01.1 4.02 2 2 0 012.08 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 9.91a16 16 0 006.18 6.18l1.48-1.48a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" />
-                  </svg>
+                <button className="dm-head-call" onClick={() => {
+                  const cid = convId(employeeId, selectedPerson.employeeId);
+                  const socket = (typeof window !== "undefined") ? require("../../../lib/coworkSocket").getCoworkSocket(employeeId) : null;
+                  if (socket) socket.emit("call_invite", { toEmployeeId: selectedPerson.employeeId, fromEmployeeId: employeeId, fromName: employeeName, convId: cid });
+                  router.push(`/coworking/audio-call/${cid}`);
+                }} title="Audio call">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 8.63 19.79 19.79 0 01.1 4.02 2 2 0 012.08 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 9.91a16 16 0 006.18 6.18l1.48-1.48a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" /></svg>
                 </button>
-
-                {/* Request button */}
                 <button className="dm-head-btn dm-head-req" onClick={() => {
-                  window.dispatchEvent(new CustomEvent("openRequestPanel", {
-                    detail: {
-                      tab: "compose",
-                      threadContext: { type: "dm", threadId: convId(employeeId, selectedPerson.employeeId), recipientId: selectedPerson.employeeId, recipientName: selectedPerson.name }
-                    }
-                  }));
+                  window.dispatchEvent(new CustomEvent("openRequestPanel", { detail: { tab: "compose", threadContext: { type: "dm", threadId: convId(employeeId, selectedPerson.employeeId), recipientId: selectedPerson.employeeId, recipientName: selectedPerson.name } } }));
                 }} title="Request">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                    <line x1="12" y1="8" x2="12" y2="12" /><line x1="10" y1="10" x2="14" y2="10" />
-                  </svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="10" y1="10" x2="14" y2="10" /></svg>
                   <span className="dm-head-btn-lbl">Request</span>
                 </button>
-
-                {/* Schedule Meeting button — CEO/TL only */}
                 {isCeoOrTl && (
                   <button className="dm-head-btn dm-head-meet" onClick={() => { setShowMeetModal(true); setMeetError(""); }} title="Schedule Meeting">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" />
-                    </svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" /></svg>
                     <span className="dm-head-btn-lbl">Schedule</span>
                   </button>
                 )}
               </div>
 
-
-
               {/* Messages */}
               <div className="dm-msgs">
-                {msgsLoading && messages.length === 0 ? (
-                  <div className="dm-center"><GwSpinner size={24} /></div>
-                ) : withSep.length === 0 ? (
-                  <div className="dm-chat-empty">
-                    <Av name={selectedPerson.name || "?"} size={52} url={selectedPerson.profilePicUrl || ""} />
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
-                    <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
-                  </div>
-                ) : (() => {
-                  // Merge requests into message timeline by createdAt
-                  const reqItems = threadRequests.map(r => ({
-                    _isReq: true, id: r.id, req: r,
-                    _ts: r.createdAt?.seconds || 0,
-                  }));
-                  const msgItems = withSep.map(m => ({
-                    ...m, _ts: m.createdAt ? (typeof m.createdAt === 'string' ? new Date(m.createdAt).getTime() / 1000 : (m.createdAt?.seconds || 0)) : 0
-                  }));
-                  const combined = [...msgItems, ...reqItems].sort((a, b) => a._ts - b._ts);
-
-                  return combined.map((item, i) => {
-                    if (item._sep) return (
-                      <div key={"sep" + i} className="dm-datesep">
-                        <span className="dm-datesep-label">{item.label}</span>
-                      </div>
-                    );
-                    if (item._isReq) return (
-                      <div key={item.id} style={{ padding: "0 4px", marginBottom: 8 }}>
-                        <ThreadRequestCard req={item.req} employeeId={employeeId} />
-                      </div>
-                    );
-                    return (
-                      <Bubble key={item.messageId || item.id || i} msg={{ ...item, senderPicUrl: item.isMe ? "" : (selectedPerson?.profilePicUrl || "") }} isMe={item.isMe} showAvatar={item.showAvatar} onImg={setLightbox} onDl={dlFile} isHost={isCeoOrTl} onViewSummary={handleViewSummary} onCancel={handleCancelMeet} onEdit={setEditModal} />
-                    );
-                  });
-                })()}
+                {msgsLoading && messages.length === 0 ? <div className="dm-center"><GwSpinner size={24} /></div>
+                  : withSep.length === 0 ? (
+                    <div className="dm-chat-empty">
+                      <Av name={selectedPerson.name || "?"} size={52} url={selectedPerson.profilePicUrl || ""} />
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
+                      <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
+                    </div>
+                  ) : (() => {
+                    const reqItems = threadRequests.map(r => ({ _isReq: true, id: r.id, req: r, _ts: r.createdAt?.seconds || 0 }));
+                    const msgItems = withSep.map(m => ({ ...m, _ts: m.createdAt ? (typeof m.createdAt === 'string' ? new Date(m.createdAt).getTime() / 1000 : (m.createdAt?.seconds || 0)) : 0 }));
+                    const combined = [...msgItems, ...reqItems].sort((a, b) => a._ts - b._ts);
+                    return combined.map((item, i) => {
+                      if (item._sep) return <div key={"sep" + i} className="dm-datesep"><span className="dm-datesep-label">{item.label}</span></div>;
+                      if (item._isReq) return <div key={item.id} style={{ padding: "0 4px", marginBottom: 8 }}><ThreadRequestCard req={item.req} employeeId={employeeId} /></div>;
+                      return (
+                        <Bubble
+                          key={item.messageId || item.id || i}
+                          msg={{ ...item, senderPicUrl: item.isMe ? "" : (selectedPerson?.profilePicUrl || "") }}
+                          isMe={item.isMe}
+                          showAvatar={item.showAvatar}
+                          onImg={setLightbox}
+                          onDl={dlFile}
+                          isHost={isCeoOrTl}
+                          onViewSummary={handleViewSummary}
+                          onCancel={handleCancelMeet}
+                          onEdit={setEditModal}
+                          onCopied={showCopyToast}
+                        />
+                      );
+                    });
+                  })()}
                 <div ref={endRef} />
               </div>
 
-              {/* Input */}
-              <div className="dm-input">
-                <MediaMessageInput onSend={handleSend} placeholder={`Message ${selectedPerson.name || selectedPerson.employeeId}\u2026`} disabled={msgsLoading} />
+              {/* Input — paste handler wraps it */}
+              <div className="dm-input" onPaste={handlePaste}>
+                <MediaMessageInput
+                  onSend={handleSend}
+                  placeholder={`Message ${selectedPerson.name || selectedPerson.employeeId}\u2026`}
+                  disabled={msgsLoading}
+                />
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* ── Meeting Summary Modal ── */}
-      {summaryModal && (
-        <MeetingSummaryModal
-          meetId={summaryModal.meetId}
-          meetTitle={summaryModal.meetTitle}
-          onClose={() => setSummaryModal(null)}
-        />
-      )}
+      {/* Meeting Summary Modal */}
+      {summaryModal && <MeetingSummaryModal meetId={summaryModal.meetId} meetTitle={summaryModal.meetTitle} onClose={() => setSummaryModal(null)} />}
 
-      {/* ── Edit Meeting Modal ── */}
+      {/* Edit Meeting Modal */}
       {editModal && (
-        <div onClick={e => { if (e.target === e.currentTarget) setEditModal(null); }}
-          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
+        <div onClick={e => { if (e.target === e.currentTarget) setEditModal(null); }} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
           <div style={{ background: "#fff", borderRadius: 16, width: "min(440px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", fontFamily: "inherit", overflow: "hidden" }}>
             <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>✏️ Edit Meeting</div>
-              <button onClick={() => setEditModal(null)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              </button>
+              <button onClick={() => setEditModal(null)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
             </div>
             <div style={{ padding: "16px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
               {editError && <div style={{ padding: "8px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 7, fontSize: 12, color: "#B91C1C" }}>{editError}</div>}
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Title</label>
-                <input value={editModal.title || ""} onChange={e => setEditModal(p => ({ ...p, title: e.target.value }))}
-                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                <input value={editModal.title || ""} onChange={e => setEditModal(p => ({ ...p, title: e.target.value }))} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Date</label>
-                  <input type="date" value={editModal.dateTime ? editModal.dateTime.split("T")[0] : ""}
-                    onChange={e => setEditModal(p => ({ ...p, dateTime: `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` }))}
-                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                  <input type="date" value={editModal.dateTime ? editModal.dateTime.split("T")[0] : ""} onChange={e => setEditModal(p => ({ ...p, dateTime: `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` }))} style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Time</label>
-                  <input type="time" value={editModal.dateTime ? (editModal.dateTime.split("T")[1] || "09:00") : "09:00"}
-                    onChange={e => { const d = editModal.dateTime?.split("T")[0]; if (d) setEditModal(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }}
-                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                  <input type="time" value={editModal.dateTime ? (editModal.dateTime.split("T")[1] || "09:00") : "09:00"} onChange={e => { const d = editModal.dateTime?.split("T")[0]; if (d) setEditModal(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }} style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                 </div>
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Description</label>
-                <textarea value={editModal.description || ""} onChange={e => setEditModal(p => ({ ...p, description: e.target.value }))} rows={2}
-                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+                <textarea value={editModal.description || ""} onChange={e => setEditModal(p => ({ ...p, description: e.target.value }))} rows={2} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
               </div>
             </div>
             <div style={{ padding: "0 22px 20px", display: "flex", gap: 10 }}>
               <button onClick={() => setEditModal(null)} style={{ flex: 1, padding: "10px 0", border: "1.5px solid #E2E8F0", borderRadius: 9, background: "#F8FAFC", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={() => handleEditSave(editModal)} disabled={editSaving}
-                style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: editSaving ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: editSaving ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                {editSaving ? "Saving…" : "Save Changes"}
-              </button>
+              <button onClick={() => handleEditSave(editModal)} disabled={editSaving} style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: editSaving ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: editSaving ? "not-allowed" : "pointer", fontFamily: "inherit" }}>{editSaving ? "Saving…" : "Save Changes"}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Schedule Meeting Modal ── */}
+      {/* Schedule Meeting Modal */}
       {showMeetModal && selectedPerson && (
-        <div onClick={e => { if (e.target === e.currentTarget) setShowMeetModal(false); }}
-          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
+        <div onClick={e => { if (e.target === e.currentTarget) setShowMeetModal(false); }} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(4px)" }}>
           <div style={{ background: "#fff", borderRadius: 16, width: "min(440px,100%)", boxShadow: "0 24px 60px rgba(0,0,0,0.18)", fontFamily: "inherit", overflow: "hidden" }}>
             <div style={{ padding: "18px 22px 14px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>📅 Schedule Meeting</div>
                 <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>with {selectedPerson.name}</div>
               </div>
-              <button onClick={() => setShowMeetModal(false)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              </button>
+              <button onClick={() => setShowMeetModal(false)} style={{ width: 28, height: 28, border: "1px solid #E2E8F0", borderRadius: 7, background: "#F8FAFC", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
             </div>
             <div style={{ padding: "16px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
               {meetError && <div style={{ padding: "8px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 7, fontSize: 12, color: "#B91C1C" }}>{meetError}</div>}
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Meeting Title *</label>
-                <input value={meetForm.title} onChange={e => setMeetForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. Project Review" autoFocus
-                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                <input value={meetForm.title} onChange={e => setMeetForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. Project Review" autoFocus style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Date</label>
-                  <input type="date" value={meetForm.dateTime ? meetForm.dateTime.split("T")[0] : ""}
-                    onChange={e => setMeetForm(p => ({ ...p, dateTime: e.target.value ? `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` : "" }))}
-                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                  <input type="date" value={meetForm.dateTime ? meetForm.dateTime.split("T")[0] : ""} onChange={e => setMeetForm(p => ({ ...p, dateTime: e.target.value ? `${e.target.value}T${p.dateTime?.split("T")[1] || "09:00"}` : "" }))} style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Time</label>
-                  <input type="time" value={meetForm.dateTime ? (meetForm.dateTime.split("T")[1] || "09:00") : "09:00"} disabled={!meetForm.dateTime}
-                    onChange={e => { const d = meetForm.dateTime?.split("T")[0]; if (d) setMeetForm(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }}
-                    style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", opacity: meetForm.dateTime ? 1 : 0.4 }} />
+                  <input type="time" value={meetForm.dateTime ? (meetForm.dateTime.split("T")[1] || "09:00") : "09:00"} disabled={!meetForm.dateTime} onChange={e => { const d = meetForm.dateTime?.split("T")[0]; if (d) setMeetForm(p => ({ ...p, dateTime: `${d}T${e.target.value}` })); }} style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", opacity: meetForm.dateTime ? 1 : 0.4 }} />
                 </div>
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 }}>Description</label>
-                <textarea value={meetForm.description} onChange={e => setMeetForm(p => ({ ...p, description: e.target.value }))} placeholder="Agenda…" rows={2}
-                  style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+                <textarea value={meetForm.description} onChange={e => setMeetForm(p => ({ ...p, description: e.target.value }))} placeholder="Agenda…" rows={2} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
               </div>
               <div style={{ padding: "10px 12px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, fontSize: 12, color: "#1D4ED8" }}>
                 👤 <strong>{selectedPerson.name}</strong> will be invited automatically
@@ -1174,8 +1036,7 @@ export default function DirectMessagesPage() {
             </div>
             <div style={{ padding: "0 22px 20px", display: "flex", gap: 10 }}>
               <button onClick={() => setShowMeetModal(false)} style={{ flex: 1, padding: "10px 0", border: "1.5px solid #E2E8F0", borderRadius: 9, background: "#F8FAFC", color: "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={handleCreateMeeting} disabled={meetBusy || !meetForm.title.trim() || !meetForm.dateTime}
-                style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: meetBusy || !meetForm.title.trim() || !meetForm.dateTime ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: meetBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+              <button onClick={handleCreateMeeting} disabled={meetBusy || !meetForm.title.trim() || !meetForm.dateTime} style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 9, background: meetBusy || !meetForm.title.trim() || !meetForm.dateTime ? "#93C5FD" : "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600, cursor: meetBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
                 {meetBusy ? "Scheduling…" : "Schedule Meeting"}
               </button>
             </div>
@@ -1189,6 +1050,9 @@ export default function DirectMessagesPage() {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
+@keyframes dm-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes dm-spin { to { transform: rotate(360deg); } }
+
 .dm-root {
   display: flex;
   height: calc(100dvh - 56px);
@@ -1200,87 +1064,52 @@ const CSS = `
   border: 1px solid #E2E8F0;
   box-shadow: 0 4px 24px rgba(0,0,0,0.07);
   position: relative;
-  /* Prevent the messages list from bouncing the parent on overscroll */
   overscroll-behavior: contain;
 }
-/* Fallback for browsers without dvh support */
 @supports not (height: 100dvh) {
   .dm-root { height: calc(100vh - 56px); max-height: calc(100vh - 56px); }
 }
 
 /* ─── SIDEBAR ─── */
 .dm-left {
-  width: 320px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
+  width: 320px; min-width: 320px;
+  display: flex; flex-direction: column;
   background: #fff;
   border-right: 1.5px solid #EEF2F8;
   overflow: hidden;
 }
-.dm-lhead {
-  padding: 18px 18px 14px;
-  border-bottom: 1px solid #F1F5F9;
-  flex-shrink: 0;
-}
+.dm-lhead { padding: 18px 18px 14px; border-bottom: 1px solid #F1F5F9; flex-shrink: 0; }
 
-/* Search */
 .dm-search-wrap {
   margin: 10px 14px 6px;
   display: flex; align-items: center; gap: 8px;
   padding: 9px 12px;
-  background: #F8FAFC;
-  border: 1.5px solid #E2E8F0;
-  border-radius: 10px;
-  transition: all 0.15s;
-  flex-shrink: 0;
+  background: #F8FAFC; border: 1.5px solid #E2E8F0; border-radius: 10px;
+  transition: all 0.15s; flex-shrink: 0;
 }
 .dm-search-wrap:focus-within { border-color: #1a73e8; background: #fff; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
 .dm-search-in { border: none; background: none; outline: none; font-size: 13px; font-weight: 500; color: #0F172A; font-family: inherit; width: 100%; }
 .dm-search-in::placeholder { color: #CBD5E1; }
 .dm-search-clr { background: none; border: none; cursor: pointer; color: #94A3B8; font-size: 17px; line-height: 1; padding: 0; }
 
-/* Dept chips */
-.dm-dept-row {
-  display: flex; gap: 5px; padding: 4px 14px 8px;
-  overflow-x: auto; flex-wrap: nowrap; flex-shrink: 0;
-}
+.dm-dept-row { display: flex; gap: 5px; padding: 4px 14px 8px; overflow-x: auto; flex-wrap: nowrap; flex-shrink: 0; }
 .dm-dept-row::-webkit-scrollbar { height: 0; }
-.dm-chip {
-  display: inline-flex; align-items: center;
-  padding: 4px 11px; border-radius: 20px;
-  font-size: 11px; font-weight: 600; white-space: nowrap;
-  border: 1.5px solid #E2E8F0; background: #fff; color: #64748B;
-  cursor: pointer; transition: all 0.12s; font-family: inherit;
-}
+.dm-chip { display: inline-flex; align-items: center; padding: 4px 11px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; border: 1.5px solid #E2E8F0; background: #fff; color: #64748B; cursor: pointer; transition: all 0.12s; font-family: inherit; }
 .dm-chip:hover { border-color: #1a73e8; color: #1a73e8; }
 .dm-chip.on { background: #1a73e8; color: #fff; border-color: #1a73e8; box-shadow: 0 2px 8px rgba(26,115,232,0.2); }
 
-/* Tabs */
 .dm-tabs { display: flex; padding: 0 14px; gap: 2px; border-bottom: 1.5px solid #EEF2F8; flex-shrink: 0; }
-.dm-tab {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 8px; border: none; background: none; cursor: pointer;
-  font-size: 11px; font-weight: 700; color: #94A3B8;
-  border-bottom: 2.5px solid transparent; margin-bottom: -1.5px;
-  font-family: inherit; transition: all 0.12s; text-transform: uppercase; letter-spacing: 0.06em;
-}
+.dm-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: none; background: none; cursor: pointer; font-size: 11px; font-weight: 700; color: #94A3B8; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; font-family: inherit; transition: all 0.12s; text-transform: uppercase; letter-spacing: 0.06em; }
 .dm-tab:hover { color: #475569; }
 .dm-tab.on { color: #1a73e8; border-bottom-color: #1a73e8; }
 .dm-tab-bdg { font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 99px; background: #EF4444; color: #fff; }
 .dm-tab-cnt { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; background: #F1F5F9; color: #64748B; }
 
-/* List */
 .dm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0; }
 .dm-list::-webkit-scrollbar { width: 3px; }
 .dm-list::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 2px; }
 
-.dm-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px; cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: all 0.1s; user-select: none;
-}
+.dm-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent; transition: all 0.1s; user-select: none; }
 .dm-row:hover { background: #F8FAFC; }
 .dm-row.act { background: #EFF6FF; border-left-color: #1a73e8; }
 .dm-row-info { flex: 1; min-width: 0; }
@@ -1297,8 +1126,7 @@ const CSS = `
   flex: 1; display: flex; flex-direction: column;
   background: #F8FAFC; overflow: hidden; min-width: 0;
   background-image: radial-gradient(circle at 1px 1px, #E2E8F0 1px, transparent 0);
-  background-size: 20px 20px;
-  background-color: #F8FAFC;
+  background-size: 20px 20px; background-color: #F8FAFC;
 }
 .dm-no-sel {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -1307,14 +1135,8 @@ const CSS = `
   background-image: radial-gradient(circle at 1px 1px, #E2E8F0 1px, transparent 0);
   background-size: 20px 20px;
 }
-.dm-no-sel-icon {
-  width: 68px; height: 68px; border-radius: 20px;
-  background: linear-gradient(135deg,#EEF2FF,#F0F9FF);
-  display: flex; align-items: center; justify-content: center;
-  border: 1.5px solid #E0E7FF;
-}
+.dm-no-sel-icon { width: 68px; height: 68px; border-radius: 20px; background: linear-gradient(135deg,#EEF2FF,#F0F9FF); display: flex; align-items: center; justify-content: center; border: 1.5px solid #E0E7FF; }
 
-/* Chat header */
 .dm-chat-head {
   padding: 12px 18px; background: #fff;
   border-bottom: 1.5px solid #EEF2F8;
@@ -1324,51 +1146,33 @@ const CSS = `
 }
 .dm-chat-name { font-size: 15px; font-weight: 700; color: #0F172A; letter-spacing: -0.02em; }
 .dm-chat-meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
-.dm-pill {
-  font-size: 10.5px; font-weight: 600; padding: 2px 8px;
-  border-radius: 20px; letter-spacing: 0.02em; white-space: nowrap;
-}
-.dm-pill.dept  { background: #EFF6FF; color: #1D4ED8; }
-.dm-pill.mono  { background: #F8FAFC; color: #94A3B8; font-family: monospace; font-size: 9px; border: 1px solid #E2E8F0; }
+.dm-pill { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 20px; letter-spacing: 0.02em; white-space: nowrap; }
+.dm-pill.dept { background: #EFF6FF; color: #1D4ED8; }
+.dm-pill.mono { background: #F8FAFC; color: #94A3B8; font-family: monospace; font-size: 9px; border: 1px solid #E2E8F0; }
 
-.dm-back {
-  display: none; align-items: center; gap: 5px;
-  padding: 7px 12px; border: 1.5px solid #E2E8F0; border-radius: 9px;
-  background: #fff; cursor: pointer; color: #1a73e8;
-  font-size: 12px; font-weight: 600; font-family: inherit;
-  transition: all 0.12s; white-space: nowrap; flex-shrink: 0;
-}
+.dm-back { display: none; align-items: center; gap: 5px; padding: 7px 12px; border: 1.5px solid #E2E8F0; border-radius: 9px; background: #fff; cursor: pointer; color: #1a73e8; font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.12s; white-space: nowrap; flex-shrink: 0; }
 .dm-back:hover { background: #EFF6FF; border-color: #1a73e8; }
 
-/* Bubble column — responsive max width */
+/* Bubble column */
 .dm-bub-col { max-width: 64%; }
 
-/* Chat header action buttons */
-.dm-head-call {
-  display: flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 10px;
-  border: 1.5px solid #DCFCE7; background: #F0FDF4; color: #16A34A;
-  cursor: pointer; flex-shrink: 0; transition: all 0.12s;
-}
+/* ── Copy button — shown on bubble hover ── */
+.dm-bubble-wrap .dm-copy-btn { opacity: 0; transition: opacity 0.15s; }
+.dm-bubble-wrap:hover .dm-copy-btn { opacity: 1 !important; }
+@media (hover: none) { .dm-copy-btn { opacity: 1 !important; } }
+
+.dm-head-call { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 10px; border: 1.5px solid #DCFCE7; background: #F0FDF4; color: #16A34A; cursor: pointer; flex-shrink: 0; transition: all 0.12s; }
 .dm-head-call:hover { background: #DCFCE7; }
-.dm-head-btn {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 14px; border-radius: 9px;
-  font-size: 12px; font-weight: 600; cursor: pointer;
-  font-family: inherit; flex-shrink: 0; transition: all 0.12s;
-  white-space: nowrap;
-}
+.dm-head-btn { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; flex-shrink: 0; transition: all 0.12s; white-space: nowrap; }
 .dm-head-req { border: 1.5px solid #E9D5FF; background: #FAF5FF; color: #7C3AED; }
 .dm-head-req:hover { background: #F3E8FF; }
 .dm-head-meet { border: 1.5px solid #BFDBFE; background: #EFF6FF; color: #1D4ED8; }
 .dm-head-meet:hover { background: #DBEAFE; }
 
-/* Messages */
 .dm-msgs {
   flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px;
   display: flex; flex-direction: column; gap: 2px;
-  background: inherit;
-  overscroll-behavior: contain;
+  background: inherit; overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 .dm-msgs::-webkit-scrollbar { width: 4px; }
@@ -1376,52 +1180,23 @@ const CSS = `
 
 .dm-datesep { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; }
 .dm-datesep::before, .dm-datesep::after { content: ""; flex: 1; height: 1px; background: #E2E8F0; }
-.dm-datesep-label {
-  font-size: 10.5px; font-weight: 700; color: "#94A3B8";
-  padding: 3px 12px; background: #EEF2F8; border-radius: 20px;
-  white-space: nowrap; letter-spacing: 0.03em;
-}
+.dm-datesep-label { font-size: 10.5px; font-weight: 700; color: #94A3B8; padding: 3px 12px; background: #EEF2F8; border-radius: 20px; white-space: nowrap; letter-spacing: 0.03em; }
+.dm-chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 40px; }
 
-.dm-chat-empty {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 10px; text-align: center; padding: 40px;
-}
-
-/* Input */
 .dm-input { flex-shrink: 0; border-top: 1.5px solid #EEF2F8; background: #fff; padding: 10px 16px 12px; }
 
 /* ─── RESPONSIVE ─── */
-
-/* Tablet portrait — slightly wider mobile feel */
 @media (max-width: 1024px) and (min-width: 769px) {
   .dm-left { width: 280px; min-width: 280px; }
   .dm-back { display: flex !important; }
 }
 
-/* MOBILE — phones up to 768px */
 @media (max-width: 768px) {
-  .dm-root {
-    height: calc(100dvh - 56px);
-    min-height: calc(100dvh - 56px);
-    max-height: calc(100dvh - 56px);
-    border-radius: 0; border: none; box-shadow: none;
-  }
-
-  /* Slide panels */
-  .dm-left {
-    position: absolute; inset: 0; z-index: 10;
-    width: 100%; min-width: 100%;
-    transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
-  }
+  .dm-root { height: calc(100dvh - 56px); min-height: calc(100dvh - 56px); max-height: calc(100dvh - 56px); border-radius: 0; border: none; box-shadow: none; }
+  .dm-left { position: absolute; inset: 0; z-index: 10; width: 100%; min-width: 100%; transition: transform 0.28s cubic-bezier(0.4,0,0.2,1); }
   .dm-left.mob-gone { transform: translateX(-100%); }
-  .dm-chat {
-    position: absolute; inset: 0; z-index: 20;
-    transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
-  }
+  .dm-chat { position: absolute; inset: 0; z-index: 20; transition: transform 0.28s cubic-bezier(0.4,0,0.2,1); }
   .dm-chat.mob-gone-chat { transform: translateX(100%); }
-
-  /* Sidebar tweaks */
   .dm-lhead { padding: 14px 14px 12px; }
   .dm-search-wrap { margin: 8px 12px 4px; padding: 10px 12px; }
   .dm-search-in { font-size: 14px; }
@@ -1430,97 +1205,32 @@ const CSS = `
   .dm-row { padding: 11px 14px; gap: 11px; }
   .dm-row-name { font-size: 14px; }
   .dm-row-prev { font-size: 12px; }
-
-  /* ── Chat header — the main fix ── */
-  .dm-chat-head {
-    padding: 8px 10px;
-    gap: 8px;
-    min-height: 56px;
-    flex-wrap: nowrap;
-  }
-  .dm-back {
-    display: flex !important;
-    padding: 7px 8px;
-    gap: 0;
-  }
+  .dm-chat-head { padding: 8px 10px; gap: 8px; flex-wrap: nowrap; }
+  .dm-back { display: flex !important; padding: 7px 8px; gap: 0; }
   .dm-back-lbl { display: none; }
-  .dm-chat-av-wrap > img,
-  .dm-chat-av-wrap > div:first-child {
-    width: 36px !important; height: 36px !important;
-    font-size: 13px !important;
-  }
-  .dm-chat-presence {
-    width: 9px !important; height: 9px !important;
-    border-width: 1.5px !important;
-  }
-  .dm-chat-name {
-    font-size: 14px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .dm-chat-meta {
-    flex-wrap: nowrap;
-    overflow: hidden;
-    gap: 4px;
-    margin-top: 2px;
-  }
-  .dm-chat-meta .dm-pill {
-    font-size: 9.5px;
-    padding: 1.5px 6px;
-    flex-shrink: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100px;
-  }
-  /* Hide the EmployeeId pill on small mobile to save space */
+  .dm-chat-av-wrap > img, .dm-chat-av-wrap > div:first-child { width: 36px !important; height: 36px !important; font-size: 13px !important; }
+  .dm-chat-presence { width: 9px !important; height: 9px !important; border-width: 1.5px !important; }
+  .dm-chat-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dm-chat-meta { flex-wrap: nowrap; overflow: hidden; gap: 4px; margin-top: 2px; }
+  .dm-chat-meta .dm-pill { font-size: 9.5px; padding: 1.5px 6px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; max-width: 100px; }
   .dm-chat-meta .dm-pill.mono { display: none; }
-
-  /* Action buttons — collapse to icon only */
-  .dm-head-call {
-    width: 36px; height: 36px;
-    border-radius: 9px;
-  }
-  .dm-head-btn {
-    padding: 0;
-    width: 36px; height: 36px;
-    justify-content: center;
-    border-radius: 9px;
-    gap: 0;
-  }
+  .dm-head-call { width: 36px; height: 36px; border-radius: 9px; }
+  .dm-head-btn { padding: 0; width: 36px; height: 36px; justify-content: center; border-radius: 9px; gap: 0; }
   .dm-head-btn-lbl { display: none; }
-  /* Hide the Schedule Meeting on phones — it lives in detail panel anyway */
   .dm-head-meet { display: none; }
-
-  /* Messages area — give bubbles room to breathe */
   .dm-msgs { padding: 10px 10px; gap: 1px; }
   .dm-bub-col { max-width: 78%; }
-
-  /* Input area */
   .dm-input { padding: 8px 10px 10px; }
-
-  /* Date separator */
   .dm-datesep { margin: 10px 0 6px; }
   .dm-datesep-label { font-size: 10px; padding: 2px 10px; }
 }
 
-/* SMALL PHONES — under 380px */
 @media (max-width: 380px) {
-  .dm-chat-head {
-    padding: 7px 8px;
-    gap: 6px;
-  }
-  .dm-back {
-    padding: 7px 7px;
-    border-radius: 8px;
-  }
+  .dm-chat-head { padding: 7px 8px; gap: 6px; }
+  .dm-back { padding: 7px 7px; border-radius: 8px; }
   .dm-chat-name { font-size: 13.5px; }
   .dm-chat-meta .dm-pill { font-size: 9px; padding: 1px 5px; }
-  /* On very small screens, also hide Request label and shrink everything */
-  .dm-head-call,
-  .dm-head-btn {
-    width: 34px; height: 34px;
-  }
+  .dm-head-call, .dm-head-btn { width: 34px; height: 34px; }
   .dm-bub-col { max-width: 82%; }
   .dm-msgs { padding: 8px 8px; }
 }
@@ -1528,84 +1238,4 @@ const CSS = `
 @media (min-width: 1280px) {
   .dm-left { width: 360px; min-width: 360px; }
 }
-`
-// ── Request Card — professional, like meeting invite ─────────────────────────
-const REQ_STATUS_COLORS = {
-  pending: { color: "#D97706", bg: "#FEF3C7", border: "#FDE68A" },
-  approved: { color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0" },
-  rejected: { color: "#DC2626", bg: "#FEF2F2", border: "#FECACA" },
-};
-const REQ_PRI_COLOR = { urgent: "#DC2626", high: "#D97706", medium: "#6366F1", low: "#6B7280" };
-const REQ_PRI_BG = { urgent: "#FEF2F2", high: "#FEF3C7", medium: "#EEF2FF", low: "#F9FAFB" };
-
-function ThreadRequestCard({ req, employeeId }) {
-  const sc = REQ_STATUS_COLORS[req.status] || REQ_STATUS_COLORS.pending;
-  const isFromMe = req.fromId === employeeId;
-  const isToMe = req.toId === employeeId;
-
-  const fire = (extra) => window.dispatchEvent(new CustomEvent("openRequestPanel", {
-    detail: { tab: isToMe ? "received" : "sent", requestId: req.id, ...extra }
-  }));
-
-  return (
-    <div style={{ display: "flex", justifyContent: isFromMe ? "flex-end" : "flex-start", width: "100%", marginBottom: 4 }}>
-      <div style={{ maxWidth: 280, width: "100%", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", border: "1px solid #E2E8F0", background: "#fff" }}>
-        {/* Header — dark like meeting card */}
-        <div style={{ background: "#1E293B", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>Request</div>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginTop: 1 }}>from {req.fromName}</div>
-          </div>
-          <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 99, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}`, flexShrink: 0, whiteSpace: "nowrap" }}>{req.status}</span>
-          {req.priority && <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, color: REQ_PRI_COLOR[req.priority], background: REQ_PRI_BG[req.priority], flexShrink: 0 }}>{req.priority}</span>}
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: "10px 14px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{req.subject}</div>
-          {req.message && <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}>{req.message}</div>}
-          {req.dueDate && <div style={{ fontSize: 11, color: "#D97706", fontWeight: 600 }}>⏰ Due {new Date(req.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>}
-          {req.type && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "#F1F5F9", color: "#475569", fontWeight: 600, border: "1px solid #E2E8F0", alignSelf: "flex-start" }}>{req.type}</span>}
-          {req.attachments?.length > 0 && (
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {req.attachments.map((att, i) => (
-                <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
-                  style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 5, textDecoration: "none", fontWeight: 500 }}>
-                  📎 {(att.name || "File").slice(0, 18)}
-                </a>
-              ))}
-            </div>
-          )}
-          {req.responseMessage && (
-            <div style={{ padding: "5px 9px", background: "#F8FAFC", borderRadius: 6, fontSize: 11, color: "#374151", borderLeft: "2px solid #CBD5E1" }}>
-              <strong>Response:</strong> {req.responseMessage}
-            </div>
-          )}
-
-          {/* Action buttons */}
-          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-            {isToMe && req.status === "pending" && (
-              <button onClick={() => fire({ openRespond: true })}
-                style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "none", background: "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                ✓ Respond
-              </button>
-            )}
-            <button onClick={() => fire({ openChat: true })}
-              style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-              💬 Chat
-            </button>
-            <button onClick={() => fire({})}
-              style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid #E2E8F0", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-              View →
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-;
+`;

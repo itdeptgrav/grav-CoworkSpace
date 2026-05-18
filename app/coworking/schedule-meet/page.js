@@ -2,6 +2,15 @@
 import React from "react";
 /**
  * app/coworking/schedule-meet/page.js
+ *
+ * UI revision: formal, restrained neutral palette.
+ *   - One muted slate accent replaces the bright blue / green / red /
+ *     amber / purple mix. Status is conveyed by a single calm accent
+ *     plus weight, not by saturated colour blocks.
+ *   - System font stack instead of Inter/Google Sans.
+ *   - Flatter surfaces, hairline borders, no glow rings / pulsing.
+ *   - Same logic, status rules, props, handlers, Firestore listeners.
+ *
  * Status logic:
  *   LIVE     — dateTime <= now <= dateTime + 2h  (or meet.status === "live")
  *   UPCOMING — scheduled but not yet started
@@ -41,7 +50,9 @@ function timeUntil(iso) {
   return `in ${m}m`;
 }
 
-const AV_COLORS = ["#1a73e8", "#0f9d58", "#f29900", "#7b1fa2", "#d93025", "#00acc1", "#e64a19", "#0097a7"];
+// Neutral avatar fills — desaturated greys, no rainbow
+// Muted, professional avatar palette — colour without the neon
+const AV_COLORS = ["#3B6CB5", "#3F8F6B", "#B07A2F", "#6B5B95", "#A85454", "#3D8B96", "#7A6248", "#5C6BB5"];
 const avBg = (id = "") => AV_COLORS[(id.charCodeAt(0) || 0) % AV_COLORS.length];
 
 // ── EditMeetingModal ───────────────────────────────────────────────────────────
@@ -56,8 +67,6 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
   const [deptFilter, setDeptFilter] = React.useState([]);
   const [empSearch, setEmpSearch] = React.useState("");
 
-  const AV_COLORS = ["#1a73e8", "#0f9d58", "#f29900", "#7b1fa2", "#d93025", "#00acc1", "#e64a19", "#0097a7"];
-  const avBg = (id = "") => AV_COLORS[(id.charCodeAt(0) || 0) % AV_COLORS.length];
   const initials = (name = "") => name.trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 
   const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
@@ -86,7 +95,6 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
     });
   };
 
-  // Prevent background scroll
   React.useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
@@ -98,7 +106,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
         {/* Header */}
         <div className="sm-edit-head">
           <span className="sm-edit-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", marginRight: 8, verticalAlign: "middle" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", marginRight: 8, verticalAlign: "middle" }}>
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
@@ -156,13 +164,13 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
 
           {/* Participants */}
           <div className="sm-edit-field">
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, minWidth: 0 }}>
               <label className="sm-edit-label" style={{ marginBottom: 0 }}>
                 Participants ({participantIds.length} selected)
               </label>
               <button
                 onClick={selectAll}
-                style={{ fontSize: 11, color: "#1a73e8", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
+                style={{ fontSize: 11, color: "#475569", background: "none", border: "none", cursor: "pointer", fontWeight: 600, flexShrink: 0 }}
               >
                 Select all visible
               </button>
@@ -195,7 +203,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             {/* Employee list */}
             <div className="sm-edit-emp-list">
               {visibleEmps.length === 0 ? (
-                <div style={{ padding: "16px", textAlign: "center", color: "#9AA0A6", fontSize: 12 }}>No employees found</div>
+                <div style={{ padding: "16px", textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>No employees found</div>
               ) : visibleEmps.map(emp => {
                 const checked = participantIds.includes(emp.employeeId);
                 return (
@@ -263,11 +271,9 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
   const shownNames = allNames.slice(0, 4);
   const tooltipText = allNames.slice(0, 8).join(", ") + (allNames.length > 8 ? ` +${allNames.length - 8} more` : "");
 
-  // Only the organiser (CEO/TL who created it) can edit/cancel — not ended or already cancelled
   const canManage = isHost && meet.createdBy === employeeId && !isCancelled && status !== "ended";
   const isCancelling = cancellingId === meet.meetId;
 
-  // ── Three-dot menu state (local to this card) ─────────────────────────
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef(null);
 
@@ -284,10 +290,10 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
     <div className={`smc${status === "live" ? " smc-live" : ""}${status === "ended" ? " smc-ended" : ""}${isCancelled ? " smc-cancelled" : ""}`}
       style={isCancelled ? { position: "relative" } : {}}>
 
-      {/* ── Cancelled overlay blur ────────────────────────────────────────── */}
+      {/* ── Cancelled overlay ──────────────────────────────────────────── */}
       {isCancelled && (
         <div style={{
-          position: "absolute", inset: 0, borderRadius: 12, zIndex: 2,
+          position: "absolute", inset: 0, borderRadius: 10, zIndex: 2,
           background: "rgba(255,255,255,0.55)", backdropFilter: "blur(3px)",
           WebkitBackdropFilter: "blur(3px)",
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -295,11 +301,11 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
         }}>
           <div style={{
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-            background: "#FEF2F2", border: "1.5px solid #FECDD3",
-            borderRadius: 10, padding: "8px 18px",
+            background: "#F7EFEF", border: "1px solid #E6D5D5",
+            borderRadius: 8, padding: "8px 18px",
           }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#DC2626", letterSpacing: "0.02em" }}>
-              ✕ &nbsp;Meeting Cancelled
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#A85454", letterSpacing: "0.02em" }}>
+              Meeting Cancelled
             </span>
             {meet.cancelledByName && (
               <span style={{ fontSize: 10, color: "#9CA3AF" }}>
@@ -310,7 +316,7 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
         </div>
       )}
 
-      {/* ── Card content (blurred when cancelled) ─────────────────────────── */}
+      {/* ── Card content ───────────────────────────────────────────────── */}
       <div style={{
         display: "contents", filter: isCancelled ? "blur(1.5px)" : "none",
         pointerEvents: isCancelled ? "none" : "auto"
@@ -329,7 +335,6 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
             </div>
             {status === "live" && (
               <span className="smc-badge smc-badge-live">
-                <span className="smc-live-ring" />
                 <span className="smc-live-dot" />
                 LIVE
               </span>
@@ -365,12 +370,12 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
                   );
                 })}
                 {extra > 0 && <div className="smc-av-extra" title={allNames.slice(4).join(", ")}>+{extra}</div>}
-                <div style={{ display: "flex", flexDirection: "column", marginLeft: 8, gap: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", marginLeft: 8, gap: 0, minWidth: 0 }}>
                   <span className="smc-av-count">
                     {parts.length} participant{parts.length !== 1 ? "s" : ""}
                   </span>
                   {shownNames.length > 0 && (
-                    <span style={{ fontSize: 10, color: "#9AA0A6", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 10, color: "#9CA3AF", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {shownNames.slice(0, 2).join(", ")}{shownNames.length > 2 ? ` +${parts.length - 2} more` : ""}
                     </span>
                   )}
@@ -408,7 +413,6 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
               View
             </button>
           )}
-          {/* AI Summary — host only, not for cancelled */}
           {isHost && !isCancelled && (
             <button
               className="smc-btn smc-btn-summary"
@@ -425,7 +429,6 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
             </button>
           )}
 
-          {/* ── Three-dot menu (Edit / Cancel) — only the organiser ───────── */}
           {canManage && (
             <div ref={menuRef} style={{ position: "relative" }}>
               <button
@@ -449,7 +452,6 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
 
               {menuOpen && !isCancelling && (
                 <div className="smc-popover">
-                  {/* Edit */}
                   <button
                     className="smc-popover-item"
                     onClick={() => { setMenuOpen(false); onEdit(meet); }}
@@ -460,8 +462,7 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
                     </svg>
                     Edit Meeting
                   </button>
-                  <div style={{ height: 1, background: "#F3F4F6", margin: "2px 0" }} />
-                  {/* Cancel */}
+                  <div style={{ height: 1, background: "#F1F2F4", margin: "2px 0" }} />
                   <button
                     className="smc-popover-item smc-popover-item-danger"
                     onClick={() => { setMenuOpen(false); onCancel(meet.meetId, meet.title, meet); }}
@@ -483,14 +484,13 @@ function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, on
   );
 }
 
-function Section({ label, count, dotColor, dotGlow, children }) {
+function Section({ label, count, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px" }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, boxShadow: dotGlow || "none", flexShrink: 0, display: "inline-block" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#5f6368" }}>{label}</span>
-        <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 99, background: "#F1F3F4", color: "#5f6368" }}>{count}</span>
-        <div style={{ flex: 1, height: 1, background: "#E4E7EC" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#6B7280", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 99, background: "#F4F5F7", color: "#6B7280", border: "1px solid #E5E7EB", flexShrink: 0 }}>{count}</span>
+        <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
       </div>
       {children}
     </div>
@@ -499,8 +499,8 @@ function Section({ label, count, dotColor, dotGlow, children }) {
 
 function EmptyInline({ message }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#F8F9FA", border: "1.5px dashed #E4E7EC", borderRadius: 10, fontSize: 13, color: "#9AA0A6" }}>
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, flexShrink: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#FAFAFA", border: "1px dashed #E5E7EB", borderRadius: 8, fontSize: 13, color: "#9CA3AF" }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, flexShrink: 0 }}>
         <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
       </svg>
       {message}
@@ -516,17 +516,16 @@ export default function MeetingsPage() {
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
   const [, setTick] = useState(0);
-  const [empMap, setEmpMap] = useState({}); // employeeId -> { name, department }
-  const [summaryModal, setSummaryModal] = useState(null); // { meetId, meetTitle } | null
-  const [cancellingId, setCancellingId] = useState(null); // meetId being cancelled
-  const [cancelConfirm, setCancelConfirm] = useState(null); // { meetId, title, meet } | null
-  const [editModal, setEditModal] = useState(null); // meet object being edited | null
+  const [empMap, setEmpMap] = useState({});
+  const [summaryModal, setSummaryModal] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [cancelConfirm, setCancelConfirm] = useState(null);
+  const [editModal, setEditModal] = useState(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
   const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
 
-  // Show a confirmation dialog before cancelling
   const handleCancelRequest = (meetId, title, meet) => setCancelConfirm({ meetId, title, meet: meet || null });
 
   const handleCancelConfirm = async () => {
@@ -536,7 +535,6 @@ export default function MeetingsPage() {
     setCancellingId(meetId);
     try {
       await cancelMeet(meetId);
-      // Optimistically update local state — mark as cancelled immediately
       setMeets(prev => prev.map(m =>
         m.meetId === meetId
           ? { ...m, isCancelled: true, cancelledByName: empMap[employeeId]?.name || "You" }
@@ -569,7 +567,6 @@ export default function MeetingsPage() {
         googleMeetLink: updated.googleMeetLink || null,
         participants: updated.participants,
       });
-      // Optimistically update local state
       setMeets(prev => prev.map(m =>
         m.meetId === editModal.meetId ? { ...m, ...updated } : m
       ));
@@ -582,7 +579,7 @@ export default function MeetingsPage() {
   };
 
   const isCEO = role === "ceo";
-  const isHost = role === "ceo" || role === "tl"; // CEO + TL can see Summary, New Meeting
+  const isHost = role === "ceo" || role === "tl";
 
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 30000);
@@ -595,13 +592,10 @@ export default function MeetingsPage() {
 
   useEffect(() => {
     if (!user || !employeeId) return;
-    // Real-time listener — picks up meetings created from DM/Group chat instantly
     let q;
     if (role === "ceo") {
       q = query(collection(firebaseDb, "cowork_scheduled_meets"));
     } else if (role === "tl") {
-      // TL sees meetings they created or are participant in
-      // Use two separate listeners merged
       q = query(collection(firebaseDb, "cowork_scheduled_meets"),
         where("participants", "array-contains", employeeId));
     } else {
@@ -610,15 +604,11 @@ export default function MeetingsPage() {
     }
     const unsub = onSnapshot(q, snap => {
       let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // For TL — also fetch meetings they created (second query not possible with onSnapshot easily)
-      // We handle this by including createdBy check client-side after fetch
       setMeets(docs);
       setFetching(false);
     }, () => {
-      // Fallback to API if snapshot fails
       listMeets().then(d => setMeets(d.meets || [])).catch(() => { }).finally(() => setFetching(false));
     });
-    // For TL — also listen to meetings they created (createdBy)
     let unsubCreated = null;
     if (role === "tl") {
       const qCreated = query(collection(firebaseDb, "cowork_scheduled_meets"),
@@ -636,7 +626,6 @@ export default function MeetingsPage() {
     return () => { unsub(); if (unsubCreated) unsubCreated(); };
   }, [user, employeeId, role]);
 
-  // Load employee names from Firestore for avatar tooltips
   useEffect(() => {
     if (!user) return;
     getDocs(collection(firebaseDb, "cowork_employees"))
@@ -666,76 +655,72 @@ export default function MeetingsPage() {
   return (
     <>
       <style>{`
-        .sm-page{min-height:100vh;background:#F0F2F5;font-family:'Inter','Google Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-        .sm-hdr{background:#fff;border-bottom:1px solid #E4E7EC;padding:0 28px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:10}
-        .sm-hdr-icon{width:38px;height:38px;border-radius:10px;background:#EBF3FE;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-        .sm-hdr-title{font-size:18px;font-weight:600;color:#1A1D21;letter-spacing:-0.01em}
-        .sm-new-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;background:#1a73e8;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;white-space:nowrap}
-        .sm-new-btn:hover{background:#1557b0}
+        .sm-page{min-height:100vh;background:#FAFAFA;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+        .sm-hdr{background:#fff;border-bottom:1px solid #E5E7EB;padding:0 28px;height:62px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:10}
+        .sm-hdr-icon{width:36px;height:36px;border-radius:8px;background:#F4F5F7;border:1px solid #E5E7EB;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .sm-hdr-title{font-size:17px;font-weight:700;color:#1F2937;letter-spacing:-0.01em}
+        .sm-new-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:#475569;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;white-space:nowrap;flex-shrink:0}
+        .sm-new-btn:hover{background:#374151}
         .sm-stats{display:flex;gap:8px;padding:16px 28px 0;flex-wrap:wrap}
-        .sm-stat{padding:10px 18px;background:#fff;border:1px solid #E4E7EC;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:70px}
-        .sm-stat-n{font-size:20px;font-weight:700;line-height:1}
-        .sm-stat-l{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#9AA0A6}
+        .sm-stat{padding:10px 18px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:70px}
+        .sm-stat-n{font-size:19px;font-weight:700;line-height:1;color:#1F2937}
+        .sm-stat-l{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#9CA3AF}
         .sm-search-wrap{padding:14px 28px 0}
-        .sm-search{display:flex;align-items:center;gap:8px;padding:9px 14px;border:1.5px solid #E4E7EC;border-radius:8px;background:#fff;max-width:360px;transition:all 0.15s}
-        .sm-search:focus-within{border-color:#1a73e8;box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
-        .sm-search input{border:none;background:none;outline:none;font-size:13px;color:#1A1D21;font-family:inherit;width:100%}
-        .sm-search input::placeholder{color:#9AA0A6}
+        .sm-search{display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid #E5E7EB;border-radius:8px;background:#fff;max-width:360px;transition:border-color 0.15s}
+        .sm-search:focus-within{border-color:#475569}
+        .sm-search input{border:none;background:none;outline:none;font-size:13px;color:#1F2937;font-family:inherit;width:100%;min-width:0}
+        .sm-search input::placeholder{color:#9CA3AF}
         .sm-body{padding:20px 28px 60px;display:flex;flex-direction:column;gap:24px}
         /* Card */
-        .smc{background:#fff;border:1px solid #E4E7EC;border-radius:12px;padding:18px 20px;display:flex;align-items:flex-start;gap:14px;transition:box-shadow 0.15s,border-color 0.15s}
-        .smc:hover{box-shadow:0 4px 16px rgba(0,0,0,0.07);border-color:#D0D5DD}
-        .smc-live{border-left:3px solid #EA4335}
-        .smc-ended{opacity:0.68}
+        .smc{background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:16px 18px;display:flex;align-items:flex-start;gap:14px;transition:border-color 0.15s;min-width:0}
+        .smc:hover{border-color:#CBD5E1}
+        .smc-live{border-left:3px solid #2E7D55}
+        .smc-ended{opacity:0.72}
         .smc-date{width:50px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:1px}
-        .smc-month{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#9AA0A6}
-        .smc-day{font-size:26px;font-weight:400;color:#1A1D21;line-height:1}
-        .smc-time{font-size:10px;color:#9AA0A6;margin-top:3px}
-        .smc-ended .smc-day{color:#9AA0A6}
-        .smc-divider{width:1px;background:#E4E7EC;align-self:stretch;flex-shrink:0}
+        .smc-month{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#9CA3AF}
+        .smc-day{font-size:25px;font-weight:600;color:#1F2937;line-height:1}
+        .smc-time{font-size:10px;color:#9CA3AF;margin-top:3px}
+        .smc-ended .smc-day{color:#9CA3AF}
+        .smc-divider{width:1px;background:#E5E7EB;align-self:stretch;flex-shrink:0}
         .smc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
-        .smc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-        .smc-title{font-size:15px;font-weight:600;color:#1A1D21;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .smc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+        .smc-title{font-size:15px;font-weight:600;color:#1F2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .smc-ended .smc-title{color:#6B7280}
         .smc-desc{font-size:12px;color:#6B7280;line-height:1.5;margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical}
-        /* Badges */
-        .smc-badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;letter-spacing:0.03em}
-        .smc-badge-live{background:#FEF2F2;color:#EA4335;border:1px solid #FECDD3;position:relative}
-        .smc-badge-upcoming{background:#EFF6FF;color:#1a73e8;border:1px solid #BFDBFE}
-        .smc-badge-ended{background:#F1F3F4;color:#9AA0A6;border:1px solid #E4E7EC}
-        /* Live animation */
-        .smc-live-dot{width:7px;height:7px;border-radius:50%;background:#EA4335;display:inline-block;flex-shrink:0}
-        .smc-live-ring{position:absolute;width:7px;height:7px;border-radius:50%;background:transparent;border:2px solid #EA4335;animation:sm-ring 1.4s ease-out infinite}
-        @keyframes sm-ring{0%{transform:scale(1);opacity:1}100%{transform:scale(2.8);opacity:0}}
+        /* Badges — neutral, no saturated colour blocks */
+        .smc-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;letter-spacing:0.02em;border:1px solid #E5E7EB}
+        .smc-badge-live{background:#ECF6F0;color:#2E7D55;border-color:#CDE7D8}
+        .smc-badge-upcoming{background:#EDF3FB;color:#35608F;border-color:#D2E0F0}
+        .smc-badge-ended{background:#F7F7F8;color:#9CA3AF}
+        .smc-live-dot{width:6px;height:6px;border-radius:50%;background:#2E7D55;display:inline-block;flex-shrink:0}
         /* Meta */
-        .smc-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-        .smc-meta-live{font-size:11px;color:#EA4335;font-weight:600}
-        .smc-meta-until{font-size:11px;color:#1a73e8;font-weight:600}
-        .smc-meta-ended{font-size:11px;color:#9AA0A6}
-        .smc-avstack{display:flex;align-items:center;gap:0}
+        .smc-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+        .smc-meta-live{font-size:11px;color:#2E7D55;font-weight:600}
+        .smc-meta-until{font-size:11px;color:#35608F;font-weight:600}
+        .smc-meta-ended{font-size:11px;color:#9CA3AF}
+        .smc-avstack{display:flex;align-items:center;gap:0;min-width:0}
         .smc-av{width:20px;height:20px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;border:2px solid #fff;margin-left:-5px;flex-shrink:0}
         .smc-av:first-child{margin-left:0}
-        .smc-av-extra{width:20px;height:20px;border-radius:50%;background:#F1F3F4;color:#6B7280;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;border:2px solid #fff;margin-left:-5px}
-        .smc-av-count{font-size:11px;color:#9AA0A6;margin-left:7px;white-space:nowrap}
-        .smc-meetid{font-family:monospace;font-size:10px;color:#BDC1C6}
+        .smc-av-extra{width:20px;height:20px;border-radius:50%;background:#E5E7EB;color:#6B7280;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;border:2px solid #fff;margin-left:-5px;flex-shrink:0}
+        .smc-av-count{font-size:11px;color:#9CA3AF;margin-left:7px;white-space:nowrap}
+        .smc-meetid{font-family:monospace;font-size:10px;color:#C7CBD1;flex-shrink:0}
         /* Actions */
         .smc-actions{display:flex;flex-direction:column;gap:6px;align-self:center;flex-shrink:0}
-        .smc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;transition:all 0.12s;border:none}
-        .smc-btn-join{background:#16A34A;color:#fff;box-shadow:0 2px 8px rgba(22,163,74,0.25)}
-        .smc-btn-join:hover{background:#15803D}
-        .smc-btn-join:hover{background:#C5221F}
-        .smc-btn-cowork{background:#EBF3FE;color:#1a73e8;border:1px solid #BFDBFE !important}
-        .smc-btn-cowork:hover{background:#D2E3FC}
-        .smc-btn-gmeet{background:#fff;color:#5f6368;border:1px solid #E4E7EC !important}
-        .smc-btn-gmeet:hover{background:#F8F9FA}
-        .smc-btn-view{background:#F8F9FA;color:#9AA0A6;border:1px solid #E4E7EC !important}
-        .smc-btn-view:hover{background:#F1F3F4}
-        .smc-btn-summary{background:#F0FDF4;color:#16A34A;border:1px solid #BBF7D0 !important}
-        .smc-btn-summary:hover{background:#DCFCE7}
+        .smc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;white-space:nowrap;transition:background 0.12s,border-color 0.12s;border:1px solid transparent}
+        .smc-btn-join{background:#2E7D55;color:#fff}
+        .smc-btn-join:hover{background:#256646}
+        .smc-btn-cowork{background:#fff;color:#475569;border-color:#D8DEE6}
+        .smc-btn-cowork:hover{background:#F4F5F7}
+        .smc-btn-gmeet{background:#fff;color:#6B7280;border-color:#E5E7EB}
+        .smc-btn-gmeet:hover{background:#FAFAFA}
+        .smc-btn-view{background:#FAFAFA;color:#9CA3AF;border-color:#E5E7EB}
+        .smc-btn-view:hover{background:#F4F5F7}
+        .smc-btn-summary{background:#fff;color:#6B7280;border-color:#E5E7EB}
+        .smc-btn-summary:hover{background:#F4F5F7}
         /* Skeleton */
         .sm-skel{animation:sm-sk 1.4s ease infinite}
-        @keyframes sm-sk{0%,100%{opacity:1}50%{opacity:0.4}}
-        .sm-skel-b{background:#F1F3F4;border-radius:6px}
+        @keyframes sm-sk{0%,100%{opacity:1}50%{opacity:0.45}}
+        .sm-skel-b{background:#F1F2F4;border-radius:6px}
         /* Responsive */
         @media(max-width:640px){
           .sm-hdr{padding:0 16px;height:56px}
@@ -757,78 +742,75 @@ export default function MeetingsPage() {
           .smc-btn{flex:1}
         }
         /* Cancelled meeting */
-        .smc-cancelled{border-left:3px solid #DC2626;opacity:1;position:relative;overflow:hidden}
-        .smc-btn-cancel{background:#FEF2F2;color:#DC2626;border:1px solid #FECDD3 !important}
-        .smc-btn-cancel:hover:not(:disabled){background:#FEE2E2}
-        .smc-btn-cancel:disabled{opacity:0.6;cursor:not-allowed}
+        .smc-cancelled{border-left:3px solid #A85454;opacity:1;position:relative;overflow:hidden}
         /* Confirm dialog overlay */
-        .sm-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
-        .sm-confirm-box{background:#fff;border-radius:14px;padding:28px 28px 22px;max-width:380px;width:100%;box-shadow:0 20px 48px rgba(0,0,0,0.18)}
-        .sm-confirm-icon{width:44px;height:44px;border-radius:50%;background:#FEF2F2;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
-        .sm-confirm-title{font-size:16px;font-weight:700;color:#1A1D21;text-align:center;margin-bottom:6px}
+        .sm-confirm-overlay{position:fixed;inset:0;background:rgba(17,24,39,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
+        .sm-confirm-box{background:#fff;border-radius:12px;padding:26px 26px 20px;max-width:380px;width:100%;box-shadow:0 20px 48px rgba(0,0,0,0.16)}
+        .sm-confirm-icon{width:42px;height:42px;border-radius:50%;background:#F7EFEF;border:1px solid #E6D5D5;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+        .sm-confirm-title{font-size:16px;font-weight:700;color:#1F2937;text-align:center;margin-bottom:6px}
         .sm-confirm-body{font-size:13px;color:#6B7280;text-align:center;line-height:1.55;margin-bottom:20px}
         .sm-confirm-actions{display:flex;gap:10px}
-        .sm-confirm-btn{flex:1;padding:10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.12s;border:none}
-        .sm-confirm-cancel-btn{background:#F3F4F6;color:#374151}
-        .sm-confirm-cancel-btn:hover{background:#E5E7EB}
-        .sm-confirm-ok-btn{background:#DC2626;color:#fff}
-        .sm-confirm-ok-btn:hover{background:#B91C1C}
+        .sm-confirm-btn{flex:1;padding:10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s;border:1px solid transparent}
+        .sm-confirm-cancel-btn{background:#fff;color:#374151;border-color:#E5E7EB}
+        .sm-confirm-cancel-btn:hover{background:#F4F5F7}
+        .sm-confirm-ok-btn{background:#A85454;color:#fff}
+        .sm-confirm-ok-btn:hover{background:#8F4545}
         @keyframes sm-spin{to{transform:rotate(360deg)}}
         /* Three-dot button */
-        .smc-btn-more{background:#F8F9FA;color:#5f6368;border:1px solid #E4E7EC !important;gap:3px;padding:7px 10px}
-        .smc-btn-more:hover:not(:disabled){background:#F1F3F4}
+        .smc-btn-more{background:#FAFAFA;color:#6B7280;border-color:#E5E7EB;gap:3px;padding:7px 10px}
+        .smc-btn-more:hover:not(:disabled){background:#F4F5F7}
+        .smc-btn-more:disabled{opacity:0.6;cursor:not-allowed}
         /* Popover menu */
-        .smc-popover{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #E4E7EC;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.13);z-index:50;min-width:160px;padding:4px;animation:smc-pop 0.12s cubic-bezier(0.4,0,0.2,1)}
-        @keyframes smc-pop{from{opacity:0;transform:scale(0.94) translateY(-4px)}to{opacity:1;transform:scale(1) translateY(0)}}
-        .smc-popover-item{width:100%;display:flex;align-items:center;gap:8px;padding:8px 12px;border:none;background:transparent;font-size:12px;font-weight:500;color:#374151;cursor:pointer;border-radius:7px;font-family:inherit;text-align:left;transition:background 0.1s}
-        .smc-popover-item:hover{background:#F3F4F6}
-        .smc-popover-item-danger{color:#DC2626}
-        .smc-popover-item-danger:hover{background:#FEF2F2}
+        .smc-popover{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #E5E7EB;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,0.10);z-index:50;min-width:160px;padding:4px;animation:smc-pop 0.12s ease}
+        @keyframes smc-pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+        .smc-popover-item{width:100%;display:flex;align-items:center;gap:8px;padding:8px 12px;border:none;background:transparent;font-size:12px;font-weight:500;color:#374151;cursor:pointer;border-radius:6px;font-family:inherit;text-align:left;transition:background 0.1s}
+        .smc-popover-item:hover{background:#F4F5F7}
+        .smc-popover-item-danger{color:#A85454}
+        .smc-popover-item-danger:hover{background:#F7EFEF}
         /* Edit modal */
-        .sm-edit-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
-        .sm-edit-box{background:#fff;border-radius:16px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,0.2);animation:smc-pop 0.18s cubic-bezier(0.4,0,0.2,1)}
+        .sm-edit-overlay{position:fixed;inset:0;background:rgba(17,24,39,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
+        .sm-edit-box{background:#fff;border-radius:14px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,0.18);animation:smc-pop 0.18s ease}
         .sm-edit-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 0}
-        .sm-edit-title{font-size:17px;font-weight:700;color:#1A1D21}
-        .sm-edit-close{width:32px;height:32px;border:none;background:transparent;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#5f6368;font-size:20px;transition:background 0.1s}
-        .sm-edit-close:hover{background:#F1F3F4}
+        .sm-edit-title{font-size:16px;font-weight:700;color:#1F2937}
+        .sm-edit-close{width:32px;height:32px;border:1px solid #E5E7EB;background:#FAFAFA;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:18px;transition:background 0.1s}
+        .sm-edit-close:hover{background:#F4F5F7}
         .sm-edit-body{padding:20px 24px}
         .sm-edit-field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
-        .sm-edit-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#5f6368}
-        .sm-edit-input{padding:9px 12px;border:1.5px solid #E4E7EC;border-radius:8px;font-size:13px;color:#1A1D21;font-family:inherit;outline:none;transition:border 0.15s;width:100%}
-        .sm-edit-input:focus{border-color:#1a73e8;box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
+        .sm-edit-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6B7280}
+        .sm-edit-input{padding:9px 12px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#1F2937;font-family:inherit;outline:none;transition:border-color 0.15s;width:100%;box-sizing:border-box}
+        .sm-edit-input:focus{border-color:#475569}
         .sm-edit-textarea{resize:vertical;min-height:72px;line-height:1.5}
         .sm-edit-dept-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
-        .sm-edit-dept-btn{padding:4px 12px;border-radius:99px;border:1.5px solid #E4E7EC;background:#fff;font-size:11px;font-weight:600;color:#5f6368;cursor:pointer;transition:all 0.12s;font-family:inherit}
-        .sm-edit-dept-btn.active{background:#1a73e8;border-color:#1a73e8;color:#fff}
-        .sm-edit-emp-list{max-height:180px;overflow-y:auto;border:1.5px solid #E4E7EC;border-radius:8px;background:#FAFBFF}
-        .sm-edit-emp-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #F3F4F6}
+        .sm-edit-dept-btn{padding:4px 12px;border-radius:99px;border:1px solid #E5E7EB;background:#fff;font-size:11px;font-weight:600;color:#6B7280;cursor:pointer;transition:all 0.12s;font-family:inherit}
+        .sm-edit-dept-btn.active{background:#475569;border-color:#475569;color:#fff}
+        .sm-edit-emp-list{max-height:180px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px;background:#FAFAFA}
+        .sm-edit-emp-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #F1F2F4}
         .sm-edit-emp-item:last-child{border-bottom:none}
-        .sm-edit-emp-item:hover{background:#F8F9FA}
+        .sm-edit-emp-item:hover{background:#F4F5F7}
         .sm-edit-emp-av{width:26px;height:26px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-        .sm-edit-emp-name{font-size:12px;font-weight:500;color:#1A1D21;flex:1}
-        .sm-edit-emp-dept{font-size:10px;color:#9AA0A6}
-        .sm-edit-emp-check{width:16px;height:16px;border-radius:4px;border:1.5px solid #D0D5DD;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.12s}
-        .sm-edit-emp-check.checked{background:#1a73e8;border-color:#1a73e8}
-        .sm-edit-foot{padding:14px 24px 20px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #F3F4F6}
-        .sm-edit-save-btn{padding:9px 22px;background:#1a73e8;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s}
-        .sm-edit-save-btn:hover:not(:disabled){background:#1557b0}
+        .sm-edit-emp-name{font-size:12px;font-weight:500;color:#1F2937;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+        .sm-edit-emp-dept{font-size:10px;color:#9CA3AF}
+        .sm-edit-emp-check{width:16px;height:16px;border-radius:4px;border:1.5px solid #CBD5E1;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.12s}
+        .sm-edit-emp-check.checked{background:#475569;border-color:#475569}
+        .sm-edit-foot{padding:14px 24px 20px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #F1F2F4}
+        .sm-edit-save-btn{padding:9px 22px;background:#475569;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s}
+        .sm-edit-save-btn:hover:not(:disabled){background:#374151}
         .sm-edit-save-btn:disabled{opacity:0.6;cursor:not-allowed}
-        .sm-edit-cancel-btn{padding:9px 18px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s}
-        .sm-edit-cancel-btn:hover{background:#E5E7EB}
-        .sm-edit-err{color:#DC2626;font-size:12px;margin-bottom:10px;padding:8px 12px;background:#FEF2F2;border-radius:7px;border:1px solid #FECDD3}
+        .sm-edit-cancel-btn{padding:9px 18px;background:#fff;color:#374151;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.12s}
+        .sm-edit-cancel-btn:hover{background:#F4F5F7}
+        .sm-edit-err{color:#9B6B6B;font-size:12px;margin-bottom:10px;padding:8px 12px;background:#F6F0F0;border-radius:7px;border:1px solid #E6D8D8}
       `}</style>
 
       <div className="sm-page">
         <div className="sm-hdr">
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
             <div className="sm-hdr-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
             </div>
             <span className="sm-hdr-title">Meetings</span>
           </div>
-          {/* CHANGED: isCEO → isHost so TL also sees New Meeting button */}
           {isHost && (
             <button className="sm-new-btn" onClick={() => router.push("/coworking/schedule-meet/new")}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -840,10 +822,10 @@ export default function MeetingsPage() {
         {!fetching && meets.length > 0 && (
           <div className="sm-stats">
             {[
-              { n: live.length, l: "Live", c: "#EA4335" },
-              { n: upcoming.length, l: "Upcoming", c: "#1a73e8" },
-              { n: ended.length, l: "Ended", c: "#9AA0A6" },
-              { n: cancelled.length, l: "Cancelled", c: "#DC2626" },
+              { n: live.length, l: "Live", c: "#2E7D55" },
+              { n: upcoming.length, l: "Upcoming", c: "#35608F" },
+              { n: ended.length, l: "Ended", c: "#6B7280" },
+              { n: cancelled.length, l: "Cancelled", c: "#A85454" },
             ].map(s => (
               <div className="sm-stat" key={s.l}>
                 <span className="sm-stat-n" style={{ color: s.c }}>{s.n}</span>
@@ -855,9 +837,9 @@ export default function MeetingsPage() {
 
         <div className="sm-search-wrap">
           <div className="sm-search">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9AA0A6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search meetings…" />
-            {search && <button onClick={() => setSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#9AA0A6", fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>}
+            {search && <button onClick={() => setSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>}
           </div>
         </div>
 
@@ -878,44 +860,39 @@ export default function MeetingsPage() {
               ))}
             </div>
           ) : meets.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "80px 20px", color: "#9AA0A6" }}>
-              <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#D0D5DD" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px", display: "block" }}>
+            <div style={{ textAlign: "center", padding: "80px 20px", color: "#9CA3AF" }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px", display: "block" }}>
                 <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>No meetings yet</div>
-              {/* CHANGED: isCEO → isHost so TL also sees the hint text */}
-              {isHost && <div style={{ fontSize: 13, color: "#9AA0A6" }}>Click "New Meeting" to schedule one.</div>}
+              {isHost && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Click "New Meeting" to schedule one.</div>}
             </div>
           ) : (
             <>
               {live.length > 0 && (
-                <Section label="Live Now" count={live.length} dotColor="#EA4335" dotGlow="0 0 0 3px rgba(234,67,53,0.25)">
+                <Section label="Live Now" count={live.length}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {live.map(m => <MeetCard key={m.meetId} meet={m} status="live" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)}
                   </div>
                 </Section>
               )}
-              <Section label="Upcoming" count={upcoming.length} dotColor="#1a73e8">
+              <Section label="Upcoming" count={upcoming.length}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {upcoming.length === 0
-                    ? <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#F8F9FA", border: "1.5px dashed #E4E7EC", borderRadius: 10, fontSize: 13, color: "#9AA0A6" }}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4, flexShrink: 0 }}><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-                      No upcoming meetings
-                    </div>
+                    ? <EmptyInline message="No upcoming meetings" />
                     : upcoming.map(m => <MeetCard key={m.meetId} meet={m} status="upcoming" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)
                   }
                 </div>
               </Section>
               {ended.length > 0 && (
-                <Section label="Past" count={ended.length} dotColor="#D0D5DD">
+                <Section label="Past" count={ended.length}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {ended.map(m => <MeetCard key={m.meetId} meet={m} status="ended" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)}
                   </div>
                 </Section>
               )}
-              {/* Cancelled meetings — visible to host + all invited participants (blurred) */}
               {cancelled.length > 0 && (
-                <Section label="Cancelled" count={cancelled.length} dotColor="#DC2626">
+                <Section label="Cancelled" count={cancelled.length}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {cancelled.map(m => (
                       <MeetCard
@@ -945,7 +922,7 @@ export default function MeetingsPage() {
         <div className="sm-confirm-overlay" onClick={() => setCancelConfirm(null)}>
           <div className="sm-confirm-box" onClick={e => e.stopPropagation()}>
             <div className="sm-confirm-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A85454" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="15" y1="9" x2="9" y2="15" />
                 <line x1="9" y1="9" x2="15" y2="15" />
@@ -953,18 +930,18 @@ export default function MeetingsPage() {
             </div>
             <div className="sm-confirm-title">Cancel Meeting?</div>
             <div className="sm-confirm-body">
-              <strong style={{ color: "#1A1D21", fontSize: 14 }}>{cancelConfirm.title}</strong>
+              <strong style={{ color: "#1F2937", fontSize: 14 }}>{cancelConfirm.title}</strong>
               {cancelConfirm.meet?.dateTime && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#6B7280" }}>
-                  📅 {fmtFull(cancelConfirm.meet.dateTime)}
+                  {fmtFull(cancelConfirm.meet.dateTime)}
                 </div>
               )}
               {cancelConfirm.meet?.participants?.length > 0 && (
                 <div style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
-                  👥 {cancelConfirm.meet.participants.length} participant{cancelConfirm.meet.participants.length !== 1 ? "s" : ""} will be notified
+                  {cancelConfirm.meet.participants.length} participant{cancelConfirm.meet.participants.length !== 1 ? "s" : ""} will be notified
                 </div>
               )}
-              <div style={{ marginTop: 12, color: "#DC2626", fontWeight: 600, fontSize: 13 }}>This cannot be undone.</div>
+              <div style={{ marginTop: 12, color: "#A85454", fontWeight: 600, fontSize: 13 }}>This cannot be undone.</div>
             </div>
             <div className="sm-confirm-actions">
               <button className="sm-confirm-btn sm-confirm-cancel-btn" onClick={() => setCancelConfirm(null)}>

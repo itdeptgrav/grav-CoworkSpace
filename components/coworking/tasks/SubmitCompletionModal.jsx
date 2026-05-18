@@ -1,14 +1,11 @@
 "use client";
 /**
  * GRAV-CMS/components/coworking/tasks/SubmitCompletionModal.jsx
- * Employee submits completion request with proof.
- * Single "Attach Files" input — supports images, PDF, Excel, Word, and any other file.
- * Images → Cloudinary | All other files → Google Drive (via /cowork/upload/pdf)
+ * Employee submits completion request with proof — right slider panel.
  */
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { uploadImage, uploadPDF, submitCompletionRequest } from "../../../lib/mediaUploadApi";
 
-// ── File type helpers ─────────────────────────────────────
 const IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"];
 
 function getFileIcon(name = "") {
@@ -32,6 +29,7 @@ function getFileColor(name = "") {
 }
 
 export default function SubmitCompletionModal({ task, currentEmployeeId, onClose, onSuccess }) {
+    const [visible, setVisible] = useState(false);
     const [message, setMessage] = useState("");
     const [files, setFiles] = useState([]);
     const [submitting, setSubmitting] = useState(false);
@@ -39,40 +37,30 @@ export default function SubmitCompletionModal({ task, currentEmployeeId, onClose
     const [error, setError] = useState("");
     const fileRef = useRef(null);
 
+    useEffect(() => { requestAnimationFrame(() => setVisible(true)); }, []);
+
+    const handleClose = () => {
+        setVisible(false);
+        setTimeout(onClose, 280);
+    };
+
     const uploading = uploadingCount > 0;
 
-    // ── Single unified file handler ───────────────────────
     const handleFiles = async (e) => {
         const selected = Array.from(e.target.files || []);
         e.target.value = "";
         if (!selected.length) return;
-
         setError("");
         setUploadingCount(prev => prev + selected.length);
-
         await Promise.all(selected.map(async (file) => {
             try {
                 if (IMAGE_TYPES.includes(file.type)) {
-                    // Images → Cloudinary
                     const preview = URL.createObjectURL(file);
                     const result = await uploadImage(file, "cowork-completion-proof");
-                    setFiles(prev => [...prev, {
-                        type: "image",
-                        url: result.url,
-                        name: file.name,
-                        preview,
-                    }]);
+                    setFiles(prev => [...prev, { type: "image", url: result.url, name: file.name, preview }]);
                 } else {
-                    // Everything else (PDF, Excel, Word, etc.) → Google Drive
                     const result = await uploadPDF(file);
-                    setFiles(prev => [...prev, {
-                        type: "doc",
-                        url: result.viewUrl || result.url,
-                        downloadUrl: result.downloadUrl,
-                        embedUrl: result.embedUrl,
-                        name: file.name,
-                        fileId: result.fileId,
-                    }]);
+                    setFiles(prev => [...prev, { type: "doc", url: result.viewUrl || result.url, downloadUrl: result.downloadUrl, embedUrl: result.embedUrl, name: file.name, fileId: result.fileId }]);
                 }
             } catch (err) {
                 setError(`Failed to upload "${file.name}": ${err.message}`);
@@ -89,8 +77,7 @@ export default function SubmitCompletionModal({ task, currentEmployeeId, onClose
         try {
             const imageUrls = files.filter(f => f.type === "image").map(f => f.url);
             const pdfAttachments = files.filter(f => f.type === "doc").map(f => ({
-                url: f.url, name: f.name, downloadUrl: f.downloadUrl,
-                embedUrl: f.embedUrl, fileId: f.fileId,
+                url: f.url, name: f.name, downloadUrl: f.downloadUrl, embedUrl: f.embedUrl, fileId: f.fileId,
             }));
             await submitCompletionRequest({ taskId: task.taskId, message: message.trim(), imageUrls, pdfAttachments });
             onSuccess?.();
@@ -99,125 +86,148 @@ export default function SubmitCompletionModal({ task, currentEmployeeId, onClose
     };
 
     return (
-        <div style={s.overlay}>
-            <div style={s.modal}>
-                <div style={s.header}>
+        <>
+            <style>{`
+                @keyframes _scm_fadeIn { from{opacity:0} to{opacity:1} }
+                @keyframes _scm_slideIn { from{transform:translateX(110%)} to{transform:translateX(0)} }
+                @keyframes _scm_slideOut { from{transform:translateX(0)} to{transform:translateX(110%)} }
+            `}</style>
+
+            {/* Backdrop */}
+            <div
+                onClick={handleClose}
+                style={{
+                    position: "fixed", inset: 0, zIndex: 1998,
+                    background: "rgba(15,23,42,0.35)",
+                    backdropFilter: "blur(2px)",
+                    animation: "_scm_fadeIn 0.2s ease",
+                }}
+            />
+
+            {/* Slider panel */}
+            <div style={{
+                position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 1999,
+                width: "min(480px, 100vw)",
+                background: "#fff",
+                boxShadow: "-4px 0 32px rgba(0,0,0,0.15)",
+                display: "flex", flexDirection: "column",
+                fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+                animation: `${visible ? "_scm_slideIn" : "_scm_slideOut"} 0.28s cubic-bezier(0.4,0,0.2,1) forwards`,
+            }}>
+
+                {/* Header */}
+                <div style={{
+                    display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+                    padding: "18px 20px 14px",
+                    borderBottom: "1px solid #F1F5F9",
+                    flexShrink: 0,
+                }}>
                     <div>
-                        <h2 style={s.title}>Submit Completed Work</h2>
-                        <p style={s.subtitle}>{task.title} ({task.taskId})</p>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", marginBottom: 3 }}>
+                            Submit Completed Work
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }}>
+                            {task.title}
+                            <span style={{ fontSize: 10, fontFamily: "monospace", background: "#F1F5F9", color: "#94A3B8", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{task.taskId}</span>
+                        </div>
                     </div>
-                    <button onClick={onClose} style={s.closeBtn}>✕</button>
+                    <button onClick={handleClose} style={{ width: 28, height: 28, border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748B", flexShrink: 0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
                 </div>
 
-                {error && <div style={s.errBox}>⚠️ {error}</div>}
-                {uploading && (
-                    <div style={s.infoBox}>
-                        ⏳ Uploading {uploadingCount} file{uploadingCount > 1 ? "s" : ""}...
-                    </div>
-                )}
+                {/* Scrollable body */}
+                <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
 
-                <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <div style={s.field}>
-                        <label style={s.label}>Describe completed work *</label>
-                        <textarea
-                            style={{ ...s.input, height: "100px", resize: "vertical" }}
-                            value={message}
-                            onChange={e => setMessage(e.target.value)}
-                            placeholder="What did you complete? How was it done? Include any notes..."
-                            required
-                        />
-                    </div>
+                    {error && (
+                        <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "10px 14px", color: "#DC2626", fontSize: 13, marginBottom: 16 }}>
+                            ⚠️ {error}
+                        </div>
+                    )}
+                    {uploading && (
+                        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 14px", color: "#1D4ED8", fontSize: 13, marginBottom: 16 }}>
+                            ⏳ Uploading {uploadingCount} file{uploadingCount > 1 ? "s" : ""}...
+                        </div>
+                    )}
 
-                    <div style={s.field}>
-                        <label style={s.label}>Attachments (proof of work)</label>
+                    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
 
-                        {/* Single attach button */}
-                        <button
-                            type="button"
-                            onClick={() => fileRef.current?.click()}
-                            style={s.attachBtn}
-                            disabled={uploading}
-                        >
-                            <span style={{ fontSize: "16px" }}>📎</span>
-                            <span>Attach Files</span>
-                            <span style={s.attachHint}>Images, PDF, Excel, Word, and more</span>
-                        </button>
-                        <input
-                            ref={fileRef}
-                            type="file"
-                            multiple
-                            style={{ display: "none" }}
-                            onChange={handleFiles}
-                        />
+                        {/* Description */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                Describe completed work *
+                            </label>
+                            <textarea
+                                value={message}
+                                onChange={e => setMessage(e.target.value)}
+                                placeholder="What did you complete? How was it done? Include any notes..."
+                                required
+                                style={{
+                                    padding: "10px 12px", border: "1px solid #E2E8F0", borderRadius: 8,
+                                    fontSize: 13, fontFamily: "inherit", outline: "none",
+                                    resize: "vertical", minHeight: 100, width: "100%", boxSizing: "border-box",
+                                    color: "#0F172A", lineHeight: 1.5,
+                                }}
+                                onFocus={e => e.target.style.borderColor = "#1B4F8A"}
+                                onBlur={e => e.target.style.borderColor = "#E2E8F0"}
+                            />
+                        </div>
 
-                        {/* File preview grid */}
-                        {files.length > 0 && (
-                            <div style={s.fileList}>
-                                {files.map((f, i) => (
-                                    <div key={i} style={s.fileRow}>
-                                        {f.type === "image" ? (
-                                            <img src={f.preview || f.url} alt="" style={s.imgThumb} />
-                                        ) : (
-                                            <div style={{ ...s.docIcon, color: getFileColor(f.name) }}>
-                                                {getFileIcon(f.name)}
-                                            </div>
-                                        )}
-                                        <span style={s.fileName} title={f.name}>{f.name}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}
-                                            style={s.removeBtn}
-                                            title="Remove"
-                                        >✕</button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                        {/* Attachments */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <label style={{ fontSize: 11, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                Attachments (proof of work)
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => fileRef.current?.click()}
+                                disabled={uploading}
+                                style={{
+                                    display: "flex", alignItems: "center", gap: 10,
+                                    padding: "10px 14px", border: "1.5px dashed #CBD5E1", borderRadius: 8,
+                                    background: "#F8FAFC", cursor: uploading ? "not-allowed" : "pointer",
+                                    fontFamily: "inherit", fontSize: 13, color: "#475569",
+                                    textAlign: "left", width: "100%", transition: "all 0.15s",
+                                    opacity: uploading ? 0.6 : 1,
+                                }}
+                                onMouseEnter={e => { if (!uploading) { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; } }}
+                                onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                            >
+                                <span style={{ fontSize: 16 }}>📎</span>
+                                <span>Attach Files</span>
+                                <span style={{ marginLeft: "auto", fontSize: 11, color: "#94A3B8" }}>Images, PDF, Excel, Word…</span>
+                            </button>
+                            <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={handleFiles} />
 
-                    <div style={s.footer}>
-                        <button type="button" onClick={onClose} style={s.cancelBtn} disabled={submitting}>Cancel</button>
-                        <button type="submit" disabled={submitting || uploading} style={s.submitBtn}>
-                            {submitting ? "Submitting..." : "Submit for Review"}
-                        </button>
-                    </div>
-                </form>
+                            {files.length > 0 && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                                    {files.map((f, i) => (
+                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "#F8FAFC", borderRadius: 6, border: "1px solid #E2E8F0" }}>
+                                            {f.type === "image" ? (
+                                                <img src={f.preview || f.url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "cover", flexShrink: 0 }} />
+                                            ) : (
+                                                <span style={{ fontSize: 20, color: getFileColor(f.name), flexShrink: 0, width: 32, textAlign: "center" }}>{getFileIcon(f.name)}</span>
+                                            )}
+                                            <span style={{ flex: 1, fontSize: 12, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                                            <button type="button" onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))} style={{ background: "none", border: "none", color: "#94A3B8", fontSize: 14, cursor: "pointer", padding: "2px 4px", flexShrink: 0 }}>✕</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer buttons */}
+                        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8, borderTop: "1px solid #F1F5F9", marginTop: 8 }}>
+                            <button type="button" onClick={handleClose} disabled={submitting} style={{ padding: "8px 18px", border: "1px solid #E2E8F0", borderRadius: 7, background: "#fff", color: "#64748B", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                                Cancel
+                            </button>
+                            <button type="submit" disabled={submitting || uploading} style={{ padding: "8px 20px", border: "none", borderRadius: 7, background: submitting || uploading ? "#94A3B8" : "#1B4F8A", color: "#fff", fontSize: 13, fontWeight: 600, cursor: submitting || uploading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                                {submitting ? "Submitting…" : uploading ? "Uploading…" : "Submit for Review"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
-        </div>
+        </>
     );
 }
-
-const s = {
-    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, fontFamily: "'Google Sans','Roboto',sans-serif" },
-    modal: { background: "#fff", borderRadius: "12px", width: "min(580px,96vw)", maxHeight: "88vh", overflow: "auto", padding: "26px", boxShadow: "0 24px 48px rgba(0,0,0,0.2)" },
-    header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px" },
-    title: { margin: "0 0 4px", fontSize: "20px", fontWeight: 400, color: "#202124" },
-    subtitle: { margin: 0, fontSize: "13px", color: "#5f6368" },
-    closeBtn: { background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#5f6368" },
-    errBox: { background: "#fce8e6", border: "1px solid #f5c6c6", borderRadius: "6px", padding: "9px 12px", color: "#c5221f", fontSize: "13px", marginBottom: "12px" },
-    infoBox: { background: "#e8f0fe", borderRadius: "6px", padding: "9px 12px", color: "#1a73e8", fontSize: "13px", marginBottom: "12px" },
-    field: { display: "flex", flexDirection: "column", gap: "6px" },
-    label: { fontSize: "11px", fontWeight: 500, color: "#5f6368", textTransform: "uppercase", letterSpacing: "0.5px" },
-    input: { padding: "10px 12px", border: "1px solid #dadce0", borderRadius: "4px", fontSize: "14px", fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" },
-    attachBtn: {
-        display: "flex", alignItems: "center", gap: "10px",
-        padding: "10px 16px", border: "1.5px dashed #dadce0", borderRadius: "8px",
-        background: "#fafafa", cursor: "pointer", fontFamily: "inherit",
-        fontSize: "14px", color: "#3c4043", textAlign: "left", width: "100%",
-        transition: "border-color 0.15s, background 0.15s",
-    },
-    attachHint: { marginLeft: "auto", fontSize: "11px", color: "#9aa0a6" },
-    fileList: { display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px" },
-    fileRow: {
-        display: "flex", alignItems: "center", gap: "10px",
-        padding: "7px 10px", background: "#f8f9fa", borderRadius: "6px",
-        border: "1px solid #e8eaed",
-    },
-    imgThumb: { width: "32px", height: "32px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 },
-    docIcon: { width: "32px", textAlign: "center", fontSize: "22px", flexShrink: 0 },
-    fileName: { flex: 1, fontSize: "13px", color: "#202124", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-    removeBtn: { background: "none", border: "none", color: "#9aa0a6", fontSize: "14px", cursor: "pointer", padding: "2px 4px", flexShrink: 0, lineHeight: 1 },
-    footer: { display: "flex", justifyContent: "flex-end", gap: "10px", paddingTop: "14px", borderTop: "1px solid #e8eaed" },
-    cancelBtn: { padding: "9px 22px", border: "none", background: "transparent", color: "#1a73e8", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-    submitBtn: { padding: "9px 24px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: "4px", fontSize: "14px", fontWeight: 500, cursor: "pointer" },
-};

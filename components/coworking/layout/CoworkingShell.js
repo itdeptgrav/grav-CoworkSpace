@@ -1796,7 +1796,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         const res = await fetch(`${BASE}/cowork/sop/recheck/pending-count`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { return; }
         if (data.success) setPendingRecheckCount(data.count || 0);
       } catch (e) { console.error("recheck count:", e); }
     };
@@ -2294,7 +2296,6 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     { id: "meetings", label: "Meetings", icon: "meetings", path: "/coworking/schedule-meet" },
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),
-    { id: "calendar", label: "Calendar", icon: "calendar", path: "/coworking/calendar" },
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
     { id: "settings", label: "Settings", icon: "settings", path: "/coworking/settings" },
   ];
@@ -2623,7 +2624,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         }
         .cw-topbar {
           height: 56px;
-          min-height: 56px;
+         
           background: #FFFFFF;
           border-bottom: 1px solid #E4E7EC;
           display: flex;
@@ -3019,29 +3020,50 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             {NAV.map(item => {
               if (item.id === "tasks") return (
                 <div key="tasks-group">
-                  <div className={`cw-nav-item${isActive(item.path) ? " active" : ""}`} style={{ userSelect: "none" }}>
+                  <div
+                    className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                    style={{ userSelect: "none" }}
+                    onClick={() => setTasksExpanded(v => !v)}
+                  >
                     <NavIcon name={item.icon} size={18} />
-                    <span style={{ flex: 1 }} onClick={() => handleNav(item.path)}>Tasks</span>
+                    <span style={{ flex: 1 }}>Tasks</span>
                     {taskChatUnreadCount > 0 && (
                       <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#8B5CF6", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 4 }}>
                         {taskChatUnreadCount > 99 ? "99+" : taskChatUnreadCount}
                       </span>
                     )}
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                      onClick={e => { e.stopPropagation(); setTasksExpanded(v => !v); }}
-                      style={{ transition: "transform 0.2s", transform: tasksExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.7, flexShrink: 0, cursor: "pointer", padding: 2 }}>
+                    <svg
+                      width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transition: "transform 0.2s", transform: tasksExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.5, flexShrink: 0 }}
+                    >
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
                   </div>
                   {tasksExpanded && (
-                    <div
-                      onClick={() => { router.push("/coworking/tasks?filter=goal"); if (isMobile) setMobileOpen(false); }}
-                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px 7px 44px", cursor: "pointer", borderRadius: 8, margin: "1px 8px", fontSize: 13, fontWeight: 500, color: "#7E22CE", transition: "background 0.12s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "var(--cw-hover)"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    >
-                      <span style={{ fontSize: 14, flexShrink: 0 }}>🎯</span>
-                      <span>Goal Tasks</span>
+                    <div style={{ paddingBottom: 2 }}>
+                      <div
+                        onClick={() => { router.push("/coworking/tasks"); if (isMobile) setMobileOpen(false); setTasksExpanded(false); }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 42px", cursor: "pointer", borderRadius: 7, margin: "1px 4px", fontSize: 13, fontWeight: 500, color: "#374151", transition: "background 0.12s" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#F5F7FA"}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                        </svg>
+                        <span>Cowork Task</span>
+                      </div>
+                      <div
+                        onClick={() => { router.push("/coworking/tasks?filter=goal"); if (isMobile) setMobileOpen(false); setTasksExpanded(false); }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 42px", cursor: "pointer", borderRadius: 7, margin: "1px 4px", fontSize: 13, fontWeight: 500, color: "#374151", transition: "background 0.12s" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#F5F7FA"}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <span>Cowork Goal</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3050,37 +3072,47 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 <div key="mail-group">
                   <div
                     className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
-                    onClick={() => { handleNav(item.path); setMailExpanded(e => !e); }}
                     style={{ userSelect: "none" }}
+                    onClick={() => setMailExpanded(v => !v)}
                   >
                     <NavIcon name={item.icon} size={18} />
                     <span style={{ flex: 1 }}>Mail</span>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                      style={{ transition: "transform 0.2s", transform: mailExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.5, flexShrink: 0 }}>
+                    <svg
+                      width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transition: "transform 0.2s", transform: mailExpanded ? "rotate(180deg)" : "rotate(0deg)", opacity: 0.5, flexShrink: 0 }}
+                    >
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
                   </div>
                   {mailExpanded && (
-                    <div
-                      onClick={() => { router.push("/coworking/mail/gmail"); if (isMobile) setMobileOpen(false); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 10,
-                        padding: "7px 14px 7px 44px", cursor: "pointer",
-                        borderRadius: 8, margin: "1px 8px",
-                        fontSize: 13, fontWeight: 500,
-                        color: "var(--cw-text-2)",
-                        transition: "background 0.12s",
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = "var(--cw-hover)"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                      </svg>
-                      <span>My Gmail</span>
+                    <div style={{ paddingBottom: 2 }}>
+                      <div
+                        onClick={() => { router.push("/coworking/mail"); if (isMobile) setMobileOpen(false); setMailExpanded(false); }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 42px", cursor: "pointer", borderRadius: 7, margin: "1px 4px", fontSize: 13, fontWeight: 500, color: "#374151", transition: "background 0.12s" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#F5F7FA"}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                          <polyline points="22,6 12,13 2,6" />
+                        </svg>
+                        <span>Cowork Mail</span>
+                      </div>
+                      <div
+                        onClick={() => { router.push("/coworking/mail/gmail"); if (isMobile) setMobileOpen(false); setMailExpanded(false); }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px 7px 42px", cursor: "pointer", borderRadius: 7, margin: "1px 4px", fontSize: 13, fontWeight: 500, color: "#374151", transition: "background 0.12s" }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#F5F7FA"}
+                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                        </svg>
+                        <span>My Gmail</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3110,18 +3142,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                               : item.id === "sop" ? pendingRecheckCount
                                 : 0;
 
-                    // NEW badge on Settings — only when no profile pic uploaded yet
-                    if (item.id === "settings" && !ownProfilePicUrl) return (
-                      <span style={{
-                        fontSize: 8, fontWeight: 900, color: "#FACC15",
-                        background: "#DC2626",
-                        padding: "2px 6px", borderRadius: 99,
-                        letterSpacing: "0.06em",
-                        boxShadow: "0 0 0 1.5px #fff, 0 2px 6px rgba(220,38,38,0.5)",
-                        animation: "newBadgePulse 1.8s ease-in-out infinite",
-                        textTransform: "uppercase",
-                      }}>NEW!</span>
-                    );
+                    
 
                     if (cnt <= 0) return null;
                     const bg =
@@ -3167,43 +3188,40 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   onClick={() => {
                     const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
                     if (isIos) {
-                      // iOS: can't trigger install programmatically — show step guide
                       setShowIosGuide(p => !p);
                     } else if (canInstall) {
-                      // Android/Desktop: trigger native browser install prompt
                       handleInstall();
                     } else {
-                      // Prompt already used or not available — show manual hint
                       alert("To install: tap the browser menu (⋮) → \"Add to Home Screen\" or \"Install App\"");
                     }
                   }}
                   style={{
                     width: "100%", display: "flex", alignItems: "center", gap: 10,
-                    padding: "10px 12px", borderRadius: 10, border: "none",
-                    background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-                    boxShadow: "0 4px 14px rgba(37,99,235,0.35)",
+                    padding: "9px 12px", borderRadius: 8,
+                    border: "1px solid #E2E8F0",
+                    background: "#fff",
                     cursor: "pointer", fontFamily: "inherit",
-                    transition: "opacity 0.15s",
+                    transition: "border-color 0.15s, background 0.15s",
                   }}
-                  onMouseEnter={e => e.currentTarget.style.opacity = "0.9"}
-                  onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.background = "#F8FAFC"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.background = "#fff"; }}
                 >
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: "#EBF2FA", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1B4F8A" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                       <polyline points="7 10 12 15 17 10" />
                       <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
                   </div>
                   <div style={{ flex: 1, textAlign: "left" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", lineHeight: 1.3 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#1B4F8A", lineHeight: 1.3 }}>
                       {canInstall ? "Install App" : "Download App"}
                     </div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>
-                      {canInstall ? "Tap to install — get notifications" : "Install on your device"}
+                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 1 }}>
+                      {canInstall ? "Get Live Updates" : "Add to home screen"}
                     </div>
                   </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
                 </button>
@@ -3835,3 +3853,31 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     </>
   );
 }
+
+
+
+// Ok so let's move to the goal based task ok, where i have provided you the component page code ok so that need to modify which is described as below ok..
+
+
+
+// -> first of all as you can see in the activity goal progress, basically an tree structure/component based task creation was happening so here so many things need to modify which are described as below ok..
+
+// -> First of all remove the global delete button from the receiver side ok..
+
+// -> second thing is as you can see both the provider and the receiver can create the component so the receiver shouldn't able to remove the sender created component ok.
+
+// -> and also basically slightly showcase ki who created that component ok slightly just with the created at ok..
+
+
+
+// -> and while creating the Goal task, basically auto create the last node/component ok whose heading need to keep as the goal task name and the description as the goal task description..
+
+// and the timeline/deadline as the defined goal task deadline ok.(so after that auto created last node/below that don't suggest for new component ok)
+
+
+
+// ->and the main twist point is now it is needed to remove the manual weightage and points define as per the node /component wise ok because now in the admin side sop setting we are goona need to define the Weightage percentage of Last Goal Task Node/Component ok  and also the second one that is Number of Points in Goal Based task ok..
+
+
+
+// So as per the weig

@@ -325,7 +325,10 @@ export default function CreateEmployeePage() {
                       <span style={{ fontSize: 12, color: "#374151" }}>
                         {availableIds.find(a => a.biometricId === selectedId)?.hrName}
                       </span>
-                      <button type="button" onClick={() => setSelectedId("")}
+                      <button type="button" onClick={() => {
+                        setSelectedId("");
+                        setForm({ name: "", email: "", mobile: "", city: "", department: "" });
+                      }}
                         style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#6b7280", textDecoration: "underline", padding: 0 }}>
                         Change
                       </button>
@@ -350,13 +353,31 @@ export default function CreateEmployeePage() {
                           .filter(a => !idSearch || a.biometricId.toLowerCase().includes(idSearch.toLowerCase()) || a.hrName.toLowerCase().includes(idSearch.toLowerCase()))
                           .map(a => (
                             <div key={a.biometricId}
-                              onClick={() => { setSelectedId(a.biometricId); setIdSearch(""); }}
+                              onClick={() => {
+                                setSelectedId(a.biometricId);
+                                setIdSearch("");
+                                // Auto-fill form fields from HR data
+                                setForm({
+                                  name: a.hrName || "",
+                                  email: a.hrEmail || "",
+                                  mobile: a.hrMobile || "",
+                                  city: a.hrCity || "",
+                                  department: a.hrDepartment || "",
+                                });
+                              }}
                               style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", transition: "background 0.1s" }}
                               onMouseEnter={e => e.currentTarget.style.background = "#f0fdf4"}
                               onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                             >
                               <code style={{ fontSize: 12, fontWeight: 600, color: "#15803d", fontFamily: "monospace", minWidth: 60 }}>{a.biometricId}</code>
-                              <span style={{ fontSize: 12, color: "#374151" }}>{a.hrName}</span>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{a.hrName}</span>
+                                {(a.hrEmail || a.hrDepartment) && (
+                                  <span style={{ fontSize: 11, color: "#6b7280" }}>
+                                    {[a.hrDepartment, a.hrEmail].filter(Boolean).join("  ·  ")}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ))}
                         {availableIds.filter(a => !idSearch || a.biometricId.toLowerCase().includes(idSearch.toLowerCase()) || a.hrName.toLowerCase().includes(idSearch.toLowerCase())).length === 0 && (
