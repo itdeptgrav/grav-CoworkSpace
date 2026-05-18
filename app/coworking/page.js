@@ -17,6 +17,8 @@ import {
   query, where, orderBy, onSnapshot, setDoc, getDocs, limit,
 } from "firebase/firestore";
 
+
+
 /* ──────────────────────────────────────────────────────────
    PUSH
 ────────────────────────────────────────────────────────── */
@@ -25,8 +27,7 @@ function reqPush() {
     Notification.requestPermission();
 }
 function firePush(t, b) {
-  if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted")
-    try { new Notification(t, { body: b, icon: "/favicon.ico" }); } catch (_) { }
+
 }
 
 /* ──────────────────────────────────────────────────────────
