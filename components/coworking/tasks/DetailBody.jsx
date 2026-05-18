@@ -212,7 +212,7 @@ export default function DetailBody({
   const curTab = activeDetailTab === "reports" ? "reports" : "info";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", fontFamily: F }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, fontFamily: F }}>
       <style>{`
         @keyframes db-spin { to { transform: rotate(360deg); } }
         .db-tab { background: none; border: none; cursor: pointer; padding: 8px 14px; font-size: 12px; font-weight: 500; color: #9CA3AF; border-bottom: 2px solid transparent; font-family: ${F}; transition: all 0.12s; white-space: nowrap; }
@@ -227,7 +227,7 @@ export default function DetailBody({
 
       {/* ── REPORTS / GOAL / TIMELINE / SUBMISSIONS TAB ── */}
       {curTab === "reports" && (
-        <div className="db-scroll" style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+        <div className="db-scroll" style={{ flex: 1, overflowY: "auto", padding: task.isGoal ? "0" : "14px 16px" }}>
           {task.isThirdParty && <ThirdPartyTask task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} />}
           {task.isGoal && <GoalTask task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} />}
           {!task.isThirdParty && !task.isGoal && (

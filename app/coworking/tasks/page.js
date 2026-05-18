@@ -6951,8 +6951,8 @@ em-emoji-picker,
 
             {/* === Image-2: inline detail/activity render inside chat sidebar === */}
             {task && !task.isFolder && rightPanel && (
-              <div className="gv-chat-inline-detail" style={{ flex: 1, background: "#fff", display: "flex", flexDirection: "column" }}>
-
+              <div className="gv-chat-inline-detail" style={{ flex: 1, overflowY: task.isGoal ? "auto" : "hidden", background: "#fff", display: "flex", flexDirection: "column", minHeight: 0 }}>
+                
                 <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
 
                 {rightPanel === "files" ? (

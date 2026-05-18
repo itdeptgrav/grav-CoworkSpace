@@ -1194,7 +1194,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   const addingInsertIdx = addingAfter !== null ? addingAfter : -1;
 
   return (
-    <div style={{ padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", flex: 1 }}>
 
       {/* ── Add Component slider ── */}
       {addingAfter !== null && (
@@ -1281,15 +1281,13 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
 
 export default function GoalTask({ task, isAssignee, isCEO, isTL, currentEmployeeId, currentEmployeeName, onRefresh }) {
   return (
-    <div style={{ height: "100%", overflowY: "auto" }}>
-      <ActivitiesSection
-        task={task}
-        isAssignee={isAssignee}
-        isCEO={isCEO}
-        isTL={isTL}
-        currentEmployeeId={currentEmployeeId}
-        currentEmployeeName={currentEmployeeName}
-      />
-    </div>
+    <ActivitiesSection
+      task={task}
+      isAssignee={isAssignee}
+      isCEO={isCEO}
+      isTL={isTL}
+      currentEmployeeId={currentEmployeeId}
+      currentEmployeeName={currentEmployeeName}
+    />
   );
 }
