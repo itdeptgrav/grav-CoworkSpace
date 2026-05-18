@@ -49,19 +49,7 @@ function getUrl(type) {
 
 // ── 1. FCM Background/Closed push (Android Chrome + desktop) ─────────────────
 messaging.onBackgroundMessage((payload) => {
-    const title = payload.notification?.title || payload.data?.title || 'CoWork';
-    const body = payload.notification?.body || payload.data?.body || '';
-    const type = payload.data?.type || '';
 
-    self.registration.showNotification(title, {
-        body,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag: 'cowork-' + (type || 'notif'),
-        renotify: true,
-        data: { url: getUrl(type), ...payload.data },
-        vibrate: [200, 100, 200],
-    });
 });
 
 // iOS push handled by onBackgroundMessage above
