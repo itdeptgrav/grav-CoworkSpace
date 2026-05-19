@@ -223,9 +223,46 @@ function ThreadRequestsBar({ requests, employeeId, employeeName }) {
 }
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
-function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied }) {
+// ── Self-contained context menu — no backdrop, uses document listener ────────
+function CtxMenu({ items, isMe, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    // slight delay so the same click that opened it doesn't close it
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 10);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [onClose]);
+
+  return (
+    <div ref={ref} style={{
+      position: "absolute", [isMe ? "right" : "left"]: 0, bottom: "calc(100% + 6px)",
+      zIndex: 9999, background: "#fff", borderRadius: 12,
+      boxShadow: "0 8px 28px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+      border: "1px solid #E5E7EB", minWidth: 180, overflow: "hidden", padding: "4px 0",
+    }}>
+      {items.map(item => (
+        <button
+          key={item.label}
+          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); item.action(); }}
+          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", border: "none", background: "transparent", color: item.red ? "#EF4444" : "#1F2937", fontSize: 13.5, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <span style={{ fontSize: 15, width: 20, textAlign: "center", flexShrink: 0 }}>{item.icon}</span>
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied, onReply = null, onDeleteMsg = null, onEditMsg = null, currentUserId = null }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
   const [copyFlash, setCopyFlash] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState(false);
+  const lastTapRef = useRef(0);
 
   const handleCopy = () => {
     if (!msg.text) return;
@@ -235,6 +272,28 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
       onCopied?.();
     });
   };
+
+  const openCtx = (e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu(true); };
+  const closeCtx = () => setCtxMenu(false);
+  const handleDoubleTap = (e) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 350) openCtx(e);
+    lastTapRef.current = now;
+  };
+  const isSender = currentUserId && msg.senderId === currentUserId;
+
+  // ── Deleted message placeholder ──────────────────────────────────────────
+  if (msg.isDeleted) {
+    return (
+      <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
+        <div style={{ width: 28, flexShrink: 0 }} />
+        <div style={{ padding: "9px 14px", borderRadius: 12, border: "1.5px dashed #D1D5DB", background: "#F9FAFB", fontSize: 13, color: "#9CA3AF", fontStyle: "italic", display: "flex", alignItems: "center", gap: 7 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+          This message was deleted.
+        </div>
+      </div>
+    );
+  }
 
   // ── Meeting invite card ───────────────────────────────────────────────────
   if (msg.messageType === "meeting_invite") {
@@ -313,16 +372,41 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
         {/* Wrapper for bubble + copy button */}
         <div className="dm-bubble-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "flex-start", flexDirection: isMe ? "row-reverse" : "row", gap: 4 }}>
 
+          {/* Context menu */}
+          {ctxMenu && (
+            <CtxMenu
+              isMe={isMe}
+              items={[
+                { icon: "↩", label: "Reply", action: () => { setCtxMenu(false); onReply?.(msg); } },
+                ...(msg.text ? [{ icon: "⎘", label: "Copy Text", action: () => { setCtxMenu(false); handleCopy(); } }] : []),
+                ...(isSender && msg.text ? [{ icon: "✎", label: "Edit Message", action: () => { setCtxMenu(false); onEditMsg?.(msg); } }] : []),
+                ...(isSender ? [{ icon: "🗑", label: "Delete", action: () => { setCtxMenu(false); onDeleteMsg?.(msg); }, red: true }] : []),
+              ]}
+              onClose={() => setCtxMenu(false)}
+            />
+          )}
+
           {/* Bubble */}
-          <div style={{
-            padding: "10px 13px 8px",
-            borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-            background: msg.error ? "#FEF2F2" : isMe ? "linear-gradient(135deg,#1a73e8 0%,#1D4ED8 50%,#4F46E5 100%)" : "#FFFFFF",
-            color: msg.error ? "#DC2626" : isMe ? "#fff" : "#1E293B",
-            border: msg.error ? "1.5px solid #FECACA" : isMe ? "none" : "1.5px solid #EEF2F8",
-            boxShadow: isMe ? "0 3px 12px rgba(26,115,232,0.28)" : "0 1px 4px rgba(15,23,42,0.06)",
-            fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .6 : 1, wordBreak: "break-word",
-          }}>
+          <div
+            onDoubleClick={openCtx}
+            onContextMenu={openCtx}
+            onTouchEnd={handleDoubleTap}
+            style={{
+              padding: "10px 13px 8px",
+              borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+              background: msg.error ? "#FEF2F2" : isMe ? "linear-gradient(135deg,#1a73e8 0%,#1D4ED8 50%,#4F46E5 100%)" : "#FFFFFF",
+              color: msg.error ? "#DC2626" : isMe ? "#fff" : "#1E293B",
+              border: msg.error ? "1.5px solid #FECACA" : isMe ? "none" : "1.5px solid #EEF2F8",
+              boxShadow: isMe ? "0 3px 12px rgba(26,115,232,0.28)" : "0 1px 4px rgba(15,23,42,0.06)",
+              fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .6 : 1, wordBreak: "break-word", cursor: "default",
+            }}>
+            {/* Reply quote preview */}
+            {msg.replyTo && (
+              <div style={{ borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.45)" : "#2563EB"}`, paddingLeft: 8, marginBottom: 6, background: isMe ? "rgba(0,0,0,0.12)" : "#EFF6FF", borderRadius: "0 6px 6px 0", padding: "4px 8px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.85)" : "#2563EB", marginBottom: 1 }}>{msg.replyTo.senderName}</div>
+                <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{msg.replyTo.text || "📎 Attachment"}</div>
+              </div>
+            )}
             {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
             {msg.attachments?.map((a, i) => (
               <div key={i} style={{ marginTop: msg.text ? 6 : 0 }}>
@@ -333,6 +417,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
             ))}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2, marginTop: 6 }}>
               <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.58)" : "#94A3B8", whiteSpace: "nowrap" }}>{fmtTime(msg.createdAt)}</span>
+              {msg.isEdited && <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.5)" : "#9CA3AF", fontStyle: "italic" }}>(edited)</span>}
               <Ticks status={status} isMe={isMe} />
             </div>
           </div>
@@ -482,6 +567,12 @@ export default function DirectMessagesPage() {
     copyToastTimerRef.current = setTimeout(() => setCopyToast(false), 1500);
   };
 
+  // ── Reply / Edit / Delete state ──────────────────────────────────────────
+  const [replyTo, setReplyTo] = useState(null);       // { messageId, senderName, text }
+  const [editingMsg, setEditingMsg] = useState(null); // message object being edited
+  const [editText, setEditText] = useState("");
+  const editInputRef = useRef(null);
+
   const endRef = useRef(null);
   const pendingMapRef = useRef(new Map());
   const activeConv = useRef(null);
@@ -612,6 +703,44 @@ export default function DirectMessagesPage() {
       pendingMapRef.current.delete(tempId);
       setMessages(prev => prev.map(m => m.messageId === tempId ? { ...m, sending: false, error: true, status: "error" } : m));
     }
+  };
+
+  // ── Delete message ────────────────────────────────────────────────────────
+  const handleDeleteMsg = async (msg) => {
+    if (!msg || msg.senderId !== employeeId || !selectedPerson) return;
+    const msgId = msg.messageId || msg.id;
+    if (!msgId || msgId.startsWith("temp_")) return;
+    const cid = convId(employeeId, selectedPerson.employeeId);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_direct_messages", cid, "messages", msgId), {
+        isDeleted: true, text: "", attachments: [], deletedAt: serverTimestamp(),
+      });
+    } catch (e) { console.error("deleteMsg:", e); }
+  };
+
+  // ── Save edited message ───────────────────────────────────────────────────
+  const handleMsgEditSave = async () => {
+    if (!editingMsg || !editText.trim() || !selectedPerson) return;
+    const msgId = editingMsg.messageId || editingMsg.id;
+    if (!msgId || msgId.startsWith("temp_")) return;
+    const cid = convId(employeeId, selectedPerson.employeeId);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_direct_messages", cid, "messages", msgId), {
+        text: editText.trim(), isEdited: true, editedAt: serverTimestamp(),
+      });
+      setEditingMsg(null); setEditText("");
+    } catch (e) { console.error("editMsg:", e); }
+  };
+
+  // ── Open reply / edit ─────────────────────────────────────────────────────
+  const handleReply = (msg) => {
+    setReplyTo({ messageId: msg.messageId || msg.id, senderName: msg.senderName || "Unknown", text: (msg.text || "").slice(0, 120) });
+    setEditingMsg(null);
+  };
+  const handleOpenEdit = (msg) => {
+    if (msg.senderId !== employeeId) return;
+    setEditingMsg(msg); setEditText(msg.text || ""); setReplyTo(null);
+    setTimeout(() => editInputRef.current?.focus(), 50);
   };
 
   // ── Paste image handler — uploads and adds to input as preview, not auto-sent ──
@@ -939,6 +1068,10 @@ export default function DirectMessagesPage() {
                           onCancel={handleCancelMeet}
                           onEdit={setEditModal}
                           onCopied={showCopyToast}
+                          currentUserId={employeeId}
+                          onReply={handleReply}
+                          onDeleteMsg={handleDeleteMsg}
+                          onEditMsg={handleOpenEdit}
                         />
                       );
                     });
@@ -948,11 +1081,43 @@ export default function DirectMessagesPage() {
 
               {/* Input — paste handler wraps it */}
               <div className="dm-input" onPaste={handlePaste}>
-                <MediaMessageInput
-                  onSend={handleSend}
-                  placeholder={`Message ${selectedPerson.name || selectedPerson.employeeId}\u2026`}
-                  disabled={msgsLoading}
-                />
+                {/* Reply preview strip */}
+                {replyTo && !editingMsg && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderTop: "1px solid #E5E7EB", background: "#F0F7FF", borderLeft: "3px solid #2563EB" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#2563EB" }}>Replying to {replyTo.senderName}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text || "📎 Attachment"}</div>
+                    </div>
+                    <button onClick={() => setReplyTo(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", fontSize: 16, padding: 2 }}>✕</button>
+                  </div>
+                )}
+                {/* Edit bar */}
+                {editingMsg ? (
+                  <div style={{ padding: "8px 12px", borderTop: "1px solid #E5E7EB" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#2563EB" }}>✎ Editing message</span>
+                      <button onClick={() => { setEditingMsg(null); setEditText(""); }} style={{ fontSize: 12, color: "#9CA3AF", border: "none", background: "transparent", cursor: "pointer" }}>✕ Cancel</button>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                      <textarea
+                        ref={editInputRef}
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleMsgEditSave(); } if (e.key === "Escape") { setEditingMsg(null); setEditText(""); } }}
+                        rows={2}
+                        style={{ flex: 1, resize: "none", border: "1.5px solid #2563EB", borderRadius: 10, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: "#111827", lineHeight: 1.5 }}
+                      />
+                      <button onClick={handleMsgEditSave} disabled={!editText.trim()} style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: editText.trim() ? "#2563EB" : "#E5E7EB", color: editText.trim() ? "#fff" : "#9CA3AF", fontSize: 13, fontWeight: 600, cursor: editText.trim() ? "pointer" : "default", fontFamily: "inherit", flexShrink: 0 }}>Save</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 3 }}>Enter to save · Esc to cancel</div>
+                  </div>
+                ) : (
+                  <MediaMessageInput
+                    onSend={handleSend}
+                    placeholder={`Message ${selectedPerson.name || selectedPerson.employeeId}\u2026`}
+                    disabled={msgsLoading}
+                  />
+                )}
               </div>
             </>
           )}

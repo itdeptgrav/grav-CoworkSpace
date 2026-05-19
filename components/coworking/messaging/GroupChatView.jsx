@@ -273,8 +273,13 @@ export default function GroupChatView({ groupId, onBack }) {
     const [editError, setEditError] = useState("");
     const [editSaving, setEditSaving] = useState(false);
     const [cancellingId, setCancellingId] = useState(null);
-
     const [pasteUploading, setPasteUploading] = useState(false);
+
+    // ── Reply / Edit state ─────────────────────────────────────────────────
+    const [replyTo, setReplyTo] = useState(null);
+    const [editingMsg, setEditingMsg] = useState(null);
+    const [editText, setEditText] = useState("");
+    const editInputRef = useRef(null);
     const [copyToast, setCopyToast] = useState(false);
     const copyToastTimerRef = useRef(null);
     const showCopyToast = () => {
@@ -437,6 +442,41 @@ export default function GroupChatView({ groupId, onBack }) {
                 m.messageId === tempId ? { ...m, sending: false, error: true } : m
             ));
         }
+    };
+
+    // ── Delete / Edit / Reply handlers ────────────────────────────────────
+    const handleDeleteMsg = async (msg) => {
+        if (!msg || msg.senderId !== employeeId) return;
+        const msgId = msg.messageId || msg.id;
+        if (!msgId || msgId.startsWith("temp_")) return;
+        try {
+            await updateDoc(doc(firebaseDb, "cowork_groups", groupId, "messages", msgId), {
+                isDeleted: true, text: "", attachments: [], deletedAt: serverTimestamp(),
+            });
+        } catch (e) { console.error("deleteMsg:", e); }
+    };
+
+    const handleGroupEditSave = async () => {
+        if (!editingMsg || !editText.trim()) return;
+        const msgId = editingMsg.messageId || editingMsg.id;
+        if (!msgId || msgId.startsWith("temp_")) return;
+        try {
+            await updateDoc(doc(firebaseDb, "cowork_groups", groupId, "messages", msgId), {
+                text: editText.trim(), isEdited: true, editedAt: serverTimestamp(),
+            });
+            setEditingMsg(null); setEditText("");
+        } catch (e) { console.error("editMsg:", e); }
+    };
+
+    const handleReply = (msg) => {
+        setReplyTo({ messageId: msg.messageId || msg.id, senderName: msg.senderName || "Unknown", text: (msg.text || "").slice(0, 120) });
+        setEditingMsg(null);
+    };
+
+    const handleOpenEdit = (msg) => {
+        if (msg.senderId !== employeeId) return;
+        setEditingMsg(msg); setEditText(msg.text || ""); setReplyTo(null);
+        setTimeout(() => editInputRef.current?.focus(), 50);
     };
 
     // Load tasks from group doc's taskIds array
@@ -1002,6 +1042,9 @@ export default function GroupChatView({ groupId, onBack }) {
                                     onViewSummary={handleViewSummary}
                                     onCancel={handleCancelMeet}
                                     onEdit={setEditModal}
+                                    onReply={handleReply}
+                                    onDeleteMsg={handleDeleteMsg}
+                                    onEditMsg={handleOpenEdit}
                                 />
                             );
                         });
@@ -1036,12 +1079,38 @@ export default function GroupChatView({ groupId, onBack }) {
                             Uploading pasted image…
                         </div>
                     )}
-                    <MediaMessageInput
-                        onSend={handleSend}
-                        placeholder={`Message ${group?.name || "group"}…`}
-                        disabled={msgsLoading || pasteUploading}
-                        members={members}
-                    />
+                    {replyTo && !editingMsg && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderTop: "1px solid #E5E7EB", background: "#F0F7FF", borderLeft: "3px solid #2563EB" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "#2563EB" }}>Replying to {replyTo.senderName}</div>
+                                <div style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text || "📎 Attachment"}</div>
+                            </div>
+                            <button onClick={() => setReplyTo(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1 }}>✕</button>
+                        </div>
+                    )}
+                    {editingMsg ? (
+                        <div style={{ padding: "10px 14px", borderTop: "1px solid #E5E7EB" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: "#2563EB" }}>✎ Editing message</span>
+                                <button onClick={() => { setEditingMsg(null); setEditText(""); }} style={{ fontSize: 12, color: "#9CA3AF", border: "none", background: "transparent", cursor: "pointer" }}>✕ Cancel</button>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                                <textarea ref={editInputRef} value={editText} onChange={e => setEditText(e.target.value)}
+                                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleGroupEditSave(); } if (e.key === "Escape") { setEditingMsg(null); setEditText(""); } }}
+                                    rows={2} style={{ flex: 1, resize: "none", border: "1.5px solid #2563EB", borderRadius: 10, padding: "8px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: "#111827", lineHeight: 1.5 }} />
+                                <button onClick={handleGroupEditSave} disabled={!editText.trim()}
+                                    style={{ padding: "8px 16px", borderRadius: 10, border: "none", background: editText.trim() ? "#2563EB" : "#E5E7EB", color: editText.trim() ? "#fff" : "#9CA3AF", fontSize: 13, fontWeight: 600, cursor: editText.trim() ? "pointer" : "default", fontFamily: "inherit", flexShrink: 0 }}>Save</button>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Enter to save · Esc to cancel</div>
+                        </div>
+                    ) : (
+                        <MediaMessageInput
+                            onSend={handleSend}
+                            placeholder={`Message ${group?.name || "group"}…`}
+                            disabled={msgsLoading || pasteUploading}
+                            members={members}
+                        />
+                    )}
                 </div>
             </div>
 

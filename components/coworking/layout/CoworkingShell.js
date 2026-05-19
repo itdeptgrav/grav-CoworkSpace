@@ -17,6 +17,7 @@ import { usePushNotifications } from "../../../hooks/usePushNotifications";
 // Dynamically import LiveKit (browser-only) for PiP room
 const LiveKitRoom = dynamic(() => import("@livekit/components-react").then(m => m.LiveKitRoom), { ssr: false });
 const RoomAudioRenderer = dynamic(() => import("@livekit/components-react").then(m => m.RoomAudioRenderer), { ssr: false });
+const PipRoomControls = dynamic(() => import("../meets/PipRoomControls"), { ssr: false });
 const useLocalParticipant = dynamic ? null : null; // accessed via window event instead
 
 import {
@@ -1743,6 +1744,7 @@ function NavIcon({ name, size = 20 }) {
     status: <><circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.3" /><circle cx="12" cy="12" r="3" /><path d="M6.3 6.3a8 8 0 000 11.4M17.7 17.7a8 8 0 000-11.4M3.5 3.5a12 12 0 000 17M20.5 20.5a12 12 0 000-17" /></>,
     calendar: <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
     mail: <><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></>,
+    profile: <><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></>,
     logout: <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>,
     bell: <><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></>,
@@ -1785,6 +1787,15 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const MEET_NOTIF_TYPES = new Set(["meet_scheduled", "meet_cancelled", "meet_updated"]);
   const meetingUnreadCount = notifications.filter(n => !n.read && MEET_NOTIF_TYPES.has(n.type)).length;
 
+
+  const TASK_NOTIF_TYPES = new Set([
+    "task_assigned", "task_update", "task_confirmed", "task_started",
+    "task_forwarded", "deadline_changed", "completion_submitted",
+    "completion_tl_approved", "completion_rejected",
+    "completion_ceo_approved", "completion_ceo_rejected",
+  ]);
+  const taskNotifUnreadCount = notifications.filter(n => !n.read && TASK_NOTIF_TYPES.has(n.type)).length;
+
   // ── SOP Pending Recheck count (TL/CEO only) ───────────────────────────────
   const [pendingRecheckCount, setPendingRecheckCount] = React.useState(0);
   useEffect(() => {
@@ -1809,43 +1820,57 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   }, [employeeId, role]);
 
   // ── Tasks: per-task chat onSnapshot ──────────────────────────────────────
-  const [taskChatUnreadCount, setTaskChatUnreadCount] = useState(0);
+  const [taskChatUnreadNormal, setTaskChatUnreadNormal] = useState(0);
+  const [taskChatUnreadGoal, setTaskChatUnreadGoal] = useState(0);
+  const taskChatUnreadCount = taskChatUnreadNormal + taskChatUnreadGoal;
+
   useEffect(() => {
     if (!employeeId || !role) return;
     const taskUnsubs = [];
-    const taskCountMap = {};
-    const recalc = () => setTaskChatUnreadCount(Object.values(taskCountMap).reduce((s, n) => s + n, 0));
+    const normalMap = {};
+    const goalMap = {};
+    const recalc = () => {
+      setTaskChatUnreadNormal(Object.values(normalMap).reduce((s, n) => s + n, 0));
+      setTaskChatUnreadGoal(Object.values(goalMap).reduce((s, n) => s + n, 0));
+    };
 
     const run = async () => {
-      let taskIds = new Set();
+      let taskDocs = [];
       try {
         if (role === "ceo") {
           const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId)));
-          snap.forEach(d => { if (!d.data().createdByTl) taskIds.add(d.id); });
+          snap.forEach(d => { if (!d.data().createdByTl) taskDocs.push({ id: d.id, isGoal: !!d.data().isGoal }); });
         } else if (role === "tl") {
           const [s1, s2] = await Promise.all([
             getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId))),
             getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId))),
           ]);
-          s1.forEach(d => taskIds.add(d.id));
-          s2.forEach(d => taskIds.add(d.id));
+          const seen = new Set();
+          s1.forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); taskDocs.push({ id: d.id, isGoal: !!d.data().isGoal }); } });
+          s2.forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); taskDocs.push({ id: d.id, isGoal: !!d.data().isGoal }); } });
         } else {
           const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId)));
-          snap.forEach(d => taskIds.add(d.id));
+          snap.forEach(d => taskDocs.push({ id: d.id, isGoal: !!d.data().isGoal }));
         }
       } catch (e) { console.error("task badge:", e); return; }
 
-      taskIds.forEach(taskId => {
+      taskDocs.forEach(({ id: taskId, isGoal }) => {
         const unsub = onSnapshot(
           query(collection(firebaseDb, "cowork_tasks", taskId, "chat"), orderBy("createdAt", "asc")),
           snap => {
-            taskCountMap[taskId] = snap.docs.filter(d => {
+            const count = snap.docs.filter(d => {
               const data = d.data();
               return data.senderId !== employeeId && !(data.readBy || []).includes(employeeId);
             }).length;
+            if (isGoal) goalMap[taskId] = count;
+            else normalMap[taskId] = count;
             recalc();
           },
-          () => { taskCountMap[taskId] = 0; recalc(); }
+          () => {
+            if (isGoal) goalMap[taskId] = 0;
+            else normalMap[taskId] = 0;
+            recalc();
+          }
         );
         taskUnsubs.push(unsub);
       });
@@ -2054,6 +2079,11 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       if (state.isActive) {
         setPipMeetingState(state);
         setPipCollapsed(false);
+        const choices = state.userChoices || {};
+        setPipMicOn(choices.audioEnabled !== false);
+        setPipCamOn(choices.videoEnabled === true);
+        if (typeof state.micOn === 'boolean') setPipMicOn(state.micOn);
+        if (typeof state.camOn === 'boolean') setPipCamOn(state.camOn);
         setPipPos(pos => pos.x === null ? { x: window.innerWidth - 320, y: window.innerHeight - 220 } : pos);
       } else {
         setPipMeetingState(null);
@@ -2067,23 +2097,39 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const handlePipDragStart = (e) => {
     const el = pipDragRef.current;
     if (!el) return;
+    e.preventDefault();
+    const startX = e.touches ? e.touches[0].clientX : e.clientX;
+    const startY = e.touches ? e.touches[0].clientY : e.clientY;
     const rect = el.getBoundingClientRect();
-    pipDragStateRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top };
+    const origX = rect.left;
+    const origY = rect.top;
+    el.style.transition = "none";
+    let lastX = origX;
+    let lastY = origY;
     const onMove = (e2) => {
-      if (!pipDragStateRef.current) return;
-      const dx = e2.clientX - pipDragStateRef.current.startX;
-      const dy = e2.clientY - pipDragStateRef.current.startY;
-      const newX = Math.max(0, Math.min(window.innerWidth - 300, pipDragStateRef.current.origX + dx));
-      const newY = Math.max(0, Math.min(window.innerHeight - 180, pipDragStateRef.current.origY + dy));
-      setPipPos({ x: newX, y: newY });
+      const cx = e2.touches ? e2.touches[0].clientX : e2.clientX;
+      const cy = e2.touches ? e2.touches[0].clientY : e2.clientY;
+      lastX = Math.max(8, Math.min(window.innerWidth - rect.width - 8, origX + (cx - startX)));
+      lastY = Math.max(8, Math.min(window.innerHeight - rect.height - 8, origY + (cy - startY)));
+      el.style.left = lastX + "px";
+      el.style.top = lastY + "px";
+      el.style.right = "auto";
+      el.style.bottom = "auto";
     };
     const onUp = () => {
+      el.style.transition = "";
+      setPipPos({ x: lastX, y: lastY });
       pipDragStateRef.current = null;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
     };
-    window.addEventListener("mousemove", onMove);
+    pipDragStateRef.current = { startX, startY, origX, origY };
+    window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", onUp);
   };
 
   const openChatForReq = (reqId, req) => {
@@ -2297,7 +2343,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
-    { id: "settings", label: "Settings", icon: "settings", path: "/coworking/settings" },
+    { id: "settings", label: "Profile", icon: "profile", path: "/coworking/settings" },
   ];
 
   const isActive = (path) => {
@@ -3027,9 +3073,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   >
                     <NavIcon name={item.icon} size={18} />
                     <span style={{ flex: 1 }}>Tasks</span>
-                    {taskChatUnreadCount > 0 && (
+                    {(taskChatUnreadCount + taskNotifUnreadCount) > 0 && (
                       <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#8B5CF6", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 4 }}>
-                        {taskChatUnreadCount > 99 ? "99+" : taskChatUnreadCount}
+                        {(taskChatUnreadCount + taskNotifUnreadCount) > 99 ? "99+" : (taskChatUnreadCount + taskNotifUnreadCount)}
                       </span>
                     )}
                     <svg
@@ -3051,7 +3097,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                           <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
                         </svg>
-                        <span>Cowork Task</span>
+                        <span style={{ flex: 1 }}>Cowork Task</span>
+                        {taskChatUnreadNormal > 0 && (
+                          <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#8B5CF6", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 6 }}>
+                            {taskChatUnreadNormal > 99 ? "99+" : taskChatUnreadNormal}
+                          </span>
+                        )}
                       </div>
                       <div
                         onClick={() => { router.push("/coworking/tasks?filter=goal"); if (isMobile) setMobileOpen(false); setTasksExpanded(false); }}
@@ -3062,7 +3113,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                           <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
-                        <span>Cowork Goal</span>
+                        <span style={{ flex: 1 }}>Cowork Goal</span>
+                        {taskChatUnreadGoal > 0 && (
+                          <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#059669", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 6 }}>
+                            {taskChatUnreadGoal > 99 ? "99+" : taskChatUnreadGoal}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
@@ -3137,12 +3193,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                     const cnt =
                       item.id === "messages" ? dmUnreadCount
                         : item.id === "groups" ? groupUnreadCount
-                          : item.id === "tasks" ? taskChatUnreadCount
+                          : item.id === "tasks" ? (taskChatUnreadCount + taskNotifUnreadCount)
                             : item.id === "meetings" ? meetingUnreadCount
                               : item.id === "sop" ? pendingRecheckCount
                                 : 0;
 
-                    
+
 
                     if (cnt <= 0) return null;
                     const bg =
@@ -3741,7 +3797,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       </div>
 
       {/* ── PiP Meeting — persistent LiveKit room + floating box ── */}
-      {pipMeeting?.isActive && pipMeeting?.token && (
+      {pipMeeting?.isActive && pipMeeting?.token && !pathname?.includes('cowork-meeting') && (
         <>
           {/* Hidden LiveKit room — stays connected across all page navigations */}
           <div style={{ position: "fixed", width: 1, height: 1, top: -9999, left: -9999, overflow: "hidden", opacity: 0, pointerEvents: "none", zIndex: -1 }}>
@@ -3749,11 +3805,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               token={pipMeeting.token}
               serverUrl={pipMeeting.serverUrl}
               data-lk-theme="default"
-              video={false}
+              video={pipCamOn}
               audio={pipMicOn}
               onDisconnected={() => { clearPipMeeting(); }}
             >
               <RoomAudioRenderer />
+              <PipRoomControls micOn={pipMicOn} camOn={pipCamOn} />
             </LiveKitRoom>
           </div>
 
@@ -3775,8 +3832,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             }}
           >
             {/* Drag handle */}
-            <div onMouseDown={handlePipDragStart}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#0F172A", cursor: "grab", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <div onMouseDown={handlePipDragStart} onTouchStart={handlePipDragStart}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", background: "#0F172A", cursor: "grab", borderBottom: "1px solid rgba(255,255,255,0.08)", touchAction: "none" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0, boxShadow: "0 0 6px #EF4444" }} />
               <span style={{ fontSize: 12, fontWeight: 700, color: "#F1F5F9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {pipMeeting.title || "Meeting"}
@@ -3789,7 +3846,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 </svg>
               </button>
               {/* Restore */}
-              <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}`)}
+              <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}?restore=1`)}
                 title="Return to full meeting"
                 style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "rgba(37,99,235,0.4)", color: "#93C5FD", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -3811,7 +3868,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 {/* Mic / Cam toggle buttons */}
                 <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                   {/* Mic */}
-                  <button onClick={() => setPipMicOn(p => !p)}
+                  <button onClick={() => { getPipMeeting().toggleMic?.(); }}
                     title={pipMicOn ? "Mute mic" : "Unmute mic"}
                     style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipMicOn ? "rgba(255,255,255,0.12)" : "#DC2626", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                     {pipMicOn
@@ -3821,7 +3878,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                     {pipMicOn ? "Mic On" : "Muted"}
                   </button>
                   {/* Cam */}
-                  <button onClick={() => setPipCamOn(p => !p)}
+                  <button onClick={() => { getPipMeeting().toggleCam?.(); }}
                     title={pipCamOn ? "Stop camera" : "Start camera"}
                     style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: pipCamOn ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.06)", color: pipCamOn ? "#fff" : "#94A3B8", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, border: "1px solid rgba(255,255,255,0.1)" }}>
                     {pipCamOn
@@ -3834,7 +3891,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
                 {/* Open / Leave */}
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}`)}
+                  <button onClick={() => router.push(`/coworking/cowork-meeting/${pipMeeting.meetId}?restore=1`)}
                     style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
                     Open Meeting

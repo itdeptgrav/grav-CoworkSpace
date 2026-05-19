@@ -14,7 +14,7 @@
  *     lightbox, PDF/voice behaviour.
  */
 "use client";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { GwAvatar } from "../shared/CoworkShared";
 import LinkedText from "./LinkedText";
 
@@ -34,13 +34,46 @@ if (typeof document !== "undefined" && !document.getElementById("mb-styles")) {
     document.head.appendChild(el);
 }
 
+// ── Context menu (no backdrop — document mousedown listener) ─────────────────
+function MbCtxMenu({ items, isMe, onClose }) {
+    const ref = useRef(null);
+    useEffect(() => {
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+        const t = setTimeout(() => document.addEventListener("mousedown", handler), 10);
+        return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+    }, [onClose]);
+    return (
+        <div ref={ref} style={{
+            position: "absolute", [isMe ? "right" : "left"]: 0, bottom: "calc(100% + 6px)",
+            zIndex: 9999, background: "#fff", borderRadius: 12,
+            boxShadow: "0 8px 28px rgba(0,0,0,0.18)", border: "1px solid #E5E7EB",
+            minWidth: 180, overflow: "hidden", padding: "4px 0",
+        }}>
+            {items.map(item => (
+                <button key={item.label}
+                    onMouseDown={e => { e.preventDefault(); e.stopPropagation(); item.action(); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", border: "none", background: "transparent", color: item.red ? "#EF4444" : "#1F2937", fontSize: 13.5, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                    <span style={{ width: 22, textAlign: "center", flexShrink: 0 }}>{item.icon}</span>
+                    {item.label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 export default function MessageBubble({
     msg, isMe, showSender = true, showAvatar = true,
     isHost = false, onViewSummary = null, onEdit = null, onCancel = null, onCopied,
+    onReply = null, onDeleteMsg = null, onEditMsg = null,
 }) {
     const [pdfOpen, setPdfOpen] = useState(false);
     const [imgOpen, setImgOpen] = useState(null);
     const [copyFlash, setCopyFlash] = useState(false);
+    const [ctxMenu, setCtxMenu] = useState(false);
+    const lastTapRef = useRef(0);
 
     const handleCopy = () => {
         if (!msg.text) return;
@@ -50,6 +83,27 @@ export default function MessageBubble({
             onCopied?.();
         });
     };
+
+    const openCtx = (e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu(true); };
+    const handleDoubleTap = (e) => {
+        const now = Date.now();
+        if (now - lastTapRef.current < 350) openCtx(e);
+        lastTapRef.current = now;
+    };
+    const isSender = isMe;
+
+    /* ── Deleted message placeholder ─────────────────────── */
+    if (msg.isDeleted) {
+        return (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexDirection: isMe ? "row-reverse" : "row", minWidth: 0 }}>
+                {!isMe && <div style={{ width: 28, flexShrink: 0 }} />}
+                <div style={{ padding: "9px 14px", borderRadius: 12, border: "1.5px dashed #D1D5DB", background: "#F9FAFB", fontSize: 13, color: "#9CA3AF", fontStyle: "italic", display: "flex", alignItems: "center", gap: 7 }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+                    This message was deleted.
+                </div>
+            </div>
+        );
+    }
 
     /* ── Meeting invite card ─────────────────────────────── */
     if (msg.messageType === "meeting_invite") {
@@ -251,9 +305,27 @@ export default function MessageBubble({
                         </span>
                     )}
 
+                    {/* Context menu */}
+                    {ctxMenu && (
+                        <MbCtxMenu
+                            isMe={isMe}
+                            onClose={() => setCtxMenu(false)}
+                            items={[
+                                { icon: "↩", label: "Reply", action: () => { setCtxMenu(false); onReply?.(msg); } },
+                                ...(hasText ? [{ icon: "⎘", label: "Copy Text", action: () => { setCtxMenu(false); handleCopy(); } }] : []),
+                                ...(isSender && hasText ? [{ icon: "✎", label: "Edit Message", action: () => { setCtxMenu(false); onEditMsg?.(msg); } }] : []),
+                                ...(isSender ? [{ icon: "🗑", label: "Delete", action: () => { setCtxMenu(false); onDeleteMsg?.(msg); }, red: true }] : []),
+                            ]}
+                        />
+                    )}
+
                     {isBareImage ? (
                         /* ── Image-only: NO bubble background, just the image ── */
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: "100%", minWidth: 0, alignItems: isMe ? "flex-end" : "flex-start" }}>
+                        <div
+                            onDoubleClick={openCtx}
+                            onContextMenu={openCtx}
+                            onTouchEnd={handleDoubleTap}
+                            style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: "100%", minWidth: 0, alignItems: isMe ? "flex-end" : "flex-start", cursor: "default" }}>
                             {atts.map((att, i) => (
                                 <AttachmentPreview
                                     key={i}
@@ -267,21 +339,31 @@ export default function MessageBubble({
                         </div>
                     ) : (
                         /* ── Normal bubble (text, mixed, pdf, voice, errors) ── */
-                        <div style={{
-                            padding: "8px 12px 7px",
-                            background: bubbleBg,
-                            color: bubbleColor,
-                            borderRadius: bubbleRadius,
-                            border: bubbleBorder,
-                            fontSize: 14, lineHeight: 1.55,
-                            wordBreak: "break-word",
-                            overflowWrap: "anywhere",
-                            transition: "background 0.25s, opacity 0.25s",
-                            opacity: msg.sending ? 0.82 : 1,
-                            maxWidth: "100%",
-                            minWidth: 0,
-                            boxShadow: isMe && !msg.error ? "0 1px 4px rgba(37,99,235,0.18)" : "none",
-                        }}>
+                        <div
+                            onDoubleClick={openCtx}
+                            onContextMenu={openCtx}
+                            onTouchEnd={handleDoubleTap}
+                            style={{
+                                padding: "8px 12px 7px",
+                                background: bubbleBg,
+                                color: bubbleColor,
+                                borderRadius: bubbleRadius,
+                                border: bubbleBorder,
+                                fontSize: 14, lineHeight: 1.55,
+                                wordBreak: "break-word",
+                                overflowWrap: "anywhere",
+                                transition: "background 0.25s, opacity 0.25s",
+                                opacity: msg.sending ? 0.82 : 1,
+                                maxWidth: "100%",
+                                minWidth: 0,
+                                boxShadow: isMe && !msg.error ? "0 1px 4px rgba(37,99,235,0.18)" : "none",
+                            }}>
+                            {msg.replyTo && (
+                                <div style={{ borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.45)" : "#2563EB"}`, padding: "4px 8px", marginBottom: 6, background: isMe ? "rgba(0,0,0,0.12)" : "#EFF6FF", borderRadius: "0 6px 6px 0" }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.85)" : "#2563EB", marginBottom: 1 }}>{msg.replyTo.senderName}</div>
+                                    <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{msg.replyTo.text || "📎 Attachment"}</div>
+                                </div>
+                            )}
                             {atts.map((att, i) => (
                                 <AttachmentPreview key={i} att={att} isMe={isMe} onPDFClick={() => setPdfOpen(att)} onImgClick={() => setImgOpen(att.url)} />
                             ))}
@@ -298,6 +380,7 @@ export default function MessageBubble({
                         <span style={{ fontSize: 10, color: "#9AA0A6" }}>
                             {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}
                         </span>
+                        {msg.isEdited && <span style={{ fontSize: 10, color: "#9AA0A6", fontStyle: "italic" }}>(edited)</span>}
                         {msg.sending && !msg.error && (
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, color: "#9AA0A6" }}>
                                 <span style={{ display: "inline-block", width: 9, height: 9, border: "1.5px solid #9AA0A6", borderTopColor: "transparent", borderRadius: "50%", animation: "mb-spin 0.8s linear infinite" }} />

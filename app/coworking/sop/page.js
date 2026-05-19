@@ -23,19 +23,19 @@ async function safeFetch(url, options = {}) {
 
 // ── Design tokens — formal ────────────────────────────────────────────────────
 const C = {
-  primary:       "#1B4F8A",
-  primaryLight:  "#EBF2FA",
+  primary: "#1B4F8A",
+  primaryLight: "#EBF2FA",
   primaryBorder: "#BFDBFE",
-  red:           "#B91C1C",
-  redLight:      "#FEF2F2",
-  redBorder:     "#FECACA",
-  border:        "#E5E7EB",
-  borderLight:   "#F3F4F6",
-  text:          "#111827",
-  textSub:       "#4B5563",
-  textMuted:     "#9CA3AF",
-  surface:       "#F9FAFB",
-  white:         "#fff",
+  red: "#B91C1C",
+  redLight: "#FEF2F2",
+  redBorder: "#FECACA",
+  border: "#E5E7EB",
+  borderLight: "#F3F4F6",
+  text: "#111827",
+  textSub: "#4B5563",
+  textMuted: "#9CA3AF",
+  surface: "#F9FAFB",
+  white: "#fff",
 };
 
 const iStyle = {
@@ -106,7 +106,7 @@ function Av({ name = "?", url = null, size = 30, bg = C.primaryLight, fg = C.pri
 function StatusBadge({ status }) {
   const m = {
     approved: ["#15803D", "#F0FDF4", "#BBF7D0", "Approved"],
-    pending:  ["#B45309", "#FFFBEB", "#FDE68A", "Pending"],
+    pending: ["#B45309", "#FFFBEB", "#FDE68A", "Pending"],
     rejected: [C.red, C.redLight, C.redBorder, "Rejected"],
   };
   const [c, bg, border, label] = m[status] || m.pending;
@@ -132,7 +132,7 @@ function Spinner() {
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "28px 0", color: C.textMuted }}>
       <style>{`@keyframes sopSpin{to{transform:rotate(360deg)}}`}</style>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "sopSpin 1s linear infinite" }}>
-        <path d="M21 12a9 9 0 11-6.219-8.56"/>
+        <path d="M21 12a9 9 0 11-6.219-8.56" />
       </svg>
       <span style={{ fontSize: 12 }}>Loading…</span>
     </div>
@@ -158,17 +158,17 @@ function isReward(b) {
 
 // ── SOP Settings Panel ────────────────────────────────────────────────────────
 const EVENT_LABELS = {
-  task_overdue:          { label: "Task Overdue",               desc: "Regular task deadline passed and not completed",     hasThreshold: false },
-  task_rejected_tl:      { label: "Task Rejected by TL",        desc: "TL rejected employee's submitted task",              hasThreshold: false },
-  task_rejected_ceo:     { label: "Task Rejected by CEO",        desc: "CEO rejected employee's submitted task",             hasThreshold: false },
-  repeat_missed:         { label: "Repeat Task Missed",          desc: "Daily repeat task not submitted by deadline",        hasThreshold: false },
-  repeat_late:           { label: "Repeat Task Late",            desc: "Repeat task submitted after deadline time",          hasThreshold: false },
-  third_party_overdue:   { label: "Third Party Task Overdue",    desc: "External/client task deadline missed",               hasThreshold: false },
-  third_party_rejected:  { label: "Third Party Task Rejected",   desc: "Third party task submission rejected",               hasThreshold: false },
-  goal_overdue:          { label: "Goal Task Overdue",           desc: "Long-term goal task deadline missed",                hasThreshold: false },
-  self_assigned_overdue: { label: "Self-Assigned Task Overdue",  desc: "Employee's own task deadline missed",                hasThreshold: false },
-  extension_rejected:    { label: "Extension Request Rejected",  desc: "TL/CEO rejected deadline extension request",         hasThreshold: false },
-  task_not_started:      { label: "Task Not Started",            desc: "Task assigned but not started after X days",         hasThreshold: true  },
+  task_overdue: { label: "Task Overdue", desc: "Regular task deadline passed and not completed", hasThreshold: false },
+  task_rejected_tl: { label: "Task Rejected by TL", desc: "TL rejected employee's submitted task", hasThreshold: false },
+  task_rejected_ceo: { label: "Task Rejected by CEO", desc: "CEO rejected employee's submitted task", hasThreshold: false },
+  repeat_missed: { label: "Repeat Task Missed", desc: "Daily repeat task not submitted by deadline", hasThreshold: false },
+  repeat_late: { label: "Repeat Task Late", desc: "Repeat task submitted after deadline time", hasThreshold: false },
+  third_party_overdue: { label: "Third Party Task Overdue", desc: "External/client task deadline missed", hasThreshold: false },
+  third_party_rejected: { label: "Third Party Task Rejected", desc: "Third party task submission rejected", hasThreshold: false },
+  goal_overdue: { label: "Goal Task Overdue", desc: "Long-term goal task deadline missed", hasThreshold: false },
+  self_assigned_overdue: { label: "Self-Assigned Task Overdue", desc: "Employee's own task deadline missed", hasThreshold: false },
+  extension_rejected: { label: "Extension Request Rejected", desc: "TL/CEO rejected deadline extension request", hasThreshold: false },
+  task_not_started: { label: "Task Not Started", desc: "Task assigned but not started after X days", hasThreshold: true },
 };
 
 const DEFAULT_EVENTS = Object.fromEntries(
@@ -183,15 +183,15 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
   // goalTotalPoints       — total points awarded for the entire goal task
   // goalFinalNodeWeightPct — weight % given to the auto-created final node
   // goalBonusPoints       — extra points for completing the goal on-time or before deadline
-  const [goalTotalPoints,        setGoalTotalPoints]        = useState("");
+  const [goalTotalPoints, setGoalTotalPoints] = useState("");
   const [goalFinalNodeWeightPct, setGoalFinalNodeWeightPct] = useState("");
-  const [goalBonusPoints,        setGoalBonusPoints]        = useState("");
+  const [goalBonusPoints, setGoalBonusPoints] = useState("");
 
-  const [events,  setEvents]  = useState(DEFAULT_EVENTS);
+  const [events, setEvents] = useState(DEFAULT_EVENTS);
   const [loading, setLoading] = useState(true);
-  const [saving,  setSaving]  = useState(false);
-  const [saved,   setSaved]   = useState(false);
-  const [err,     setErr]     = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"))
@@ -199,9 +199,9 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
         if (snap.exists()) {
           const d = snap.data();
           setEvents({ ...DEFAULT_EVENTS, ...(d.events || {}) });
-          setGoalTotalPoints(        d.goalTotalPoints         != null ? String(d.goalTotalPoints)         : "");
-          setGoalFinalNodeWeightPct( d.goalFinalNodeWeightPct  != null ? String(d.goalFinalNodeWeightPct)  : "");
-          setGoalBonusPoints(        d.goalBonusPoints         != null ? String(d.goalBonusPoints)         : "");
+          setGoalTotalPoints(d.goalTotalPoints != null ? String(d.goalTotalPoints) : "");
+          setGoalFinalNodeWeightPct(d.goalFinalNodeWeightPct != null ? String(d.goalFinalNodeWeightPct) : "");
+          setGoalBonusPoints(d.goalBonusPoints != null ? String(d.goalBonusPoints) : "");
         }
       })
       .catch(console.error)
@@ -217,12 +217,12 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
       await setDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"), {
         events,
         // These 3 field names must match exactly what GoalTask reads
-        goalTotalPoints:        parseFloat(goalTotalPoints)        || 0,
+        goalTotalPoints: parseFloat(goalTotalPoints) || 0,
         goalFinalNodeWeightPct: parseFloat(goalFinalNodeWeightPct) || 0,
-        goalBonusPoints:        parseFloat(goalBonusPoints)        || 0,
-        updatedBy:     employeeId,
+        goalBonusPoints: parseFloat(goalBonusPoints) || 0,
+        updatedBy: employeeId,
         updatedByName: employeeName,
-        updatedAt:     new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -236,8 +236,8 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
     fontSize: 13, fontFamily: "inherit", color: "#111827",
     background: "#fff", outline: "none", width: "100%", boxSizing: "border-box",
   };
-  const focusBlue  = e => { e.target.style.borderColor = "#1B4F8A"; };
-  const blurGray   = e => { e.target.style.borderColor = "#E5E7EB"; };
+  const focusBlue = e => { e.target.style.borderColor = "#1B4F8A"; };
+  const blurGray = e => { e.target.style.borderColor = "#E5E7EB"; };
   const lbl10 = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 5 };
 
   return (
@@ -260,7 +260,7 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
             <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>Goal task points and bleach trigger configuration</div>
           </div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B7280", flexShrink: 0 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
 
@@ -347,12 +347,12 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                       Auto-calculation preview
                     </div>
                     {(() => {
-                      const total   = parseFloat(goalTotalPoints) || 0;
-                      const finalW  = Math.min(100, Math.max(0, parseFloat(goalFinalNodeWeightPct) || 0));
+                      const total = parseFloat(goalTotalPoints) || 0;
+                      const finalW = Math.min(100, Math.max(0, parseFloat(goalFinalNodeWeightPct) || 0));
                       const finalPts = Math.round((finalW / 100) * total);
-                      const remW    = +(100 - finalW).toFixed(1);
-                      const remPts  = Math.round((remW / 100) * total);
-                      const bonus   = parseFloat(goalBonusPoints) || 0;
+                      const remW = +(100 - finalW).toFixed(1);
+                      const remPts = Math.round((remW / 100) * total);
+                      const bonus = parseFloat(goalBonusPoints) || 0;
                       return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           <div style={{ fontSize: 12, color: "#1B4F8A" }}>
@@ -460,7 +460,7 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
 
         {/* ── Footer ── */}
         <div style={{ padding: "12px 18px", borderTop: "1px solid #E5E7EB", display: "flex", gap: 10, alignItems: "center", flexShrink: 0, background: "#F9FAFB" }}>
-          {err  && <div style={{ fontSize: 12, color: "#B91C1C", flex: 1 }}>{err}</div>}
+          {err && <div style={{ fontSize: 12, color: "#B91C1C", flex: 1 }}>{err}</div>}
           {saved && <div style={{ fontSize: 12, color: "#15803D", flex: 1, fontWeight: 600 }}>✓ Settings saved</div>}
           {!err && !saved && <div style={{ flex: 1 }} />}
           <button onClick={onClose}
@@ -533,7 +533,7 @@ function SopForm({ editing, role, myDept, employeeId, employeeName, folders, all
         <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{editing ? "Edit SOP" : "Create SOP"}</div>
           <button onClick={onClose} style={{ width: 26, height: 26, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
 
@@ -560,9 +560,9 @@ function SopForm({ editing, role, myDept, employeeId, employeeName, folders, all
             {role === "tl"
               ? <input value={myDept} disabled style={{ ...iStyle, background: C.surface, color: C.textSub }} />
               : <select value={dept} onChange={e => { setDept(e.target.value); setFolderId(""); setShowNewFolder(false); setNewFolderName(""); setFolderCreated(false); }} style={{ ...iStyle, cursor: "pointer" }}>
-                  <option value="">Select department…</option>
-                  {allDepts.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+                <option value="">Select department…</option>
+                {allDepts.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
             }
           </FieldLabel>
 
@@ -673,7 +673,7 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
 
   // Collect folder names AND folder ids that have at least 1 approved SOP in that dept
   const sopFolderNames = new Set(empDeptSops.map(s => s.folderName || "Uncategorized"));
-  const sopFolderIds   = new Set(empDeptSops.map(s => s.folderId ? String(s.folderId) : null).filter(Boolean));
+  const sopFolderIds = new Set(empDeptSops.map(s => s.folderId ? String(s.folderId) : null).filter(Boolean));
 
   // Build the dropdown list:
   // 1. Named folders (from folder objects) that have SOPs — matched by name OR by _id
@@ -693,15 +693,15 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
   // SOPs for the currently selected folder — match by folderId (string), folderName, or uncategorized
   const folderSops = selFolder
     ? empDeptSops.filter(s => {
-        if (selFolder === "__uncategorized__") {
-          return !s.folderId && (s.folderName === "Uncategorized" || !s.folderName);
-        }
-        // Primary match: folderId string comparison
-        if (s.folderId && String(s.folderId) === selFolder) return true;
-        // Fallback: find folder name by id and match folderName
-        const matchedFolder = relevantFolders.find(f => f.id === selFolder);
-        return matchedFolder && s.folderName === matchedFolder.name;
-      })
+      if (selFolder === "__uncategorized__") {
+        return !s.folderId && (s.folderName === "Uncategorized" || !s.folderName);
+      }
+      // Primary match: folderId string comparison
+      if (s.folderId && String(s.folderId) === selFolder) return true;
+      // Fallback: find folder name by id and match folderName
+      const matchedFolder = relevantFolders.find(f => f.id === selFolder);
+      return matchedFolder && s.folderName === matchedFolder.name;
+    })
     : [];
 
   return (
@@ -712,9 +712,9 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
         {/* Left: Employee list */}
         <div style={{ width: selectedEmp ? 300 : "100%", minWidth: selectedEmp ? 280 : "unset", borderRight: selectedEmp ? `1px solid ${C.border}` : "none", display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "13px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>SOP Bleach</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>SOP Breach</div>
             <button onClick={onClose} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
             </button>
           </div>
           <div style={{ padding: "8px 12px", borderBottom: `1px solid ${C.borderLight}`, flexShrink: 0 }}>
@@ -725,25 +725,25 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
             {sortedEmps.length === 0
               ? <div style={{ padding: "32px 14px", textAlign: "center", fontSize: 12, color: C.textMuted }}>No employees.</div>
               : sortedEmps.map((emp, i) => {
-                  const hasRecheck = recheckEmpIds.has(emp.employeeId);
-                  const recheckInfo = recheckList.find(r => r.employeeId === emp.employeeId);
-                  const isActive = selectedEmp?.employeeId === emp.employeeId;
-                  return (
-                    <div key={emp.employeeId || i} onClick={() => selectEmp(emp)}
-                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: `1px solid ${C.borderLight}`, cursor: "pointer", transition: "background 0.1s", background: isActive ? C.primaryLight : hasRecheck && !isActive ? "#FFFBEB" : C.white }}>
-                      <Av name={emp.name} url={emp.profilePicUrl} size={30} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? C.primary : C.text }}>{emp.name}</div>
-                        <div style={{ fontSize: 10, color: C.textSub }}>{emp.department} · {emp.employeeId}</div>
-                      </div>
-                      {hasRecheck && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: "#92400E", background: "#FDE68A", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
-                          ⏳ {recheckInfo?.pendingCount}
-                        </span>
-                      )}
+                const hasRecheck = recheckEmpIds.has(emp.employeeId);
+                const recheckInfo = recheckList.find(r => r.employeeId === emp.employeeId);
+                const isActive = selectedEmp?.employeeId === emp.employeeId;
+                return (
+                  <div key={emp.employeeId || i} onClick={() => selectEmp(emp)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: `1px solid ${C.borderLight}`, cursor: "pointer", transition: "background 0.1s", background: isActive ? C.primaryLight : hasRecheck && !isActive ? "#FFFBEB" : C.white }}>
+                    <Av name={emp.name} url={emp.profilePicUrl} size={30} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? C.primary : C.text }}>{emp.name}</div>
+                      <div style={{ fontSize: 10, color: C.textSub }}>{emp.department} · {emp.employeeId}</div>
                     </div>
-                  );
-                })
+                    {hasRecheck && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#92400E", background: "#FDE68A", padding: "2px 6px", borderRadius: 4, flexShrink: 0 }}>
+                        ⏳ {recheckInfo?.pendingCount}
+                      </span>
+                    )}
+                  </div>
+                );
+              })
             }
           </div>
         </div>
@@ -810,60 +810,62 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
               {histLoading ? <Spinner /> : allBleaches.length === 0
                 ? <div style={{ textAlign: "center", padding: "40px 0", color: C.textMuted, fontSize: 12 }}>No bleach history.</div>
                 : sortedDates.map(date => (
-                    <div key={date} style={{ border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 10, overflow: "hidden" }}>
-                      <div style={{ padding: "7px 12px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{date}</span>
-                        <span style={{ fontSize: 11, display: "flex", gap: 10 }}>
-                          {(() => {
-                            const v = grouped[date].filter(b => !isReward(b) && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0);
-                            const r = grouped[date].filter(b => isReward(b)).reduce((s, b) => s + Number(b.points), 0);
-                            return <>
-                              {v > 0 && <span style={{ color: C.red, fontWeight: 600 }}>+{v.toFixed(1)} penalty</span>}
-                              {r > 0 && <span style={{ color: C.textSub, fontWeight: 500 }}>−{r.toFixed(1)} reward</span>}
-                            </>;
-                          })()}
-                        </span>
-                      </div>
-                      {grouped[date].map((b, i) => {
-                        const rs        = b.recheck?.status || "none";
-                        const isRemoved = rs === "confirmed";
-                        const reward    = isReward(b);
-                        return (
-                          <div key={b._id || i}
-                            style={{ padding: "10px 12px", borderBottom: i < grouped[date].length - 1 ? `1px solid ${C.borderLight}` : "none", display: "flex", alignItems: "flex-start", gap: 12, opacity: isRemoved ? 0.5 : 1 }}>
-                            {/* Left: type bar */}
-                            <div style={{ width: 3, alignSelf: "stretch", borderRadius: 2, flexShrink: 0, background: reward ? "#9CA3AF" : C.red, marginTop: 2 }} />
-                            {/* Middle */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3, flexWrap: "wrap" }}>
-                                <span style={{ fontSize: 10, fontWeight: 600, color: reward ? C.textSub : "#991B1B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                  {reward ? "Goal Reward" : "SOP Violation"}
-                                </span>
-                                {b.folderName && b.folderName !== "Uncategorized" && (
-                                  <span style={{ fontSize: 10, color: C.textMuted }}>{b.folderName}</span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, textDecoration: isRemoved ? "line-through" : "none", marginBottom: 2 }}>{b.sopName}</div>
-                              {b.description && <div style={{ fontSize: 11, color: C.textSub, lineHeight: 1.5, marginBottom: 3 }}>{b.description}</div>}
-                              <div style={{ fontSize: 10, color: C.textMuted }}>Applied by {b.cutByName}</div>
-                              {rs === "pending"   && <RecheckBadge label="Recheck pending"   color="#B45309" bg="#FFFBEB" border="#FDE68A" />}
-                              {rs === "confirmed" && <RecheckBadge label="Deduction removed" color="#15803D" bg="#F0FDF4" border="#BBF7D0" />}
-                              {rs === "rejected"  && <RecheckBadge label="Recheck denied"    color={C.red}   bg={C.redLight} border={C.redBorder} />}
-                              {!reward && rs === "pending" && <RecheckReview bleach={b} employeeId={selectedEmp.employeeId} onDone={() => loadHistory(selectedEmp)} />}
-                            </div>
-                            {/* Right: points */}
-                            <div style={{ flexShrink: 0, textAlign: "right" }}>
-                              <span style={{ fontSize: 12, fontWeight: 700,
-                                color: reward ? C.textSub : isRemoved ? C.textMuted : C.red,
-                                textDecoration: isRemoved ? "line-through" : "none" }}>
-                                {reward ? "−" : "+"}{b.points} pts
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
+                  <div key={date} style={{ border: `1px solid ${C.border}`, borderRadius: 6, marginBottom: 10, overflow: "hidden" }}>
+                    <div style={{ padding: "7px 12px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{date}</span>
+                      <span style={{ fontSize: 11, display: "flex", gap: 10 }}>
+                        {(() => {
+                          const v = grouped[date].filter(b => !isReward(b) && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0);
+                          const r = grouped[date].filter(b => isReward(b)).reduce((s, b) => s + Number(b.points), 0);
+                          return <>
+                            {v > 0 && <span style={{ color: C.red, fontWeight: 600 }}>+{v.toFixed(1)} penalty</span>}
+                            {r > 0 && <span style={{ color: C.textSub, fontWeight: 500 }}>−{r.toFixed(1)} reward</span>}
+                          </>;
+                        })()}
+                      </span>
                     </div>
-                  ))
+                    {grouped[date].map((b, i) => {
+                      const rs = b.recheck?.status || "none";
+                      const isRemoved = rs === "confirmed";
+                      const reward = isReward(b);
+                      return (
+                        <div key={b._id || i}
+                          style={{ padding: "10px 12px", borderBottom: i < grouped[date].length - 1 ? `1px solid ${C.borderLight}` : "none", display: "flex", alignItems: "flex-start", gap: 12, opacity: isRemoved ? 0.5 : 1 }}>
+                          {/* Left: type bar */}
+                          <div style={{ width: 3, alignSelf: "stretch", borderRadius: 2, flexShrink: 0, background: reward ? "#9CA3AF" : C.red, marginTop: 2 }} />
+                          {/* Middle */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 10, fontWeight: 600, color: reward ? C.textSub : "#991B1B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                {reward ? "Goal Reward" : "SOP Violation"}
+                              </span>
+                              {b.folderName && b.folderName !== "Uncategorized" && (
+                                <span style={{ fontSize: 10, color: C.textMuted }}>{b.folderName}</span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, textDecoration: isRemoved ? "line-through" : "none", marginBottom: 2 }}>{b.sopName}</div>
+                            {b.description && <div style={{ fontSize: 11, color: C.textSub, lineHeight: 1.5, marginBottom: 3 }}>{b.description}</div>}
+                            <div style={{ fontSize: 10, color: C.textMuted }}>Applied by {b.cutByName}</div>
+                            {rs === "pending" && <RecheckBadge label="Recheck pending" color="#B45309" bg="#FFFBEB" border="#FDE68A" />}
+                            {rs === "confirmed" && <RecheckBadge label="Deduction removed" color="#15803D" bg="#F0FDF4" border="#BBF7D0" />}
+                            {rs === "rejected" && <RecheckBadge label="Recheck denied" color={C.red} bg={C.redLight} border={C.redBorder} />}
+                            {!reward && rs === "pending" && <RecheckReview bleach={b} employeeId={selectedEmp.employeeId} onDone={() => loadHistory(selectedEmp)} />}
+                          </div>
+                          {/* Right: points */}
+                          <div style={{ flexShrink: 0, textAlign: "right" }}>
+                            <span style={{
+                              fontSize: 12, fontWeight: 700,
+                              color: reward ? C.textSub : isRemoved ? C.textMuted : C.red,
+                              textDecoration: isRemoved ? "line-through" : "none"
+                            }}>
+                              {reward ? "−" : "+"}{b.points} pts
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
               }
             </div>
           </div>
@@ -918,12 +920,12 @@ function OwnHistory({ employeeId }) {
           // totalAll > 0  = net violations (bad) → red
           // totalAll == 0 = clean → neutral
           // totalAll < 0  = rewards exceed violations (great) → amber/yellow to signal still monitored
-          const isClean   = totalAll === 0;
+          const isClean = totalAll === 0;
           const isNegative = totalAll < 0; // more rewards than violations
-          const bgColor    = isClean ? C.surface : isNegative ? "#FFFBEB" : C.redLight;
-          const bdColor    = isClean ? C.border   : isNegative ? "#FDE68A"  : C.redBorder;
-          const labelColor = isClean ? C.textMuted : isNegative ? "#92400E"  : "#991B1B";
-          const valColor   = isClean ? C.textSub   : isNegative ? "#B45309"  : C.red;
+          const bgColor = isClean ? C.surface : isNegative ? "#FFFBEB" : C.redLight;
+          const bdColor = isClean ? C.border : isNegative ? "#FDE68A" : C.redBorder;
+          const labelColor = isClean ? C.textMuted : isNegative ? "#92400E" : "#991B1B";
+          const valColor = isClean ? C.textSub : isNegative ? "#B45309" : C.red;
           return (
             <div style={{ marginBottom: 20, padding: "14px 16px", background: bgColor, border: `1px solid ${bdColor}`, borderRadius: 6, display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
               <div>
@@ -951,8 +953,8 @@ function OwnHistory({ employeeId }) {
 
         {/* ── Per-year history ── */}
         {sopPoints.map(yp => {
-          const allB  = [...(yp.bleaches || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-          const grp   = allB.reduce((acc, b) => { const d = b.date || "Unknown"; if (!acc[d]) acc[d] = []; acc[d].push(b); return acc; }, {});
+          const allB = [...(yp.bleaches || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+          const grp = allB.reduce((acc, b) => { const d = b.date || "Unknown"; if (!acc[d]) acc[d] = []; acc[d].push(b); return acc; }, {});
           const dates = Object.keys(grp).sort((a, b) => b.localeCompare(a));
           return (
             <div key={yp.year} style={{ marginBottom: 24 }}>
@@ -981,9 +983,9 @@ function OwnHistory({ employeeId }) {
 
                   {/* Entry rows */}
                   {grp[date].map((b, i) => {
-                    const rs        = b.recheck?.status || "none";
+                    const rs = b.recheck?.status || "none";
                     const isRemoved = rs === "confirmed";
-                    const reward    = isReward(b);
+                    const reward = isReward(b);
                     return (
                       <div key={b._id || i}
                         style={{ padding: "10px 12px", borderBottom: i < grp[date].length - 1 ? `1px solid ${C.borderLight}` : "none", display: "flex", alignItems: "flex-start", gap: 12, opacity: isRemoved ? 0.5 : 1 }}>
@@ -1004,17 +1006,19 @@ function OwnHistory({ employeeId }) {
                           <div style={{ fontSize: 13, fontWeight: 600, color: C.text, textDecoration: isRemoved ? "line-through" : "none", marginBottom: 2 }}>{b.sopName}</div>
                           {b.description && <div style={{ fontSize: 11, color: C.textSub, lineHeight: 1.5, marginBottom: 3 }}>{b.description}</div>}
                           <div style={{ fontSize: 10, color: C.textMuted }}>Applied by {b.cutByName}</div>
-                          {!reward && rs === "pending"   && <RecheckBadge label="Recheck pending"   color="#B45309" bg="#FFFBEB" border="#FDE68A" />}
+                          {!reward && rs === "pending" && <RecheckBadge label="Recheck pending" color="#B45309" bg="#FFFBEB" border="#FDE68A" />}
                           {!reward && rs === "confirmed" && <RecheckBadge label="Deduction removed" color="#15803D" bg="#F0FDF4" border="#BBF7D0" />}
-                          {!reward && rs === "rejected"  && <RecheckBadge label="Recheck denied"    color={C.red}   bg={C.redLight} border={C.redBorder} />}
+                          {!reward && rs === "rejected" && <RecheckBadge label="Recheck denied" color={C.red} bg={C.redLight} border={C.redBorder} />}
                           {b.recheck?.reviewNote && <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>Note: {b.recheck.reviewNote}</div>}
                         </div>
 
                         {/* Right: points + action */}
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700,
+                          <span style={{
+                            fontSize: 12, fontWeight: 700,
                             color: reward ? C.textSub : isRemoved ? C.textMuted : C.red,
-                            textDecoration: isRemoved ? "line-through" : "none" }}>
+                            textDecoration: isRemoved ? "line-through" : "none"
+                          }}>
                             {reward ? "−" : "+"}{b.points} pts
                           </span>
                           {!reward && !isRemoved && rs !== "confirmed" && rs !== "pending" && (
@@ -1043,7 +1047,7 @@ function OwnHistory({ employeeId }) {
             <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Request Recheck</div>
               <button onClick={() => setRecheckModal(null)} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
             <div style={{ padding: "16px" }}>
@@ -1096,7 +1100,7 @@ function SuggestBleachModal({ suggestion, employeeId, employeeName, onClose, onD
         <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Apply Bleach Suggestion</div>
           <button onClick={() => onClose(false)} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
         <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1261,16 +1265,16 @@ export default function SopPage() {
             <div style={{ fontSize: 12, color: C.textSub, marginTop: 3 }}>
               {role === "ceo" ? "All department SOPs and compliance"
                 : role === "tl" ? "Your department SOPs and team compliance"
-                : "Your compliance history"}
+                  : "Your compliance history"}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn outline onClick={() => { setPanelTarget("primary"); setMgrOpen(true); }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
               Managers
             </Btn>
             {(role === "ceo" || role === "tl") && (
-              <Btn red onClick={() => setBleachOpen(true)}>SOP Bleach</Btn>
+              <Btn red onClick={() => setBleachOpen(true)}>SOP Breach</Btn>
             )}
             {(role === "ceo" || role === "tl") && (
               <Btn primary onClick={() => { setEditingSop(null); setShowCreate(true); }}>+ Create SOP</Btn>
@@ -1286,7 +1290,7 @@ export default function SopPage() {
           <div onClick={() => setBleachOpen(true)}
             style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", marginBottom: 16, background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 7, cursor: "pointer", animation: "recheckPulse 2s ease-in-out infinite" }}>
             <div style={{ width: 32, height: 32, borderRadius: 6, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
@@ -1294,7 +1298,7 @@ export default function SopPage() {
               </div>
               <div style={{ fontSize: 11, color: "#B45309", marginTop: 1 }}>{recheckList.map(e => e.name).join(", ")} — click to review</div>
             </div>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6" /></svg>
           </div>
         )}
 
@@ -1336,156 +1340,156 @@ export default function SopPage() {
               /* CEO: Person → Folder → SOP (3-level accordion) */
               ceoPersonList.length === 0
                 ? <div style={{ textAlign: "center", padding: "60px 0", color: C.textMuted }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 6 }}>No SOPs yet</div>
-                    <div style={{ fontSize: 12 }}>Click "Create SOP" to add the first one.</div>
-                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 6 }}>No SOPs yet</div>
+                  <div style={{ fontSize: 12 }}>Click "Create SOP" to add the first one.</div>
+                </div>
                 : ceoPersonList.map(person => {
-                    const personKey = `person_${person.createdBy}`;
-                    const personExpanded = !collapsedFolders[personKey];
-                    const totalSops = Object.values(person.folders).reduce((s, f) => s + f.sops.length, 0);
-                    const folderList = Object.values(person.folders).sort((a, b) => {
-                      if (a.folderName === "Uncategorized") return 1;
-                      if (b.folderName === "Uncategorized") return -1;
-                      return a.folderName.localeCompare(b.folderName);
-                    });
-                    return (
-                      <div key={person.createdBy} style={{ border: `1px solid ${C.primaryBorder}`, borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
-                        {/* Person header */}
-                        <div style={{ padding: "10px 14px", background: C.primaryLight, borderBottom: personExpanded ? `1px solid ${C.primaryBorder}` : "none", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
-                          onClick={() => toggleFolder(personKey)}>
-                          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 12, fontWeight: 700, color: "#fff" }}>
-                            {(person.createdByName || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-                          </div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: C.primary }}>{person.createdByName}</div>
-                            <div style={{ fontSize: 10, color: C.textSub, marginTop: 1 }}>
-                              {person.createdByRole === "ceo" ? "Admin" : "Team Lead"} · {folderList.length} folder{folderList.length !== 1 ? "s" : ""} · {totalSops} SOP{totalSops !== 1 ? "s" : ""}
-                            </div>
-                          </div>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="2.5" strokeLinecap="round">
-                            {personExpanded ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}
-                          </svg>
+                  const personKey = `person_${person.createdBy}`;
+                  const personExpanded = !collapsedFolders[personKey];
+                  const totalSops = Object.values(person.folders).reduce((s, f) => s + f.sops.length, 0);
+                  const folderList = Object.values(person.folders).sort((a, b) => {
+                    if (a.folderName === "Uncategorized") return 1;
+                    if (b.folderName === "Uncategorized") return -1;
+                    return a.folderName.localeCompare(b.folderName);
+                  });
+                  return (
+                    <div key={person.createdBy} style={{ border: `1px solid ${C.primaryBorder}`, borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
+                      {/* Person header */}
+                      <div style={{ padding: "10px 14px", background: C.primaryLight, borderBottom: personExpanded ? `1px solid ${C.primaryBorder}` : "none", display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                        onClick={() => toggleFolder(personKey)}>
+                        <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 12, fontWeight: 700, color: "#fff" }}>
+                          {(person.createdByName || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
                         </div>
-
-                        {/* Folders under this person */}
-                        {personExpanded && (
-                          <div style={{ background: C.white }}>
-                            {folderList.map((group, fi) => {
-                              const folderKey = `${person.createdBy}_${group.folderName}`;
-                              const folderExpanded = !collapsedFolders[folderKey];
-                              return (
-                                <div key={group.folderName} style={{ borderBottom: fi < folderList.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
-                                  {/* Folder row */}
-                                  <div style={{ padding: "9px 14px 9px 18px", background: C.surface, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", borderBottom: folderExpanded && group.sops.length > 0 ? `1px solid ${C.borderLight}` : "none" }}
-                                    onClick={() => toggleFolder(folderKey)}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-                                    <span style={{ fontSize: 12, fontWeight: 600, color: C.text, flex: 1 }}>{group.folderName}</span>
-                                    <span style={{ fontSize: 10, color: C.textMuted, marginRight: 6 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
-                                    {group.folderName !== "Uncategorized" && group.folderId && (
-                                      <button onClick={e => { e.stopPropagation(); handleDeleteFolder({ _id: group.folderId, name: group.folderName }); }}
-                                        style={{ padding: "1px 7px", border: `1px solid ${C.redBorder}`, borderRadius: 4, background: C.redLight, color: C.red, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                                        Delete
-                                      </button>
-                                    )}
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2.5" strokeLinecap="round">
-                                      {folderExpanded ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}
-                                    </svg>
-                                  </div>
-                                  {/* SOPs in this folder */}
-                                  {folderExpanded && (
-                                    <div>
-                                      {group.sops.length === 0
-                                        ? <div style={{ padding: "10px 18px", fontSize: 11, color: C.textMuted }}>No SOPs in this folder yet.</div>
-                                        : group.sops.map((sop, idx) => (
-                                            <div key={sop._id} style={{ padding: "10px 18px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
-                                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                                                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{sop.name}</div>
-                                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                                  <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points} pts</span>
-                                                  <StatusBadge status={sop.status} />
-                                                </div>
-                                              </div>
-                                              <div style={{ fontSize: 11, color: C.textSub, marginBottom: 4 }}>{sop.department}</div>
-                                              {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 6, lineHeight: 1.45 }}>{sop.description}</div>}
-                                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                                                {sop.status === "pending" && (
-                                                  <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
-                                                )}
-                                                <SmBtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</SmBtn>
-                                                <SmBtn red onClick={() => handleDelete(sop)}>Delete</SmBtn>
-                                              </div>
-                                            </div>
-                                          ))
-                                      }
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.primary }}>{person.createdByName}</div>
+                          <div style={{ fontSize: 10, color: C.textSub, marginTop: 1 }}>
+                            {person.createdByRole === "ceo" ? "Admin" : "Team Lead"} · {folderList.length} folder{folderList.length !== 1 ? "s" : ""} · {totalSops} SOP{totalSops !== 1 ? "s" : ""}
                           </div>
-                        )}
+                        </div>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="2.5" strokeLinecap="round">
+                          {personExpanded ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+                        </svg>
                       </div>
-                    );
-                  })
+
+                      {/* Folders under this person */}
+                      {personExpanded && (
+                        <div style={{ background: C.white }}>
+                          {folderList.map((group, fi) => {
+                            const folderKey = `${person.createdBy}_${group.folderName}`;
+                            const folderExpanded = !collapsedFolders[folderKey];
+                            return (
+                              <div key={group.folderName} style={{ borderBottom: fi < folderList.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
+                                {/* Folder row */}
+                                <div style={{ padding: "9px 14px 9px 18px", background: C.surface, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", borderBottom: folderExpanded && group.sops.length > 0 ? `1px solid ${C.borderLight}` : "none" }}
+                                  onClick={() => toggleFolder(folderKey)}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: C.text, flex: 1 }}>{group.folderName}</span>
+                                  <span style={{ fontSize: 10, color: C.textMuted, marginRight: 6 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
+                                  {group.folderName !== "Uncategorized" && group.folderId && (
+                                    <button onClick={e => { e.stopPropagation(); handleDeleteFolder({ _id: group.folderId, name: group.folderName }); }}
+                                      style={{ padding: "1px 7px", border: `1px solid ${C.redBorder}`, borderRadius: 4, background: C.redLight, color: C.red, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                      Delete
+                                    </button>
+                                  )}
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2.5" strokeLinecap="round">
+                                    {folderExpanded ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+                                  </svg>
+                                </div>
+                                {/* SOPs in this folder */}
+                                {folderExpanded && (
+                                  <div>
+                                    {group.sops.length === 0
+                                      ? <div style={{ padding: "10px 18px", fontSize: 11, color: C.textMuted }}>No SOPs in this folder yet.</div>
+                                      : group.sops.map((sop, idx) => (
+                                        <div key={sop._id} style={{ padding: "10px 18px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
+                                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                                            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{sop.name}</div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                              <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points} pts</span>
+                                              <StatusBadge status={sop.status} />
+                                            </div>
+                                          </div>
+                                          <div style={{ fontSize: 11, color: C.textSub, marginBottom: 4 }}>{sop.department}</div>
+                                          {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 6, lineHeight: 1.45 }}>{sop.description}</div>}
+                                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                            {sop.status === "pending" && (
+                                              <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
+                                            )}
+                                            <SmBtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</SmBtn>
+                                            <SmBtn red onClick={() => handleDelete(sop)}>Delete</SmBtn>
+                                          </div>
+                                        </div>
+                                      ))
+                                    }
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
             ) : (
               /* TL: flat folder → SOP (original layout) */
               groupedList.length === 0
                 ? <div style={{ textAlign: "center", padding: "60px 0", color: C.textMuted }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 6 }}>No SOPs yet</div>
-                    <div style={{ fontSize: 12 }}>Click "Create SOP" to add the first one.</div>
-                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 6 }}>No SOPs yet</div>
+                  <div style={{ fontSize: 12 }}>Click "Create SOP" to add the first one.</div>
+                </div>
                 : groupedList.map(group => (
-                    <div key={group.folderName} style={{ border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden", marginBottom: 12 }}>
-                      <div style={{ background: C.surface, borderBottom: collapsedFolders[group.folderName] ? "none" : `1px solid ${C.border}`, padding: "9px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-                        <button onClick={() => toggleFolder(group.folderName)}
-                          style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2.5" strokeLinecap="round">
-                            {collapsedFolders[group.folderName] ? <polyline points="6 9 12 15 18 9"/> : <polyline points="18 15 12 9 6 15"/>}
-                          </svg>
+                  <div key={group.folderName} style={{ border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden", marginBottom: 12 }}>
+                    <div style={{ background: C.surface, borderBottom: collapsedFolders[group.folderName] ? "none" : `1px solid ${C.border}`, padding: "9px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                      <button onClick={() => toggleFolder(group.folderName)}
+                        style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2.5" strokeLinecap="round">
+                          {collapsedFolders[group.folderName] ? <polyline points="6 9 12 15 18 9" /> : <polyline points="18 15 12 9 6 15" />}
+                        </svg>
+                      </button>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{group.folderName}</span>
+                      <span style={{ fontSize: 11, color: C.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
+                      {group.folderName !== "Uncategorized" && group.folderId && folders.find(f => f._id === group.folderId)?.createdBy === employeeId && (
+                        <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
+                          style={{ padding: "2px 8px", border: `1px solid ${C.redBorder}`, borderRadius: 4, background: C.redLight, color: C.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                          Delete
                         </button>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textSub} strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{group.folderName}</span>
-                        <span style={{ fontSize: 11, color: C.textMuted, marginRight: 8 }}>{group.sops.length} SOP{group.sops.length !== 1 ? "s" : ""}</span>
-                        {group.folderName !== "Uncategorized" && group.folderId && folders.find(f => f._id === group.folderId)?.createdBy === employeeId && (
-                          <button onClick={() => handleDeleteFolder({ _id: group.folderId, name: group.folderName })}
-                            style={{ padding: "2px 8px", border: `1px solid ${C.redBorder}`, borderRadius: 4, background: C.redLight, color: C.red, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                            Delete
-                          </button>
-                        )}
-                      </div>
-                      {!collapsedFolders[group.folderName] && (
-                        <div style={{ background: C.white }}>
-                          {group.sops.length === 0
-                            ? <div style={{ padding: "12px 14px", fontSize: 12, color: C.textMuted }}>No SOPs in this folder yet.</div>
-                            : group.sops.map((sop, idx) => (
-                                <div key={sop._id} style={{ padding: "11px 14px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 5 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{sop.name}</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                      <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points} pts</span>
-                                      <StatusBadge status={sop.status} />
-                                    </div>
-                                  </div>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
-                                    <span style={{ fontSize: 11, color: C.textSub, background: C.surface, padding: "1px 6px", borderRadius: 4, border: `1px solid ${C.border}` }}>{sop.department}</span>
-                                    <span style={{ fontSize: 11, color: C.textSub }}>{sop.createdByName} · {sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</span>
-                                  </div>
-                                  {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 7, lineHeight: 1.45 }}>{sop.description}</div>}
-                                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                                    {sop.status === "pending" && (
-                                      <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
-                                    )}
-                                    {sop.createdBy === employeeId && (
-                                      <><SmBtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</SmBtn><SmBtn red onClick={() => handleDelete(sop)}>Delete</SmBtn></>
-                                    )}
-                                  </div>
-                                </div>
-                              ))
-                          }
-                        </div>
                       )}
                     </div>
-                  ))
+                    {!collapsedFolders[group.folderName] && (
+                      <div style={{ background: C.white }}>
+                        {group.sops.length === 0
+                          ? <div style={{ padding: "12px 14px", fontSize: 12, color: C.textMuted }}>No SOPs in this folder yet.</div>
+                          : group.sops.map((sop, idx) => (
+                            <div key={sop._id} style={{ padding: "11px 14px", borderBottom: idx < group.sops.length - 1 ? `1px solid ${C.borderLight}` : "none" }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 5 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{sop.name}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                  <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points} pts</span>
+                                  <StatusBadge status={sop.status} />
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 11, color: C.textSub, background: C.surface, padding: "1px 6px", borderRadius: 4, border: `1px solid ${C.border}` }}>{sop.department}</span>
+                                <span style={{ fontSize: 11, color: C.textSub }}>{sop.createdByName} · {sop.createdByRole === "ceo" ? "Admin" : "Team Lead"}</span>
+                              </div>
+                              {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 7, lineHeight: 1.45 }}>{sop.description}</div>}
+                              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                {sop.status === "pending" && (
+                                  <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
+                                )}
+                                {sop.createdBy === employeeId && (
+                                  <><SmBtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</SmBtn><SmBtn red onClick={() => handleDelete(sop)}>Delete</SmBtn></>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )}
+                  </div>
+                ))
             )
           )
         )}
@@ -1525,7 +1529,7 @@ export default function SopPage() {
                 {panelManager?.designation && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 1 }}>{panelManager.designation}</div>}
               </div>
               <button onClick={() => setMgrOpen(false)} style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "rgba(255,255,255,0.18)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
             <div style={{ display: "flex", borderBottom: `1px solid ${C.border}` }}>
@@ -1540,13 +1544,13 @@ export default function SopPage() {
               {!panelManager
                 ? <div style={{ textAlign: "center", padding: "40px 0", color: C.textMuted, fontSize: 13 }}>Not assigned in HR records.</div>
                 : <>
-                    <PRow label="Full Name" value={panelManager.name} />
-                    <PRow label="Designation" value={panelManager.designation} />
-                    <PRow label="Department" value={panelManager.department} />
-                    <PRow label="Employee ID" value={panelManager.biometricId ? <code style={{ fontFamily: "monospace", fontWeight: 700, color: C.text, background: C.borderLight, padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>{panelManager.biometricId}</code> : null} />
-                    <PRow label="Phone" value={panelManager.phone ? <a href={`tel:${panelManager.phone}`} style={{ color: panelColor, fontWeight: 600, textDecoration: "none" }}>{panelManager.phone}</a> : null} />
-                    <PRow label="Email" value={panelManager.email ? <a href={`mailto:${panelManager.email}`} style={{ color: panelColor, fontWeight: 600, textDecoration: "none", wordBreak: "break-all", fontSize: 11 }}>{panelManager.email}</a> : null} />
-                  </>
+                  <PRow label="Full Name" value={panelManager.name} />
+                  <PRow label="Designation" value={panelManager.designation} />
+                  <PRow label="Department" value={panelManager.department} />
+                  <PRow label="Employee ID" value={panelManager.biometricId ? <code style={{ fontFamily: "monospace", fontWeight: 700, color: C.text, background: C.borderLight, padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>{panelManager.biometricId}</code> : null} />
+                  <PRow label="Phone" value={panelManager.phone ? <a href={`tel:${panelManager.phone}`} style={{ color: panelColor, fontWeight: 600, textDecoration: "none" }}>{panelManager.phone}</a> : null} />
+                  <PRow label="Email" value={panelManager.email ? <a href={`mailto:${panelManager.email}`} style={{ color: panelColor, fontWeight: 600, textDecoration: "none", wordBreak: "break-all", fontSize: 11 }}>{panelManager.email}</a> : null} />
+                </>
               }
             </div>
           </div>

@@ -2762,15 +2762,23 @@ export default function TasksPage() {
   const getModalTask = () => activeModal ? (allTaskMap.get(activeModal.taskId) || activeModal.task || task) : task;
   // Stats: root = strict !parentTaskId for ALL roles (CEO, TL, employee)
   // Subtasks always have parentTaskId — never count them in total regardless of role
+
   const dedupedForStats = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
   const rootOnlyTasks = dedupedForStats.filter(t => !t.parentTaskId);
+  // In goal view, stats must reflect the current section (assigned/created), not all tasks
+  const statsBaseTasks = (() => {
+    const goalOnly = rootOnlyTasks.filter(t => !!t.isGoal);
+    if (!isGoalView) return rootOnlyTasks.filter(t => !t.isGoal);
+    if (taskSection === "assigned") return goalOnly.filter(t => (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId);
+    if (taskSection === "created") return goalOnly.filter(t => t.assignedBy === employeeId);
+    return goalOnly;
+  })();
   const stats = {
-    total: rootOnlyTasks.length,
-    open: rootOnlyTasks.filter(t => ["open", "pending_deadline_approval", "pending_employee_deadline_confirmation", "deadline_approved"].includes(t.status)).length,
-    active: rootOnlyTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
-    done: rootOnlyTasks.filter(t => t.status === "done").length,
+    total: statsBaseTasks.length,
+    open: statsBaseTasks.filter(t => ["open", "pending_deadline_approval", "pending_employee_deadline_confirmation", "deadline_approved"].includes(t.status)).length,
+    active: statsBaseTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
+    done: statsBaseTasks.filter(t => t.status === "done").length,
   };
-
   const doExport = () => {
     const allRows = [];
     const esc = v => {
@@ -4984,9 +4992,9 @@ em-emoji-picker,
                   <>
                     <button className="gv-back-btn" onClick={() => { setSelectedTask(null); setChatMessages([]); }}>
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2L3 5.5l4 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      All Tasks
+                      {isGoalView ? "🎯 Goal Tasks" : "All Tasks"}
                     </button>
-                    <span className="gv-lp-title" style={{ fontSize: 14 }}>Task</span>
+                    <span className="gv-lp-title" style={{ fontSize: 14 }}>{isGoalView ? "Goal Task" : "Task"}</span>
                     <div className="gv-search-box" style={{ maxWidth: 180 }}>
                       <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="5.5" cy="5.5" r="4" stroke="var(--text-4)" strokeWidth="1.1" /><line x1="8.5" y1="8.5" x2="11" y2="11" stroke="var(--text-4)" strokeWidth="1.1" strokeLinecap="round" /></svg>
                       <input value={listSearch} onChange={e => setListSearch(e.target.value)} placeholder="Search..." />
@@ -6271,7 +6279,7 @@ em-emoji-picker,
                   )}
                 </div>
 
-                
+
               </>
             ) : (
               <div className="gv-chat-head">
@@ -6952,7 +6960,7 @@ em-emoji-picker,
             {/* === Image-2: inline detail/activity render inside chat sidebar === */}
             {task && !task.isFolder && rightPanel && (
               <div className="gv-chat-inline-detail" style={{ flex: 1, overflowY: task.isGoal ? "auto" : "hidden", background: "#fff", display: "flex", flexDirection: "column", minHeight: 0 }}>
-                
+
                 <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
 
                 {rightPanel === "files" ? (

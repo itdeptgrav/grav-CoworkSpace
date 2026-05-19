@@ -2,24 +2,11 @@
 /**
  * GRAV-CMS/app/coworking/direct-messages/[conversationId]/page.js
  *
- * 100% Firestore-native — zero backend API calls for messaging.
- *
- * Firestore operations:
- *   READ  cowork_direct_messages/{convId}                → conversation meta
- *   READ  cowork_direct_messages/{convId}/messages       → message history (onSnapshot, real-time)
- *   READ  cowork_employees/{employeeId}                  → other person's info
- *   WRITE cowork_direct_messages/{convId}                → create conversation doc if missing
- *   WRITE cowork_direct_messages/{convId}/messages       → new message
- *   WRITE cowork_direct_messages/{convId}.lastMessage    → update preview
- *
- * Images/Voice → Cloudinary directly (no backend)
- * PDFs         → still goes through backend → Google Drive (unchanged)
- *
- * Optimistic UI:
- *   1. Message shown instantly (sending=true, semi-transparent)
- *   2. Firestore write completes → message confirmed (sending=false, tick)
- *   3. Firestore write fails → message stays with error state
- *   4. onSnapshot fires for OTHER users' messages only (own messages skipped to prevent duplicates)
+ * ADDED:
+ *  - Double-tap context menu on messages (Reply / Copy / Edit / Delete)
+ *  - Reply-to: strip above input + replyTo stored in message
+ *  - Edit message: edit bar replaces input; updates Firestore + sets isEdited=true
+ *  - Delete message: sets isDeleted=true in Firestore (shows placeholder in UI)
  */
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -28,7 +15,6 @@ import {
   onSnapshot, query, orderBy, limit,
   serverTimestamp, updateDoc,
 } from "firebase/firestore";
-// Use built-in crypto.randomUUID() — no uuid package needed
 import { useCoworkAuth } from "../../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../../components/coworking/layout/CoworkingShell";
 import MessageBubble from "../../../../components/coworking/messaging/MessageBubble";
@@ -62,16 +48,20 @@ export default function ConversationPage() {
   const [otherEmployee, setOtherEmployee] = useState(null);
   const messagesEndRef = useRef(null);
   const unsubRef = useRef(null);
-  const pendingMapRef = useRef(new Map()); // tempId → realId
+  const pendingMapRef = useRef(new Map());
 
-  // Derive other employee ID from conversationId ("E000_E006")
-  // conversationId is always sorted([idA, idB]).join("_")
+  // ── New: reply / edit state ──────────────────────────────
+  const [replyTo, setReplyTo] = useState(null);   // { messageId, senderName, text }
+  const [editingMsg, setEditingMsg] = useState(null); // { messageId, text }
+  const [editText, setEditText] = useState("");
+  const editInputRef = useRef(null);
+
   const otherEmpId = conversationId
     ?.split("_")
     .find(part => part !== employeeId)
     || null;
 
-  // ── Load other employee info from Firestore ──────────────
+  // ── Load other employee info ─────────────────────────────
   const loadOtherEmployee = useCallback(async () => {
     if (!otherEmpId) return;
     try {
@@ -104,7 +94,6 @@ export default function ConversationPage() {
           temp: false, sending: false, error: false,
         }));
 
-        // Source of truth merge — pendingMapRef prevents flicker/duplicate
         const incomingIds = new Set(incoming.map(m => m.messageId));
         setMessages(prev => {
           const pendingMap = pendingMapRef.current;
@@ -145,7 +134,6 @@ export default function ConversationPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Keep the latest message visible when keyboard opens / closes
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
     const onViewportChange = () => {
@@ -157,30 +145,35 @@ export default function ConversationPage() {
     return () => window.visualViewport.removeEventListener("resize", onViewportChange);
   }, []);
 
-  // When user taps the input, scroll to last message right away
   useEffect(() => {
     const onFocusIn = (e) => {
       const t = e.target;
       if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) {
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-        }, 100);
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-        }, 350);
+        setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" }); }, 100);
+        setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" }); }, 350);
       }
     };
     document.addEventListener("focusin", onFocusIn);
     return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
 
+  // ── Focus edit input when entering edit mode ─────────────
+  useEffect(() => {
+    if (editingMsg) {
+      setTimeout(() => editInputRef.current?.focus(), 50);
+    }
+  }, [editingMsg]);
 
-  // ── Send message — writes directly to Firestore ──────────
+  // ── Send message ─────────────────────────────────────────
   const handleSend = async (text, attachments, messageType) => {
     if (!otherEmpId || !employeeId) return;
 
     const tempId = "temp_" + Date.now();
     const resolvedType = resolveMessageType(messageType, attachments);
+
+    // Capture reply then clear immediately
+    const currentReplyTo = replyTo;
+    setReplyTo(null);
 
     const optimistic = {
       messageId: tempId,
@@ -197,18 +190,17 @@ export default function ConversationPage() {
       sending: true,
       error: false,
       createdAt: new Date().toISOString(),
+      ...(currentReplyTo ? { replyTo: currentReplyTo } : {}),
     };
 
-    // 1. Show immediately
     setMessages(prev => [...prev, optimistic]);
 
     try {
       const messageId = crypto.randomUUID();
-      pendingMapRef.current.set(tempId, messageId); // register before write
+      pendingMapRef.current.set(tempId, messageId);
       const convRef = doc(firebaseDb, "cowork_direct_messages", conversationId);
       const msgsRef = collection(firebaseDb, "cowork_direct_messages", conversationId, "messages");
 
-      // 2. Ensure conversation document exists
       const convSnap = await getDoc(convRef);
       if (!convSnap.exists()) {
         await setDoc(convRef, {
@@ -219,7 +211,6 @@ export default function ConversationPage() {
         });
       }
 
-      // 3. Write message to Firestore
       const cleanAtts = (attachments || []).map(a => { const c = {}; Object.entries(a).forEach(([k, v]) => { if (v !== undefined) c[k] = v; }); return c; });
       const messageData = {
         messageId,
@@ -233,11 +224,11 @@ export default function ConversationPage() {
         type: resolvedType,
         readBy: [employeeId],
         createdAt: serverTimestamp(),
+        ...(currentReplyTo ? { replyTo: currentReplyTo } : {}),
       };
 
       await setDoc(doc(msgsRef, messageId), messageData);
 
-      // 4. Update conversation's lastMessage preview
       const previewText =
         resolvedType === "image" ? "📷 Image"
           : resolvedType === "pdf" ? "📄 Document"
@@ -255,21 +246,72 @@ export default function ConversationPage() {
         updatedAt: serverTimestamp(),
       });
 
-      // 5. Remove temp immediately; onSnapshot handles the confirmed message
       setMessages(prev => prev.filter(m => m.messageId !== tempId));
       pendingMapRef.current.delete(tempId);
 
     } catch (err) {
       console.error("handleSend error:", err);
-      // Keep message visible with error state
       pendingMapRef.current.delete(tempId);
       setMessages(prev => prev.map(m =>
-        m.messageId === tempId
-          ? { ...m, sending: false, error: true }
-          : m
+        m.messageId === tempId ? { ...m, sending: false, error: true } : m
       ));
     }
   };
+
+  // ── Delete message ────────────────────────────────────────
+  const handleDeleteMsg = useCallback(async (msg) => {
+    if (!msg || msg.senderId !== employeeId) return;
+    const msgId = msg.messageId || msg.id;
+    if (!msgId || msgId.startsWith("temp_")) return;
+    try {
+      const msgRef = doc(firebaseDb, "cowork_direct_messages", conversationId, "messages", msgId);
+      await updateDoc(msgRef, {
+        isDeleted: true,
+        text: "",
+        attachments: [],
+        deletedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("deleteMsg error:", e);
+    }
+  }, [employeeId, conversationId]);
+
+  // ── Edit message — save ───────────────────────────────────
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingMsg || !editText.trim()) return;
+    const msgId = editingMsg.messageId || editingMsg.id;
+    if (!msgId || msgId.startsWith("temp_")) return;
+    try {
+      const msgRef = doc(firebaseDb, "cowork_direct_messages", conversationId, "messages", msgId);
+      await updateDoc(msgRef, {
+        text: editText.trim(),
+        isEdited: true,
+        editedAt: serverTimestamp(),
+      });
+      setEditingMsg(null);
+      setEditText("");
+    } catch (e) {
+      console.error("editMsg error:", e);
+    }
+  }, [editingMsg, editText, conversationId]);
+
+  // ── Open edit mode ────────────────────────────────────────
+  const handleOpenEdit = useCallback((msg) => {
+    if (msg.senderId !== employeeId) return;
+    setEditingMsg(msg);
+    setEditText(msg.text || "");
+    setReplyTo(null);
+  }, [employeeId]);
+
+  // ── Open reply mode ───────────────────────────────────────
+  const handleReply = useCallback((msg) => {
+    setReplyTo({
+      messageId: msg.messageId || msg.id,
+      senderName: msg.senderName || "Unknown",
+      text: (msg.text || "").slice(0, 120),
+    });
+    setEditingMsg(null);
+  }, []);
 
   if (loading || !user) return null;
 
@@ -283,27 +325,17 @@ export default function ConversationPage() {
 
   return (
     <>
-      {/* ── Responsive styles ── */}
       <style jsx global>{`
         .gv-chat-container {
-          display: flex;
-          flex-direction: column;
-          height: 100%;
-          min-height: 0;
-          border-radius: 14px;
-          overflow: hidden;
+          display: flex; flex-direction: column; height: 100%; min-height: 0;
+          border-radius: 14px; overflow: hidden;
           border: 1px solid var(--gray-200);
-          box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-          background: #fff;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04); background: #fff;
         }
         .gv-chat-header {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 14px 20px;
-          border-bottom: 1px solid var(--gray-200);
-          background: #fff;
-          flex-shrink: 0;
+          display: flex; align-items: center; gap: 12px;
+          padding: 14px 20px; border-bottom: 1px solid var(--gray-200);
+          background: #fff; flex-shrink: 0;
         }
         .gv-chat-back {
           display: flex; align-items: center; justify-content: center;
@@ -326,14 +358,12 @@ export default function ConversationPage() {
         .gv-chat-tag {
           padding: 1px 7px; background: var(--gray-100);
           border-radius: 99px; border: 1px solid var(--gray-200);
-          color: var(--gray-600); font-weight: 500;
-          white-space: nowrap;
+          color: var(--gray-600); font-weight: 500; white-space: nowrap;
         }
         .gv-chat-id {
           padding: 1px 6px; background: var(--gray-100);
           border-radius: 4px; border: 1px solid var(--gray-200);
-          color: var(--gray-400); font-family: var(--font-mono);
-          font-size: 10px;
+          color: var(--gray-400); font-family: var(--font-mono); font-size: 10px;
         }
         .gv-chat-call, .gv-chat-req {
           display: flex; align-items: center; justify-content: center;
@@ -342,95 +372,38 @@ export default function ConversationPage() {
           background: #fff; cursor: pointer; color: var(--gray-600);
           flex-shrink: 0; transition: all 0.15s;
         }
-        .gv-chat-call:hover {
-          background: #ECFDF5; border-color: #86EFAC; color: #16A34A;
-        }
+        .gv-chat-call:hover { background: #ECFDF5; border-color: #86EFAC; color: #16A34A; }
         .gv-chat-msgs {
-          flex: 1; overflow-y: auto;
-          padding: 16px 20px;
+          flex: 1; overflow-y: auto; padding: 16px 20px;
           display: flex; flex-direction: column;
           background: linear-gradient(180deg, #FAFAFB 0%, #F4F5F7 100%);
         }
-        .gv-chat-input {
-          flex-shrink: 0;
-          border-top: 1px solid var(--gray-200);
-          background: #fff;
-          padding: 0;
-        }
-
-        /* Message bubbles — wider on mobile */
+        .gv-chat-input { flex-shrink: 0; border-top: 1px solid var(--gray-200); background: #fff; padding: 0; }
         .gv-msg-content { max-width: min(75%, 480px); }
 
-        /* ── MOBILE — FULL RESPONSIVE OVERRIDE ── */
         @media (max-width: 767px) {
           .gv-msg-content { max-width: 80% !important; }
-         .gv-chat-container {
-            height: 100%;
-            border-radius: 0;
-            border: none;
-            box-shadow: none;
-          }
-          .gv-chat-header {
-            padding: 10px 12px;
-            gap: 10px;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            backdrop-filter: blur(8px);
-            background: rgba(255,255,255,0.95);
-          }
-          .gv-chat-back {
-            width: 34px; height: 34px;
-          }
-          .gv-chat-call, .gv-chat-req {
-            width: 36px; height: 36px;
-          }
-          .gv-chat-name {
-            font-size: 14px;
-          }
-          .gv-chat-sub {
-            font-size: 10px;
-            gap: 4px;
-            margin-top: 1px;
-          }
-          .gv-chat-tag {
-            padding: 1px 6px;
-            font-size: 10px;
-          }
-          /* Hide convId on mobile — too cluttered */
-          .gv-chat-id {
-            display: none;
-          }
-          .gv-chat-msgs {
-            padding: 12px 10px;
-            background: #F8F9FB;
-          }
-          /* Bigger touch targets on mobile */
-          .gv-chat-input button {
-            min-height: 40px;
-          }
+          .gv-chat-container { height: 100%; border-radius: 0; border: none; box-shadow: none; }
+          .gv-chat-header { padding: 10px 12px; gap: 10px; position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); background: rgba(255,255,255,0.95); }
+          .gv-chat-back { width: 34px; height: 34px; }
+          .gv-chat-call, .gv-chat-req { width: 36px; height: 36px; }
+          .gv-chat-name { font-size: 14px; }
+          .gv-chat-sub { font-size: 10px; gap: 4px; margin-top: 1px; }
+          .gv-chat-tag { padding: 1px 6px; font-size: 10px; }
+          .gv-chat-id { display: none; }
+          .gv-chat-msgs { padding: 12px 10px; background: #F8F9FB; }
+          .gv-chat-input button { min-height: 40px; }
         }
 
-        /* Extra small phones */
         @media (max-width: 380px) {
-          .gv-chat-header {
-            padding: 8px 10px;
-            gap: 8px;
-          }
-          .gv-chat-name {
-            font-size: 13px;
-          }
-          .gv-chat-tag {
-            padding: 0 5px;
-            font-size: 9px;
-          }
-          .gv-chat-back, .gv-chat-call, .gv-chat-req {
-            width: 32px; height: 32px;
-          }
+          .gv-chat-header { padding: 8px 10px; gap: 8px; }
+          .gv-chat-name { font-size: 13px; }
+          .gv-chat-tag { padding: 0 5px; font-size: 9px; }
+          .gv-chat-back, .gv-chat-call, .gv-chat-req { width: 32px; height: 32px; }
         }
       `}</style>
 
-      {/* ── Audio Call Manager (handles outgoing calls + LiveKit) ── */}
+      {/* ── Audio Call Manager ── */}
       {employeeId && otherEmpId && (
         <DMCallManager
           employeeId={employeeId}
@@ -445,12 +418,7 @@ export default function ConversationPage() {
 
         {/* ── Header ── */}
         <div className="gv-chat-header">
-          <button
-            onClick={() => router.push("/coworking/direct-messages")}
-            className="gv-chat-back"
-            title="Back to messages"
-            aria-label="Back"
-          >
+          <button onClick={() => router.push("/coworking/direct-messages")} className="gv-chat-back" title="Back to messages" aria-label="Back">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -461,23 +429,13 @@ export default function ConversationPage() {
           <div className="gv-chat-info">
             <div className="gv-chat-name">{otherName}</div>
             <div className="gv-chat-sub">
-              {otherEmployee?.department && (
-                <span className="gv-chat-tag">{otherEmployee.department}</span>
-              )}
-              {otherEmployee?.role && (
-                <span className="gv-chat-tag">{otherEmployee.role}</span>
-              )}
+              {otherEmployee?.department && <span className="gv-chat-tag">{otherEmployee.department}</span>}
+              {otherEmployee?.role && <span className="gv-chat-tag">{otherEmployee.role}</span>}
               <span className="gv-chat-id">{conversationId}</span>
             </div>
           </div>
 
-          {/* ── Audio Call button ── */}
-          <button
-            onClick={() => triggerCall(conversationId)}
-            className="gv-chat-call"
-            title="Audio call"
-            aria-label="Call"
-          >
+          <button onClick={() => triggerCall(conversationId)} className="gv-chat-call" title="Audio call" aria-label="Call">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8 19.79 19.79 0 01.01 1.18 2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z" />
             </svg>
@@ -491,11 +449,7 @@ export default function ConversationPage() {
               <GwSpinner size={30} />
             </div>
           ) : messages.length === 0 ? (
-            <GwEmpty
-              icon="💬"
-              title={`Start a conversation with ${otherName}`}
-              subtitle="Messages are private and stored securely."
-            />
+            <GwEmpty icon="💬" title={`Start a conversation with ${otherName}`} subtitle="Messages are private and stored securely." />
           ) : (
             groupedMsgs.map((msg, i) => (
               <MessageBubble
@@ -509,19 +463,97 @@ export default function ConversationPage() {
                 isMe={msg.senderId === employeeId}
                 showSender={msg.showSender}
                 showAvatar={msg.showAvatar}
+                currentUserId={employeeId}
+                onReply={handleReply}
+                onDeleteMsg={handleDeleteMsg}
+                onEditMsg={handleOpenEdit}
               />
             ))
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* ── Input ── */}
+        {/* ── Input area (reply strip / edit bar / normal input) ── */}
         <div className="gv-chat-input">
-          <MediaMessageInput
-            onSend={handleSend}
-            placeholder={`Message ${otherName}…`}
-            disabled={msgsLoading}
-          />
+
+          {/* Reply preview strip */}
+          {replyTo && !editingMsg && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 16px",
+              borderTop: "1px solid #E5E7EB",
+              background: "#F8FAFF",
+              borderLeft: "3px solid #2563EB",
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#2563EB", marginBottom: 1 }}>
+                  Replying to {replyTo.senderName}
+                </div>
+                <div style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {replyTo.text || "📎 Attachment"}
+                </div>
+              </div>
+              <button
+                onClick={() => setReplyTo(null)}
+                style={{ width: 24, height: 24, border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, borderRadius: 4, fontSize: 16 }}
+              >✕</button>
+            </div>
+          )}
+
+          {/* Edit bar — replaces input when editing */}
+          {editingMsg ? (
+            <div style={{ padding: "8px 12px", borderTop: "1px solid #E5E7EB" }}>
+              {/* Edit header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#2563EB", display: "flex", alignItems: "center", gap: 5 }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                  Editing message
+                </span>
+                <button
+                  onClick={() => { setEditingMsg(null); setEditText(""); }}
+                  style={{ fontSize: 13, color: "#9CA3AF", border: "none", background: "transparent", cursor: "pointer" }}
+                >✕ Cancel</button>
+              </div>
+              {/* Edit textarea */}
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <textarea
+                  ref={editInputRef}
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSaveEdit(); }
+                    if (e.key === "Escape") { setEditingMsg(null); setEditText(""); }
+                  }}
+                  rows={2}
+                  style={{
+                    flex: 1, resize: "none", border: "1.5px solid #2563EB", borderRadius: 10,
+                    padding: "8px 12px", fontSize: 14, fontFamily: "inherit",
+                    outline: "none", color: "#111827", background: "#fff",
+                    lineHeight: 1.5,
+                  }}
+                />
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={!editText.trim()}
+                  style={{
+                    padding: "8px 18px", borderRadius: 10, border: "none",
+                    background: editText.trim() ? "#2563EB" : "#E5E7EB",
+                    color: editText.trim() ? "#fff" : "#9CA3AF",
+                    fontSize: 13, fontWeight: 600, cursor: editText.trim() ? "pointer" : "default",
+                    fontFamily: "inherit", flexShrink: 0, alignSelf: "flex-end",
+                    transition: "background 0.15s",
+                  }}
+                >Save</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Enter to save · Esc to cancel</div>
+            </div>
+          ) : (
+            <MediaMessageInput
+              onSend={handleSend}
+              placeholder={`Message ${otherName}…`}
+              disabled={msgsLoading}
+            />
+          )}
         </div>
       </div>
     </>

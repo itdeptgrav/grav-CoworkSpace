@@ -189,8 +189,8 @@ export default function SettingsPage() {
   const roleColor = role === "ceo"
     ? { bg: "#FEF2F2", color: "#991B1B", border: "#FECDD3" }
     : role === "tl"
-    ? { bg: "#EFF6FF", color: "#1E40AF", border: "#BFDBFE" }
-    : { bg: "#F0FDF4", color: "#166534", border: "#BBF7D0" };
+      ? { bg: "#EFF6FF", color: "#1E40AF", border: "#BFDBFE" }
+      : { bg: "#F0FDF4", color: "#166534", border: "#BBF7D0" };
 
   const strengthMeta = [
     { label: "Too short", color: "#EF4444" },
@@ -243,9 +243,11 @@ export default function SettingsPage() {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 18px;
-          
+          align-items: start;
         }
         .stg-col-full { grid-column: 1 / -1; }
+        .stg-col-left { grid-column: 1; }
+        .stg-col-right { grid-column: 2; }
 
         .stg-card {
           background: #ffffff;
@@ -463,6 +465,8 @@ export default function SettingsPage() {
           .stg-page { padding: 20px 16px 48px; }
           .stg-grid { grid-template-columns: 1fr; gap: 14px; }
           .stg-col-full { grid-column: 1; }
+          .stg-col-left { grid-column: 1; }
+          .stg-col-right { grid-column: 1; }
           .stg-page-title { font-size: 17px; }
         }
 
@@ -473,14 +477,14 @@ export default function SettingsPage() {
 
         {/* Page header */}
         <div className="stg-page-head">
-          <h1 className="stg-page-title">Settings</h1>
+          <h1 className="stg-page-title">Profile/settings</h1>
           <p className="stg-page-sub">Manage your account and preferences</p>
         </div>
 
         <div className="stg-grid">
 
           {/* ── PROFILE CARD ── */}
-          <div className="stg-card">
+          <div className="stg-card stg-col-left">
             <div className="stg-card-head">
               <div className="stg-card-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -495,7 +499,7 @@ export default function SettingsPage() {
             <div className="stg-card-body">
 
               {/* Avatar section */}
-              <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "4px 0 20px", borderBottom: "1px solid #F1F5F9", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 0 20px", borderBottom: "1px solid #F1F5F9", marginBottom: 16, background: "linear-gradient(135deg, #F8FAFF 0%, #F1F5F9 100%)", margin: "-20px -22px 16px", padding: "20px 22px 20px" }}>
                 <div
                   onClick={() => !picUploading && fileInputRef.current?.click()}
                   style={{ position: "relative", cursor: picUploading ? "not-allowed" : "pointer", flexShrink: 0 }}
@@ -581,6 +585,16 @@ export default function SettingsPage() {
                   value: passwordChanged !== false ? "Active" : "Pending password change",
                   valueColor: passwordChanged !== false ? "#15803D" : "#B45309",
                 },
+                {
+                  icon: (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" />
+                    </svg>
+                  ),
+                  label: "Email",
+                  value: user?.email || "—",
+                  mono: false,
+                },
               ].map(row => (
                 <div className="stg-info-row" key={row.label}>
                   <div className="stg-info-icon">{row.icon}</div>
@@ -600,7 +614,7 @@ export default function SettingsPage() {
           </div>
 
           {/* ── CHANGE PASSWORD CARD ── */}
-          <div className="stg-card">
+          <div className="stg-card stg-col-right">
             <div className="stg-card-head">
               <div className="stg-card-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -684,7 +698,7 @@ export default function SettingsPage() {
                       style={{
                         borderColor: confirm && newPw && confirm !== newPw ? "#FCA5A5"
                           : confirm && newPw && confirm === newPw ? "#6EE7B7"
-                          : undefined
+                            : undefined
                       }}
                     />
                     <button type="button" className="stg-eye" onClick={() => setShowConf(p => !p)}>
@@ -724,7 +738,7 @@ export default function SettingsPage() {
 
           {/* ── CEO ONLY: CHANGE EMAIL CARD ── */}
           {role === "ceo" && (
-            <div className="stg-card stg-col-full" style={{ maxWidth: 480 }}>
+            <div className="stg-card stg-col-full">
               <div className="stg-card-head">
                 <div className="stg-card-icon">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -808,7 +822,7 @@ export default function SettingsPage() {
           )}
 
           {/* ── CONNECT GMAIL CARD ── */}
-          <div className="stg-card" style={{ maxWidth: 480 }}>
+          <div className="stg-card">
             <div className="stg-card-head">
               <div className="stg-card-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -867,7 +881,7 @@ export default function SettingsPage() {
           </div>
 
           {/* ── SOP COMPLIANCE CARD ── */}
-          <div className="stg-card" style={{ maxWidth: 480 }}>
+          <div className="stg-card">
             <div className="stg-card-head">
               <div className="stg-card-icon">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
