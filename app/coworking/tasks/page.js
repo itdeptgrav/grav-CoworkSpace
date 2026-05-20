@@ -718,6 +718,10 @@ export default function TasksPage() {
   const [proposedDurationUnit, setProposedDurationUnit] = useState("hours"); // hours | days | minutes
   const [proposingDeadline, setProposingDeadline] = useState(false);
   const [approvingDeadline, setApprovingDeadline] = useState(false);
+  // ── Sender-preset timer approval state ────────────────────────────────────
+  const [approvingSenderTimer, setApprovingSenderTimer] = useState(false);
+  const [showSenderTimerNegotiate, setShowSenderTimerNegotiate] = useState(false);
+  const [senderTimerNegotiateModal, setSenderTimerNegotiateModal] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [showExtendForm, setShowExtendForm] = useState(false);
@@ -2001,6 +2005,11 @@ export default function TasksPage() {
       return;
     }
 
+    if (type === "review_sender_timer") {
+      setSenderTimerNegotiateModal({ task: targetTask });
+      return;
+    }
+
     if (type === "delete") {
       setShowDeleteConf(true);
       return;
@@ -2123,6 +2132,83 @@ export default function TasksPage() {
       await taskForwardApi.approveDeadline(selectedTask.taskId, approved, rejectReason.trim());
     } catch (e) { alert(e.message); }
     finally { setApprovingDeadline(false); }
+  };
+
+  // ── Approve sender's preset timer directly (no proposal needed) ───────────
+  const handleApproveSenderTimer = async () => {
+    if (!selectedTask?.taskId) return;
+    const approvedSecs = Number(selectedTask.senderTimerWindowSecs) || 0;
+    if (approvedSecs <= 0) return;
+    setApprovingSenderTimer(true);
+    // Optimistic update
+    const optimistic = {
+      status: "deadline_approved",
+      deadlineWindowSecs: approvedSecs,
+      originalWindowSecs: approvedSecs,
+      dueDate: new Date(Date.now() + approvedSecs * 1000).toISOString(),
+    };
+    ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+    setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    setShowSenderTimerNegotiate(false);
+    setSenderTimerNegotiateModal(null);
+    try {
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/approve-sender-timer`, { method: "POST" });
+    } catch (e) {
+      alert(e.message);
+      // Rollback
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: "open" } : t));
+      setSelectedTask(prev => prev ? { ...prev, status: "open" } : prev);
+    } finally { setApprovingSenderTimer(false); }
+  };
+
+  // ── Reject sender's preset timer — employee finds the time insufficient ────
+  const handleRejectSenderTimer = async (reason) => {
+    if (!selectedTask?.taskId || !reason?.trim()) return;
+    setApprovingSenderTimer(true);
+    const optimistic = {
+      senderTimerRejected: true,
+      senderTimerRejectionReason: reason.trim(),
+    };
+    ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+    setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    setSenderTimerNegotiateModal(null);
+    try {
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/reject-sender-timer`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+    } catch (e) {
+      alert(e.message);
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, senderTimerRejected: false, senderTimerRejectionReason: null } : t));
+      setSelectedTask(prev => prev ? { ...prev, senderTimerRejected: false, senderTimerRejectionReason: null } : prev);
+    } finally { setApprovingSenderTimer(false); }
+  };
+
+  // ── Propose different duration from the sender-timer modal ─────────────────
+  const handleSenderTimerPropose = async (durationVal, durationUnit) => {
+    if (!selectedTask?.taskId || !durationVal) return;
+    const proposedDate = durationToDate(durationVal, durationUnit);
+    if (!proposedDate) return;
+    const _n = parseFloat(durationVal) || 0;
+    const _windowSecs = durationUnit === "minutes" ? Math.round(_n * 60)
+      : durationUnit === "days" ? Math.round(_n * 86400)
+        : Math.round(_n * 3600);
+    setApprovingSenderTimer(true);
+    const optimistic = { status: "pending_deadline_approval", proposedDeadline: proposedDate, proposedDeadlineByName: employeeName, deadlineWindowSecs: _windowSecs };
+    ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
+    setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    setSenderTimerNegotiateModal(null);
+    try {
+      const workedSecs = getDisplaySeconds(selectedTask.taskId) || 0;
+      await taskForwardApi.proposeDeadline(selectedTask.taskId, proposedDate, workedSecs, _windowSecs);
+    } catch (e) {
+      alert(e.message);
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, status: "open" } : t));
+      setSelectedTask(prev => prev ? { ...prev, status: "open" } : prev);
+    } finally { setApprovingSenderTimer(false); }
   };
 
   // ── Fixed-deadline negotiation handlers ───────────────────────────────────
@@ -6438,11 +6524,21 @@ em-emoji-picker,
                       { label: "Awaiting Approval", active: true },
                       { label: "Start Work", active: false },
                       { label: "Submit", active: false },
-                    ] : task.hasTimer === true ? [
-                      { label: "Set Deadline", active: true },
-                      { label: "TL Approves", active: false },
-                      { label: "Start Work", active: false },
-                    ] : [
+                    ] : task.hasTimer === true ? (
+                      Number(task.senderTimerWindowSecs) > 0 && !task.senderTimerRejected ? [
+                        { label: "Approve Time", active: true },
+                        { label: "Confirm & Start", active: false },
+                        { label: "Submit", active: false },
+                      ] : Number(task.senderTimerWindowSecs) > 0 && task.senderTimerRejected ? [
+                        { label: "Propose Duration", active: true },
+                        { label: "TL Approves", active: false },
+                        { label: "Start Work", active: false },
+                      ] : [
+                        { label: "Set Deadline", active: true },
+                        { label: "TL Approves", active: false },
+                        { label: "Start Work", active: false },
+                      ]
+                    ) : [
                       { label: "Confirm & Start", active: true },
                       { label: "Submit", active: false },
                     ]).map((step, i, arr) => (
@@ -6567,38 +6663,101 @@ em-emoji-picker,
                       </div>
                     )}
 
-                    {/* Step 1b: Timer task — employee proposes duration */}
-                    {!hasDueDate && status === "open" && task.hasTimer === true && (
-                      <div style={{ padding: "10px 16px", borderLeft: "3px solid #1B4F8A" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Set your deadline</div>
-                        {task.deadlineProposalRejected && (
-                          <div style={{ fontSize: 11, color: "#DC2626", marginBottom: 8 }}>
-                            Rejected: {task.deadlineRejectionReason || "Please propose a new duration."}
+                    {/* Step 1b: Timer task — sender preset OR employee proposes duration */}
+                    {!hasDueDate && status === "open" && task.hasTimer === true && (() => {
+                      const senderSecs = Number(task.senderTimerWindowSecs) || 0;
+                      const fmtS = (s) => { if (!s) return "0m"; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`; if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`; return `${m}m`; };
+                      if (senderSecs > 0 && !task.senderTimerRejected) {
+                        // Sender set a time — show prominent card with single CTA (modal handles the 3 options)
+                        return (
+                          <div style={{ padding: "12px 16px", borderLeft: "3px solid #1B4F8A", background: "#F8FAFF" }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#1B4F8A", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Time Set by Manager</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                              <div style={{ width: 36, height: 36, borderRadius: 8, background: "#EBF2FA", border: "1px solid #BFDBFE", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <span style={{ fontSize: 18 }}>⏱</span>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 18, fontWeight: 700, color: "#1B4F8A", fontFamily: "monospace", lineHeight: 1 }}>{fmtS(senderSecs)}</div>
+                                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>Set by {task.assignedByName || "your manager"}</div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#374151", marginBottom: 10 }}>
+                              Approve this time to start working, or propose a different duration.
+                            </div>
+                            <button
+                              disabled={approvingSenderTimer}
+                              onClick={() => setSenderTimerNegotiateModal({ task })}
+                              style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 11, fontWeight: 700, cursor: approvingSenderTimer ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: approvingSenderTimer ? 0.6 : 1 }}
+                            >
+                              {approvingSenderTimer ? "Processing…" : "Approve / Negotiate"}
+                            </button>
                           </div>
-                        )}
-                        {!task.deadlineProposalRejected && (
-                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
-                            Enter how long you need. Your manager will approve before the timer starts.
+                        );
+                      }
+                      if (senderSecs > 0 && task.senderTimerRejected) {
+                        // Employee rejected the sender's time — now they propose their own
+                        return (
+                          <div style={{ padding: "10px 16px", borderLeft: "3px solid #D97706" }}>
+                            <div style={{ padding: "8px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, marginBottom: 10 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400E", marginBottom: 2 }}>↩ You rejected the {fmtS(senderSecs)} allocation</div>
+                              {task.senderTimerRejectionReason && (
+                                <div style={{ fontSize: 11, color: "#B45309", fontStyle: "italic" }}>"{task.senderTimerRejectionReason}"</div>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Propose your own duration</div>
+                            <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>Enter how long you need. Your manager will approve before the timer starts.</div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <input type="number" min="1" max="999" placeholder="e.g. 4"
+                                value={df.proposedDurationVal || ""}
+                                onChange={e => df.setDurationVal?.(e.target.value)}
+                                style={{ width: 80, padding: "5px 8px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", outline: "none", color: "#111827" }} />
+                              <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
+                                style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
+                                <option value="minutes">min</option>
+                                <option value="hours">hrs</option>
+                                <option value="days">days</option>
+                              </select>
+                              <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                                style={{ padding: "5px 14px", border: "1px solid #D97706", borderRadius: 5, background: "#D97706", color: "#fff", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
+                                {df.proposing ? "Submitting…" : "Submit for Approval"}
+                              </button>
+                            </div>
                           </div>
-                        )}
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input type="number" min="1" max="999" placeholder="e.g. 4"
-                            value={df.proposedDurationVal || ""}
-                            onChange={e => df.setDurationVal?.(e.target.value)}
-                            style={{ width: 80, padding: "5px 8px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", outline: "none", color: "#111827" }} />
-                          <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
-                            style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
-                            <option value="minutes">min</option>
-                            <option value="hours">hrs</option>
-                            <option value="days">days</option>
-                          </select>
-                          <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
-                            style={{ padding: "5px 14px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#fff", color: "#1B4F8A", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
-                            {df.proposing ? "Submitting…" : "Submit for Approval"}
-                          </button>
+                        );
+                      }
+                      // No sender preset — existing propose flow
+                      return (
+                        <div style={{ padding: "10px 16px", borderLeft: "3px solid #1B4F8A" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Set your deadline</div>
+                          {task.deadlineProposalRejected && (
+                            <div style={{ fontSize: 11, color: "#DC2626", marginBottom: 8 }}>
+                              Rejected: {task.deadlineRejectionReason || "Please propose a new duration."}
+                            </div>
+                          )}
+                          {!task.deadlineProposalRejected && (
+                            <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                              Enter how long you need. Your manager will approve before the timer starts.
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input type="number" min="1" max="999" placeholder="e.g. 4"
+                              value={df.proposedDurationVal || ""}
+                              onChange={e => df.setDurationVal?.(e.target.value)}
+                              style={{ width: 80, padding: "5px 8px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", outline: "none", color: "#111827" }} />
+                            <select value={df.proposedDurationUnit || "hours"} onChange={e => df.setDurationUnit?.(e.target.value)}
+                              style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
+                              <option value="minutes">min</option>
+                              <option value="hours">hrs</option>
+                              <option value="days">days</option>
+                            </select>
+                            <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
+                              style={{ padding: "5px 14px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#fff", color: "#1B4F8A", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
+                              {df.proposing ? "Submitting…" : "Submit for Approval"}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Step 2a: awaiting TL approval */}
                     {status === "pending_deadline_approval" && (
@@ -7722,6 +7881,17 @@ em-emoji-picker,
         />
       )}
 
+      {senderTimerNegotiateModal && (
+        <SenderTimerNegotiateModal
+          task={senderTimerNegotiateModal.task}
+          onApprove={handleApproveSenderTimer}
+          onPropose={handleSenderTimerPropose}
+          onReject={handleRejectSenderTimer}
+          onClose={() => setSenderTimerNegotiateModal(null)}
+          busy={approvingSenderTimer}
+        />
+      )}
+
       {editingDraftTask && (
         <CreateTaskModal
           editTask={editingDraftTask}
@@ -8020,6 +8190,139 @@ function FixedDeadlineCreatorReviewModal({ task, onApprove, onCounter, onClose, 
   );
 }
 
+// ── SenderTimerNegotiateModal — mirrors FixedDeadlineNegotiateModal for timer tasks ─
+// Opens when receiver clicks "Approve / Negotiate" on a task where sender preset a duration.
+// 3 modes: Approve directly | Suggest Different Duration | Reject with reason
+function SenderTimerNegotiateModal({ task, onApprove, onPropose, onReject, onClose, busy }) {
+  const [mode, setMode] = React.useState("review"); // "review" | "suggest" | "reject"
+  const [durationVal, setDurationVal] = React.useState("");
+  const [durationUnit, setDurationUnit] = React.useState("hours");
+  const [rejectReason, setRejectReason] = React.useState("");
+
+  const senderSecs = Number(task?.senderTimerWindowSecs) || 0;
+  const fmtSecs = (s) => {
+    if (!s) return "0m";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    return `${m}m`;
+  };
+
+  const steps = mode === "review"
+    ? [{ label: "Approve Time", active: true }, { label: "Confirm & Start", active: false }, { label: "Submit", active: false }]
+    : mode === "suggest"
+      ? [{ label: "Suggest Duration", active: true }, { label: "TL Approves", active: false }, { label: "Start Work", active: false }]
+      : [{ label: "Reject & Reason", active: true }, { label: "Propose Duration", active: false }, { label: "Start Work", active: false }];
+
+  const F = { fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif" };
+  const inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, ...F, boxSizing: "border-box" };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.3)", zIndex: 8998, backdropFilter: "blur(2px)" }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 8999, background: "#fff", borderRadius: 12, padding: "20px 22px", width: "min(440px,92vw)", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", ...F }}>
+
+        {/* Header */}
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 2 }}>Timer Approval</div>
+        <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task?.title}</div>
+
+        {/* HOW THIS TASK WORKS step indicator */}
+        <div style={{ marginBottom: 14, padding: "10px 12px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#1B4F8A", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>How this task works</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 0, overflowX: "auto" }}>
+            {steps.map((step, i, arr) => (
+              <React.Fragment key={i}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: step.active ? "#EBF2FA" : "transparent", borderRadius: 5, border: step.active ? "1px solid #BFDBFE" : "1px solid transparent", flexShrink: 0 }}>
+                  <span style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, background: step.active ? "#1B4F8A" : "#F1F5F9", color: step.active ? "#fff" : "#94A3B8", fontSize: 8, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                  <span style={{ fontSize: 10, fontWeight: step.active ? 600 : 400, color: step.active ? "#1B4F8A" : "#6B7280", whiteSpace: "nowrap" }}>{step.label}</span>
+                </div>
+                {i < arr.length - 1 && <div style={{ width: 16, height: 1, background: "#E5E7EB", flexShrink: 0 }} />}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        {/* Sender time highlight — mirrors deadline banner in Image 1 */}
+        <div style={{ background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 12px", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>⏱</span>
+            <div>
+              <div style={{ fontSize: 12, color: "#1E40AF", fontWeight: 600 }}>
+                Time set: <strong style={{ fontFamily: "monospace", fontSize: 13 }}>{fmtSecs(senderSecs)}</strong>
+              </div>
+              <div style={{ fontSize: 11, color: "#3B82F6", marginTop: 1 }}>
+                Set by {task?.assignedByName || "your manager"}. Approve this time to start, or propose a different duration.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mode: review — 3 action buttons */}
+        {mode === "review" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <button onClick={onApprove} disabled={busy} style={{ padding: "10px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer", ...F, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "Approving…" : "✓ Approve this time & Start"}
+            </button>
+            <button onClick={() => setMode("suggest")} disabled={busy} style={{ padding: "10px", background: "#fff", color: "#D97706", border: "1px solid #D97706", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>
+              📅 Suggest Different Duration
+            </button>
+            <button onClick={() => setMode("reject")} disabled={busy} style={{ padding: "10px", background: "#fff", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>
+              ✕ Reject This Time
+            </button>
+          </div>
+        )}
+
+        {/* Mode: suggest — duration input */}
+        {mode === "suggest" && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 8 }}>How much time do you need instead?</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input type="text" inputMode="numeric" placeholder="e.g. 4" value={durationVal}
+                onChange={e => setDurationVal(e.target.value.replace(/[^0-9.]/g, ""))}
+                style={{ ...inp, flex: 1 }} />
+              <select value={durationUnit} onChange={e => setDurationUnit(e.target.value)}
+                style={{ ...inp, width: 80, cursor: "pointer", background: "#fff" }}>
+                <option value="minutes">min</option>
+                <option value="hours">hrs</option>
+                <option value="days">days</option>
+              </select>
+            </div>
+            <button onClick={() => { if (!durationVal || busy) return; onPropose(durationVal, durationUnit); }}
+              disabled={!durationVal || busy}
+              style={{ width: "100%", padding: "9px", background: durationVal && !busy ? "#D97706" : "#E5E7EB", color: durationVal && !busy ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: durationVal && !busy ? "pointer" : "not-allowed", ...F, marginBottom: 6 }}>
+              {busy ? "Submitting…" : "Submit for Approval"}
+            </button>
+            <button onClick={() => setMode("review")} style={{ width: "100%", padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+          </>
+        )}
+
+        {/* Mode: reject — reason textarea */}
+        {mode === "reject" && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+              Why is this time not enough? <span style={{ color: "#EF4444" }}>*</span>
+            </div>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              placeholder="e.g. This task requires at least 8 hours — it involves data migration plus testing…"
+              style={{ ...inp, width: "100%", minHeight: 80, resize: "vertical", lineHeight: 1.5, marginBottom: 10 }} />
+            <button onClick={() => { if (!rejectReason.trim() || busy) return; onReject(rejectReason); }}
+              disabled={!rejectReason.trim() || busy}
+              style={{ width: "100%", padding: "9px", background: rejectReason.trim() && !busy ? "#DC2626" : "#E5E7EB", color: rejectReason.trim() && !busy ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: rejectReason.trim() && !busy ? "pointer" : "not-allowed", ...F, marginBottom: 6 }}>
+              {busy ? "Sending…" : "Send Rejection"}
+            </button>
+            <button onClick={() => setMode("review")} style={{ width: "100%", padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+          </>
+        )}
+
+        {/* Close button */}
+        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, width: 26, height: 26, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
 function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCounter, onClose, busy }) {
   const [mode, setMode] = React.useState("review");
   const [newDate, setNewDate] = React.useState("");
@@ -8031,52 +8334,59 @@ function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCount
   const inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, ...F, width: "100%", boxSizing: "border-box" };
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.3)", zIndex: 8998, backdropFilter: "blur(2px)" }} />
-      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 8999, background: "#fff", borderRadius: 12, padding: "20px 22px", width: "min(400px,92vw)", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", ...F }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{isCounter ? "Counter-Proposal Received" : "Deadline Approval"}</div>
-        <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{task?.title}</div>
-        {isCounter ? (
-          <>
-            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#92400E", marginBottom: 14 }}>Your manager counter-proposed: <strong>{counterDL}</strong></div>
-            {mode === "review" ? (
-              <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
-                <button onClick={onAcceptCounter} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Accept this date</button>
-                <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#1B4F8A", border: "1px solid #1B4F8A", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Propose a different date</button>
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
-                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.2)", zIndex: 8998 }} />
+      <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 8999, background: "#fff", width: "min(380px,92vw)", boxShadow: "-4px 0 24px rgba(15,23,42,0.12)", display: "flex", flexDirection: "column", animation: "slideInRight 0.22s cubic-bezier(0.4,0,0.2,1)", ...F }}>
+        <style>{`@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid #E5E7EB", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{isCounter ? "Counter-Proposal Received" : "Deadline Approval"}</div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{task?.title}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 28, height: 28, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
+          {isCounter ? (
+            <>
+              <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#92400E", marginBottom: 14 }}>Your manager counter-proposed: <strong>{counterDL}</strong></div>
+              {mode === "review" ? (
+                <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                  <button onClick={onAcceptCounter} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Accept this date</button>
+                  <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#1B4F8A", border: "1px solid #1B4F8A", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Propose a different date</button>
                 </div>
-                <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#1B4F8A" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
-                <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            {existingDL && <div style={{ background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#1E40AF", marginBottom: 14 }}>Deadline: <strong>{existingDL}</strong></div>}
-            {mode === "review" ? (
-              <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
-                <button onClick={onApprove} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Approve deadline & Start</button>
-                <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#D97706", border: "1px solid #D97706", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Request a different date</button>
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Proposed Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
-                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+              ) : (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                    <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
+                    <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+                  </div>
+                  <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#1B4F8A" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
+                  <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              {existingDL && <div style={{ background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#1E40AF", marginBottom: 14 }}>Deadline: <strong>{existingDL}</strong></div>}
+              {mode === "review" ? (
+                <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                  <button onClick={onApprove} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Approve deadline & Start</button>
+                  <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#D97706", border: "1px solid #D97706", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Request a different date</button>
                 </div>
-                <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#D97706" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
-                <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
-              </>
-            )}
-          </>
-        )}
-        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, width: 24, height: 24, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-        </button>
+              ) : (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                    <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Proposed Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
+                    <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+                  </div>
+                  <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#D97706" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
+                  <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </>
   );

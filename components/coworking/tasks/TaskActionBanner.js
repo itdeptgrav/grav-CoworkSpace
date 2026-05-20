@@ -68,7 +68,7 @@ export default function TaskActionBanner({
   }
 
   // ── 2. Deadline proposal review (creator / TL) ──────────────────────────
-  if (!banner && status === "pending_deadline_approval" && task.assignedBy === employeeId) {
+  if (!banner && status === "pending_deadline_approval" && task.assignedBy === employeeId && task.hasTimer !== true) {
     if (task.hasTimer === false && task.proposedFixedDeadline) {
       const proposed = new Date(task.proposedFixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
       banner = {
@@ -165,13 +165,33 @@ export default function TaskActionBanner({
     };
   }
 
-  // ── 7. Timer task — open, needs deadline proposal ───────────────────────
+  // ── 7. Timer task — open, needs deadline proposal (or sender preset approval) ──
   if (!banner && isAssignee && !isConfirmed && task.hasTimer === true && status === "open" && !task.isSelfAssigned) {
-    banner = {
-      color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "⏱",
-      text: "Propose how much time you need for this task. Enter a duration below — your manager will approve before you start.",
-      cta: null,
-    };
+    const senderSecs = Number(task.senderTimerWindowSecs) || 0;
+    if (senderSecs > 0 && !task.senderTimerRejected) {
+      // Sender set a time — show it and let employee approve or negotiate
+      banner = {
+        color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "⏱",
+        text: `Time set: ${fmtSecs(senderSecs)} by your manager. Approve this time to start, or propose a different duration.`,
+        cta: "Approve / Negotiate", action: () => handleAction("review_sender_timer"),
+      };
+    } else if (senderSecs > 0 && task.senderTimerRejected) {
+      // Employee already rejected the sender's time — guide them to propose their own
+      banner = {
+        color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "↩",
+        text: task.senderTimerRejectionReason
+          ? `You rejected the ${fmtSecs(senderSecs)} allocation: "${task.senderTimerRejectionReason}". Please propose your own duration below.`
+          : `You rejected the ${fmtSecs(senderSecs)} allocation. Please propose your own duration below.`,
+        cta: null,
+      };
+    } else {
+      // No preset — employee must propose their own
+      banner = {
+        color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "⏱",
+        text: "Propose how much time you need for this task. Enter a duration below — your manager will approve before you start.",
+        cta: null,
+      };
+    }
   }
 
   // ── 8. Awaiting TL approval (employee) ──────────────────────────────────

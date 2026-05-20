@@ -366,6 +366,13 @@ export default function CreateTaskModal({
         const timerOn = isSpecialType ? undefined : form.hasTimer;
         const fixedDeadlineISO = (!isSpecialType && !form.hasTimer && form.deadline)
           ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null;
+        // ── Sender-preset timer: convert timerDurationVal/Unit → seconds ──
+        let _senderTimerSecs = 0;
+        if (!isSpecialType && form.hasTimer && form.timerDurationVal) {
+          const val = Number(form.timerDurationVal) || 0;
+          const unit = form.timerDurationUnit || "hours";
+          _senderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
+        }
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
           notes: isFolder ? "" : form.notes,
@@ -378,6 +385,7 @@ export default function CreateTaskModal({
           isRepeat: isRepeat || false, repeatConfig: isRepeat ? repeatConfig : null,
           isThirdParty: isThirdParty || false, thirdPartyConfig: isThirdParty ? thirdPartyConfig : null,
           isGoal: isGoal || false, goalConfig: isGoal ? goalConfig : null,
+          senderTimerWindowSecs: _senderTimerSecs,
         });
         if (parentTask?.taskId && newTask?.taskId) await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
         if (newTask?.taskId && attachments.length > 0) await postAttachmentsToChat(newTask.taskId, attachments);
