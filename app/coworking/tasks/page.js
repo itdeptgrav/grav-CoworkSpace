@@ -5495,7 +5495,7 @@ em-emoji-picker,
                   <div style={{ padding: "14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
                     {[1, 2, 3, 4].map(i => (<div key={i} className="gv-skel-row"><div className="gv-skeleton gv-skel-circle" /><div className="gv-skel-lines"><div className="gv-skeleton gv-skel-line" style={{ width: `${60 + i * 8}%` }} /><div className="gv-skeleton gv-skel-line" style={{ width: `${40 + i * 5}%` }} /></div></div>))}
                   </div>
-                ) : filteredRoots.length === 0 ? (
+                ) : filteredRoots.length === 0 && taskSection !== "self" ? (
                   <div className="gv-empty"><div className="gv-empty-icon">📋</div><p className="gv-empty-t">{listSearch || filterDept || filterEmployee || filterDeadline || filterDateFrom || filterDateTo ? "No matches" : "No tasks yet"}</p><p className="gv-empty-s">{(isCEO || isTL) && !listSearch && !filterDept && !filterEmployee && !filterDeadline ? "Click + Add Task to start" : "Try adjusting search or filters"}</p></div>
                 ) : (
                   (() => {
@@ -6229,6 +6229,16 @@ em-emoji-picker,
                               );
                               return (
                                 <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+                                  {/* Create Self Task button — always visible at top */}
+                                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                                    <button
+                                      onClick={() => setActiveModal({ type: "self_assign" })}
+                                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 1.5v9M1.5 6h9" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                                      + Create Self Task
+                                    </button>
+                                  </div>
                                   {needsMyApproval.length === 0 && myOwnTasks.length === 0 && (
                                     <div style={{ textAlign: "center", padding: "40px 20px" }}>
                                       <div style={{ fontSize: 28, marginBottom: 8 }}>👤</div>
