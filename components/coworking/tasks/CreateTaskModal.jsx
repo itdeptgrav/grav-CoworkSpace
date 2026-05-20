@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { createTask, listAllEmployees, uploadImage, uploadPDF } from "../../../lib/mediaUploadApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
-import { collection, doc, setDoc, updateDoc, serverTimestamp, increment } from "firebase/firestore";
+import { collection, doc, setDoc, updateDoc, serverTimestamp, increment, getDocs, query, where, orderBy } from "firebase/firestore";
+
 
 const emptySubtask = () => ({
   title: "",
@@ -26,26 +27,28 @@ function SliderPortal({ children }) {
 }
 
 const TASK_TYPES = [
-  { value: "normal",     label: "Standard Task",    desc: "A regular task assigned to one or more team members. Supports timer tracking or a fixed deadline." },
-  { value: "folder",     label: "Folder",           desc: "An organisational container. Holds subtasks only — no assignees, chat, or reports." },
-  { value: "repeat",     label: "Repeat Task",      desc: "Recurs automatically on a daily, weekly, or custom schedule. Each slot has its own deadline time." },
+  { value: "normal", label: "Standard Task", desc: "A regular task assigned to one or more team members. Supports timer tracking or a fixed deadline." },
+  { value: "folder", label: "Folder", desc: "An organisational container. Holds subtasks only — no assignees, chat, or reports." },
+  { value: "repeat", label: "Repeat Task", desc: "Recurs automatically on a daily, weekly, or custom schedule. Each slot has its own deadline time." },
   { value: "thirdparty", label: "Third-party Task", desc: "Tracks progress on an external vendor dependency. Progress is logged via update entries." },
-  { value: "goal",       label: "Goal Task",        desc: "A target-driven task with measurable milestones. Ideal for KPIs, sales targets, or long-term objectives." },
+  { value: "goal", label: "Goal Task", desc: "A target-driven task with measurable milestones. Ideal for KPIs, sales targets, or long-term objectives." },
 ];
 
 const TYPE_COPY = {
-  normal:     { titlePlaceholder: "e.g. Prepare Q3 Sales Report", descPlaceholder: "Briefly describe what this task involves and its expected outcome.", notesPlaceholder: "List specific requirements, deliverables, or acceptance criteria the assignee must meet.", notesLabel: "Requirements / Deliverables" },
-  folder:     { titlePlaceholder: "e.g. Marketing Campaign — June 2025", descPlaceholder: "Describe the purpose of this folder. Subtasks will be created inside it.", notesPlaceholder: "", notesLabel: "" },
-  repeat:     { titlePlaceholder: "e.g. Daily Task & KPI Update", descPlaceholder: "Describe what the assignee must complete each time this task recurs.", notesPlaceholder: "List what the assignee must submit for each occurrence.", notesLabel: "Submission Requirements (per occurrence)" },
+  normal: { titlePlaceholder: "e.g. Prepare Q3 Sales Report", descPlaceholder: "Briefly describe what this task involves and its expected outcome.", notesPlaceholder: "List specific requirements, deliverables, or acceptance criteria the assignee must meet.", notesLabel: "Requirements / Deliverables" },
+  folder: { titlePlaceholder: "e.g. Marketing Campaign — June 2025", descPlaceholder: "Describe the purpose of this folder. Subtasks will be created inside it.", notesPlaceholder: "", notesLabel: "" },
+  repeat: { titlePlaceholder: "e.g. Daily Task & KPI Update", descPlaceholder: "Describe what the assignee must complete each time this task recurs.", notesPlaceholder: "List what the assignee must submit for each occurrence.", notesLabel: "Submission Requirements (per occurrence)" },
   thirdparty: { titlePlaceholder: "e.g. Machine Spare Parts — Vendor Follow-up", descPlaceholder: "Describe what is being sourced or resolved through this external vendor.", notesPlaceholder: "List what information or documents are expected from the vendor.", notesLabel: "Expected Deliverable from Vendor" },
-  goal:       { titlePlaceholder: "e.g. Achieve ₹5 Crore Revenue — Q2 2025", descPlaceholder: "Describe the goal, its context, and why it matters to the organisation.", notesPlaceholder: "List the strategy, key actions, or sub-objectives the assignee should pursue.", notesLabel: "Strategy / Key Actions" },
+  goal: { titlePlaceholder: "e.g. Achieve ₹5 Crore Revenue — Q2 2025", descPlaceholder: "Describe the goal, its context, and why it matters to the organisation.", notesPlaceholder: "List the strategy, key actions, or sub-objectives the assignee should pursue.", notesLabel: "Strategy / Key Actions" },
 };
 
 export default function CreateTaskModal({
   onClose, onSuccess,
   currentEmployeeId, currentEmployeeName, currentRole,
   parentTask = null, initialIsGoal = false,
+  editTask = null,
 }) {
+  const isEditMode = !!editTask;
   const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
   const [isGoalUrl, setIsGoalUrl] = useState(false);
@@ -60,23 +63,44 @@ export default function CreateTaskModal({
   useEffect(() => { requestAnimationFrame(() => setVisible(true)); }, []);
   const handleClose = () => { setVisible(false); setTimeout(onClose, 260); };
 
-  const defaultType = (initialIsGoal || isGoalUrl) ? "goal" : "normal";
+  const defaultType = editTask?.isGoal ? "goal" : editTask?.isRepeat ? "repeat" : editTask?.isThirdParty ? "thirdparty" : editTask?.isFolder ? "folder" : (initialIsGoal || isGoalUrl) ? "goal" : "normal";
   const [taskType, setTaskType] = useState(defaultType);
-  useEffect(() => { if (isGoalUrl) setTaskType("goal"); }, [isGoalUrl]);
+  useEffect(() => { if (isGoalUrl && !isEditMode) setTaskType("goal"); }, [isGoalUrl, isEditMode]);
 
-  const isFolder     = taskType === "folder";
-  const isRepeat     = taskType === "repeat";
+  const isFolder = taskType === "folder";
+  const isRepeat = taskType === "repeat";
   const isThirdParty = taskType === "thirdparty";
-  const isGoal       = taskType === "goal";
+  const isGoal = taskType === "goal";
   const copy = TYPE_COPY[taskType] || TYPE_COPY.normal;
 
   // ── Single-mode state ──
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", notes: "", hasTimer: true, deadline: "", deadlineTime: "", priority: 5 });
+  const _fixedDL = editTask?.fixedDeadline ? new Date(editTask.fixedDeadline) : null;
+  const [form, setForm] = useState({
+    title: editTask?.title || "",
+    description: editTask?.description || "",
+    notes: editTask?.notes || "",
+    hasTimer: editTask ? (editTask.hasTimer ?? true) : true,
+    deadline: _fixedDL ? _fixedDL.toISOString().split("T")[0] : "",
+    deadlineTime: _fixedDL ? _fixedDL.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "",
+    priority: editTask?.priority || 5,
+  });
+
+  // Auto-priority for new tasks: max existing priority + 1
+  useEffect(() => {
+    if (isEditMode) return;
+    getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", currentEmployeeId)))
+      .then(snap => {
+        const priorities = snap.docs.map(d => Number(d.data().priority) || 0).filter(Boolean);
+        set("priority", priorities.length > 0 ? Math.max(...priorities) + 1 : 1);
+      })
+      .catch(() => set("priority", 1));
+  }, [currentEmployeeId, isEditMode]);
+
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
   const [repeatConfig, setRepeatConfig] = useState({
-    frequency: "daily", activeDays: ["Mon","Tue","Wed","Thu","Fri"],
+    frequency: "daily", activeDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
     timesPerDay: 1, deadlineTimes: ["10:00"],
     startDate: "", endDate: "", missedAction: "lock",
     hasDailyReport: false, hasTimer: false,
@@ -112,7 +136,7 @@ export default function CreateTaskModal({
   const [activeRowIndex, setActiveRowIndex] = useState(0);
   const [rowUploading, setRowUploading] = useState([false]);
   const rowImageInputRef = useRef(null);
-  const rowPdfInputRef   = useRef(null);
+  const rowPdfInputRef = useRef(null);
 
   const updateRow = (i, k, v) =>
     setSubtaskRows(prev => prev.map((r, j) => j === i ? { ...r, [k]: v } : r));
@@ -140,7 +164,7 @@ export default function CreateTaskModal({
 
   // ── Shared employee state ──
   const [employees, setEmployees] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(editTask?.assigneeIds || []);
   const [selectedDepts, setSelectedDepts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -149,12 +173,12 @@ export default function CreateTaskModal({
   const [attachments, setAttachments] = useState([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const imageInputRef = useRef(null);
-  const pdfInputRef   = useRef(null);
+  const pdfInputRef = useRef(null);
 
   useEffect(() => {
     listAllEmployees()
       .then(emps => setEmployees(emps.filter(e => e.employeeId !== currentEmployeeId)))
-      .catch(() => {});
+      .catch(() => { });
   }, [currentEmployeeId]);
 
   const toggle = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -290,9 +314,31 @@ export default function CreateTaskModal({
   };
 
   // ── Submit ──
-  const handleSubmit = async () => {
+  const handleSubmit = async (asDraft = false) => {
     setError(""); setSubmitting(true);
     try {
+
+      // ── Edit mode: update existing draft task ──────────────────────────────
+      if (isEditMode) {
+        if (!form.title.trim()) { setError("Title is required."); setSubmitting(false); return; }
+        const fixedDeadlineISO = (!form.hasTimer && form.deadline)
+          ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null;
+        const taskRef = doc(firebaseDb, "cowork_tasks", editTask.taskId);
+        await updateDoc(taskRef, {
+          title: form.title.trim(),
+          description: form.description,
+          notes: form.notes,
+          hasTimer: form.hasTimer,
+          fixedDeadline: fixedDeadlineISO || null,
+          priority: form.priority || 1,
+          assigneeIds: selectedIds,
+          status: asDraft ? "draft" : "open",
+          updatedAt: serverTimestamp(),
+        });
+        onSuccess?.();
+        return;
+      }
+
       if (isMultiMode) {
         const validRows = subtaskRows.filter(r => r.title.trim() && r.assigneeIds.length > 0);
         if (!validRows.length) { setError("At least one subtask must have a title and an assignee."); setSubmitting(false); return; }
@@ -360,6 +406,7 @@ export default function CreateTaskModal({
   };
 
   const panelTitle = (() => {
+    if (isEditMode) return editTask.status === "draft" ? "Edit Draft Task" : "View Task";
     if (parentTask) return isMultiMode ? "Add Subtasks" : "Add Subtask";
     if (isGoal || isGoalUrl) return "Create Goal Task";
     return "Create Task";
@@ -407,7 +454,7 @@ export default function CreateTaskModal({
                 <span style={{ width: 20, height: 20, borderRadius: "50%", background: sel ? "#1B4F8A" : "#E5E7EB", color: sel ? "#fff" : "#6B7280", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{emp.name?.[0]?.toUpperCase()}</span>
                 <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{empDisplayName(emp)}</span>
                 {emp.role === "tl" && <span style={{ fontSize: 8, fontWeight: 700, background: "#064E3B", color: "#fff", borderRadius: 3, padding: "1px 4px" }}>TL</span>}
-                {sel && <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}><path d="M2 6l3 3 5-5" stroke="#1B4F8A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                {sel && <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}><path d="M2 6l3 3 5-5" stroke="#1B4F8A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
               </button>
             );
           })
@@ -451,38 +498,59 @@ export default function CreateTaskModal({
   );
 
   // ── TimeTrackingSection ──
-  const TimeTrackingSection = ({ hasTimer, deadline, deadlineTime, onSet }) => (
-    <div>
-      <label style={lbl}>Time Tracking</label>
-      <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
-        {[
-          { val: true,  label: "Timer — Start / Pause" },
-          { val: false, label: "Fixed Deadline" },
-        ].map(opt => (
-          <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
-            style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      {hasTimer && (
+  const TimeTrackingSection = ({ hasTimer, deadline, deadlineTime, onSet, timerDurationVal, timerDurationUnit }) => (<div>
+    <label style={lbl}>Time Tracking</label>
+    <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
+      {[
+        { val: true, label: "Timer — Start / Pause" },
+        { val: false, label: "Fixed Deadline" },
+      ].map(opt => (
+        <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
+          style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+    {hasTimer && (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ padding: "7px 10px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, color: "#6B7280", lineHeight: 1.5 }}>
           The assignee will start a timer when beginning work. Time worked is recorded automatically.
         </div>
-      )}
-      {!hasTimer && (
-        <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
-          <div style={{ flex: 2 }}>
-            <label style={lbl}>Deadline Date *</label>
-            <input className="ctm-inp" style={inp} type="date" value={deadline} min={new Date().toISOString().split("T")[0]} onChange={e => onSet("deadline", e.target.value)} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={lbl}>Time *</label>
-            <input className="ctm-inp" style={inp} type="time" value={deadlineTime} onChange={e => onSet("deadlineTime", e.target.value)} />
+        <div>
+          <label style={lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(optional — assignee can negotiate)</span></label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="ctm-inp" style={{ ...inp, width: 80 }}
+              type="text" inputMode="numeric" pattern="[0-9]*"
+              placeholder="e.g. 3"
+              value={timerDurationVal || ""}
+              onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationVal", v); }}
+            />
+            <select className="ctm-inp" style={{ ...inp, flex: 1, cursor: "pointer" }}
+              value={timerDurationUnit || "hours"}
+              onChange={e => onSet("timerDurationUnit", e.target.value)}
+            >
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+              <option value="days">Days</option>
+            </select>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    )}
+    {!hasTimer && (
+      <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+        <div style={{ flex: 2 }}>
+          <label style={lbl}>Deadline Date *</label>
+          <input className="ctm-inp" style={inp} type="date" value={deadline} min={new Date().toISOString().split("T")[0]} onChange={e => onSet("deadline", e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={lbl}>Time *</label>
+          <input className="ctm-inp" style={inp} type="time" value={deadlineTime} onChange={e => onSet("deadlineTime", e.target.value)} />
+        </div>
+      </div>
+    )}
+  </div>
   );
 
   // ── Multi-mode render ──
@@ -498,7 +566,7 @@ export default function CreateTaskModal({
             style={{ padding: "5px 12px", borderRadius: 6, border: `1px solid ${activeRowIndex === i ? "#1B4F8A" : "#E5E7EB"}`, background: activeRowIndex === i ? "#EBF2FA" : "#F9FAFB", color: activeRowIndex === i ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: activeRowIndex === i ? 700 : 400, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
             Subtask {i + 1}
             {row.title.trim() && row.assigneeIds.length > 0 && (
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#16A34A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#16A34A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
             )}
           </button>
         ))}
@@ -606,7 +674,7 @@ export default function CreateTaskModal({
             {parentTask && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>Under: <strong style={{ color: "#374151" }}>{parentTask.title}</strong></div>}
           </div>
           <button onClick={handleClose} style={{ width: 28, height: 28, border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B7280" }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
 
@@ -694,7 +762,7 @@ export default function CreateTaskModal({
                         <div>
                           <label style={lbl}>Active Days</label>
                           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                            {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => {
+                            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => {
                               const on = repeatConfig.activeDays.includes(d);
                               return (
                                 <button key={d} type="button" onClick={() => toggleDay(d)}
@@ -857,7 +925,19 @@ export default function CreateTaskModal({
 
         {/* Footer */}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "13px 20px", borderTop: "1px solid #E5E7EB", background: "#FAFAFA", flexShrink: 0 }}>
-          {isMultiMode && (
+
+          {/* Edit mode footer */}
+          {isEditMode && (
+            <>
+              <button type="button" onClick={handleClose} style={{ padding: "8px 16px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+
+              <button type="button" onClick={() => handleSubmit(false)} disabled={submitting} style={{ padding: "8px 20px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {submitting ? "Submitting…" : "Submit to Assignee"}
+              </button>
+            </>
+          )}
+
+          {!isEditMode && isMultiMode && (
             <>
               {rowStep === 2
                 ? <button type="button" onClick={() => { setRowStep(1); setError(""); }} style={{ padding: "8px 16px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>← Back</button>
@@ -866,12 +946,12 @@ export default function CreateTaskModal({
               {rowStep === 1
                 ? <button type="button" onClick={() => { if (!activeRow.title.trim()) { setError("Title is required."); return; } setError(""); setRowStep(2); }} style={{ padding: "8px 20px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Next →</button>
                 : <button type="button" onClick={handleSubmit} disabled={submitting || rowUploading.some(Boolean)} style={{ padding: "8px 20px", background: submitting ? "#9CA3AF" : "#1B4F8A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, opacity: submitting || rowUploading.some(Boolean) ? 0.7 : 1 }}>
-                    {submitting ? <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Creating…</> : `Create ${totalValidRows || 1} Subtask${(totalValidRows || 1) !== 1 ? "s" : ""}`}
-                  </button>
+                  {submitting ? <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Creating…</> : `Create ${totalValidRows || 1} Subtask${(totalValidRows || 1) !== 1 ? "s" : ""}`}
+                </button>
               }
             </>
           )}
-          {!isMultiMode && (
+          {!isEditMode && !isMultiMode && (
             <>
               {step === 2
                 ? <button type="button" onClick={() => setStep(1)} style={{ padding: "8px 16px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>← Back</button>
@@ -880,11 +960,11 @@ export default function CreateTaskModal({
               {step === 1
                 ? <button type="button" onClick={() => { if (canAdvance()) setStep(2); }} style={{ padding: "8px 20px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Next →</button>
                 : <button type="button" onClick={handleSubmit} disabled={submitting || uploadingFiles} style={{ padding: "8px 20px", background: submitting ? "#9CA3AF" : "#1B4F8A", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, opacity: submitting || uploadingFiles ? 0.7 : 1 }}>
-                    {submitting
-                      ? <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Creating…</>
-                      : isRepeat ? "Create Repeat Task" : isGoal ? "Create Goal Task" : isThirdParty ? "Create Third-party Task" : isFolder ? "Create Folder" : parentTask ? "Create Subtask" : "Create Task"
-                    }
-                  </button>
+                  {submitting
+                    ? <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" style={{ animation: "ctm-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg> Creating…</>
+                    : isRepeat ? "Create Repeat Task" : isGoal ? "Create Goal Task" : isThirdParty ? "Create Third-party Task" : isFolder ? "Create Folder" : parentTask ? "Create Subtask" : "Create Task"
+                  }
+                </button>
               }
             </>
           )}

@@ -8,7 +8,7 @@ function fmtSecs(s) {
   if (!s) return "0m";
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
-  if (h > 0)  return `${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
 
@@ -30,7 +30,7 @@ export default function TaskActionBanner({
   if (!task || task.isFolder) return null;
 
   const status = task.status;
-  const comp   = task.completionStatus;
+  const comp = task.completionStatus;
 
   let banner = null;
 
@@ -51,7 +51,7 @@ export default function TaskActionBanner({
     };
   }
 
-  if (!banner && isTL && comp === "submitted" && ["tl_final","tl_then_ceo",null,undefined].includes(task.reviewFlow)) {
+  if (!banner && isTL && comp === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(task.reviewFlow)) {
     banner = {
       color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "⭐",
       text: "The employee has submitted this task for your review.",
@@ -69,26 +69,44 @@ export default function TaskActionBanner({
 
   // ── 2. Deadline proposal review (creator / TL) ──────────────────────────
   if (!banner && status === "pending_deadline_approval" && task.assignedBy === employeeId) {
-    const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s/60)} min`; if (s < 86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
-    const total = Number(task.deadlineWindowSecs) || 0;
-    const delta = Number(task.pendingExtensionSecs) || 0;
-    const asked = delta > 0 ? `+${fmt(delta)} extra` : `${fmt(total)}`;
-    banner = {
-      color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "📅",
-      text: `${task.proposedDeadlineByName || "The assignee"} requested ${asked}. Approve, suggest a different duration, or reject.`,
-      cta: "Review Proposal", action: () => handleAction("deadline"),
-    };
+    if (task.hasTimer === false && task.proposedFixedDeadline) {
+      const proposed = new Date(task.proposedFixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      banner = {
+        color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "📅",
+        text: `${task.proposedDeadlineByName || "The assignee"} proposed a new deadline: ${proposed}. Approve or counter-propose.`,
+        cta: "Review Proposal", action: () => handleAction("deadline"),
+      };
+    } else {
+      const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
+      const total = Number(task.deadlineWindowSecs) || 0;
+      const delta = Number(task.pendingExtensionSecs) || 0;
+      const asked = delta > 0 ? `+${fmt(delta)} extra` : `${fmt(total)}`;
+      banner = {
+        color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "📅",
+        text: `${task.proposedDeadlineByName || "The assignee"} requested ${asked}. Approve, suggest a different duration, or reject.`,
+        cta: "Review Proposal", action: () => handleAction("deadline"),
+      };
+    }
   }
 
-  // ── 3. Employee needs to respond to TL counter ──────────────────────────
+  // ── 3. Employee needs to respond to counter ──────────────────────────────
   if (!banner && isAssignee && status === "pending_employee_deadline_confirmation") {
-    const w = task.tlCounterWindowSecs;
-    const label = w ? (w < 3600 ? `${Math.round(w/60)}m` : w < 86400 ? `${Math.round(w/3600)}h` : `${Math.round(w/86400)}d`) : "a new duration";
-    banner = {
-      color: "#6D28D9", bg: "#F5F3FF", border: "#DDD6FE", icon: "📅",
-      text: `${task.tlCounterDeadlineByName || "Your TL"} suggested ${label}. Accept or propose a different amount.`,
-      cta: null,
-    };
+    if (task.hasTimer === false && task.tlCounterFixedDeadline) {
+      const counter = new Date(task.tlCounterFixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      banner = {
+        color: "#6D28D9", bg: "#F5F3FF", border: "#DDD6FE", icon: "📅",
+        text: `${task.tlCounterDeadlineByName || "Your manager"} counter-proposed: ${counter}. Accept or propose a different date.`,
+        cta: "Review Counter", action: () => handleAction("review_fixed_deadline"),
+      };
+    } else {
+      const w = task.tlCounterWindowSecs;
+      const label = w ? (w < 3600 ? `${Math.round(w / 60)}m` : w < 86400 ? `${Math.round(w / 3600)}h` : `${Math.round(w / 86400)}d`) : "a new duration";
+      banner = {
+        color: "#6D28D9", bg: "#F5F3FF", border: "#DDD6FE", icon: "📅",
+        text: `${task.tlCounterDeadlineByName || "Your TL"} suggested ${label}. Accept or propose a different amount.`,
+        cta: null,
+      };
+    }
   }
 
   // ── 4. Goal / third-party / repeat confirm needed (employee) ────────────
@@ -115,20 +133,27 @@ export default function TaskActionBanner({
     }
   }
 
-  // ── 5. Fixed-deadline task (no timer) — Confirm & Start directly ─────────
+  // ── 5. Fixed-deadline task (no timer) — Approve / Negotiate (Goal/Repeat/ThirdParty exempt)
   if (!banner && isAssignee && !isConfirmed && task.hasTimer === false && status === "open" && !task.isSelfAssigned) {
-    banner = {
-      color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0", icon: "▶",
-      text: task.fixedDeadline
-        ? `Deadline: ${new Date(task.fixedDeadline).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}. Tap to confirm and start.`
-        : "Review the task and confirm to start working.",
-      cta: "Confirm & Start", action: () => handleAction("confirm_and_start"),
-    };
+    if (task.isGoal || task.isRepeat || task.isThirdParty) {
+      // These types keep their own confirm flow (handled above)
+    } else {
+      const dl = task.fixedDeadline
+        ? new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+        : null;
+      banner = {
+        color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "📅",
+        text: dl
+          ? `Deadline set for ${dl}. Approve this deadline or propose a new date.`
+          : "Review the task deadline. Approve to start or propose a different date.",
+        cta: "Approve / Negotiate", action: () => handleAction("review_fixed_deadline"),
+      };
+    }
   }
 
   // ── 6. Timer task — deadline approved, Confirm & Start ──────────────────
   if (!banner && isAssignee && !isConfirmed && task.hasTimer === true &&
-      ["deadline_approved", "confirmed"].includes(status)) {
+    ["deadline_approved", "confirmed"].includes(status)) {
     const rem = task.deadlineWindowSecs
       ? task.deadlineWindowSecs - (getDisplaySeconds?.(task.taskId) || 0)
       : null;
@@ -151,7 +176,7 @@ export default function TaskActionBanner({
 
   // ── 8. Awaiting TL approval (employee) ──────────────────────────────────
   if (!banner && isAssignee && status === "pending_deadline_approval") {
-    const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s/60)} min`; if (s < 86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
+    const fmt = (s) => { if (!s) return "?"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)} min`; if (s < 86400) return `${Math.round(s / 3600)}h`; return `${Math.round(s / 86400)}d`; };
     const total = Number(task.deadlineWindowSecs) || 0;
     banner = {
       color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "⏳",
@@ -166,19 +191,19 @@ export default function TaskActionBanner({
 
   // ── 10. TIMER TASK in progress — Play/Pause + worked/total bar ──────────
   if (!banner && isAssignee && isStarted && status === "in_progress" && task.deadlineWindowSecs > 0 &&
-      !["submitted","tl_approved","tl_final_approved","ceo_approved"].includes(comp)) {
+    !["submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(comp)) {
     const isRunning = timerActiveTaskId === task.taskId;
-    const worked    = getDisplaySeconds?.(task.taskId) || 0;
-    const total     = task.deadlineWindowSecs || 0;
+    const worked = getDisplaySeconds?.(task.taskId) || 0;
+    const total = task.deadlineWindowSecs || 0;
     const remaining = Math.max(0, total - worked);
-    const isOver    = worked >= total && total > 0;
+    const isOver = worked >= total && total > 0;
     banner = { type: "timer", isRunning, worked, total, remaining, isOver };
   }
 
   // ── 11. DEADLINE TASK in progress — Submit Daily Report ─────────────────
   if (!banner && isAssignee && isStarted && status === "in_progress" &&
-      !task.deadlineWindowSecs && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
-      !["submitted","tl_approved","tl_final_approved","ceo_approved"].includes(comp)) {
+    !task.deadlineWindowSecs && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
+    !["submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(comp)) {
     banner = {
       color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", icon: "📋",
       text: "Log your progress for today to keep your manager updated.",
@@ -210,11 +235,11 @@ export default function TaskActionBanner({
   // ── Special render: Timer task banner ────────────────────────────────────
   if (banner.type === "timer") {
     const { isRunning, worked, total, remaining, isOver } = banner;
-    const workedStr    = fmtSecs(worked);
-    const totalStr     = fmtSecs(total);
+    const workedStr = fmtSecs(worked);
+    const totalStr = fmtSecs(total);
     const remainingStr = fmtSecs(remaining);
-    const pct          = total > 0 ? Math.min(100, Math.round((worked / total) * 100)) : 0;
-    const barColor     = isOver ? "#DC2626" : pct > 80 ? "#D97706" : "#1B4F8A";
+    const pct = total > 0 ? Math.min(100, Math.round((worked / total) * 100)) : 0;
+    const barColor = isOver ? "#DC2626" : pct > 80 ? "#D97706" : "#1B4F8A";
 
     return (
       <div style={{

@@ -6,7 +6,7 @@
  * UPDATED: Tree Col-1 now groups by EMPLOYEE NAME (CEO view), then shows tasks/subtasks under each
  * FIXED: TL approve button properly integrated
  */
-import { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
@@ -684,6 +684,8 @@ export default function TasksPage() {
   const [activeDetailTab, setActiveDetailTab] = useState("info");
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [activeModal, setActiveModal] = useState(null);
+  const [editingDraftTask, setEditingDraftTask] = useState(null);
+  const [fixedDeadlineNegotiateModal, setFixedDeadlineNegotiateModal] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [showDeleteConf, setShowDeleteConf] = useState(false);
   const [priorityToast, setPriorityToast] = useState(null); // { label, taskTitle }
@@ -1994,6 +1996,11 @@ export default function TasksPage() {
       return;
     }
 
+    if (type === "review_fixed_deadline") {
+      setFixedDeadlineNegotiateModal({ task: targetTask });
+      return;
+    }
+
     if (type === "delete") {
       setShowDeleteConf(true);
       return;
@@ -2116,6 +2123,100 @@ export default function TasksPage() {
       await taskForwardApi.approveDeadline(selectedTask.taskId, approved, rejectReason.trim());
     } catch (e) { alert(e.message); }
     finally { setApprovingDeadline(false); }
+  };
+
+  // ── Fixed-deadline negotiation handlers ───────────────────────────────────
+  const handleFixedDeadlineApprove = async () => {
+    if (!fixedDeadlineNegotiateModal?.task?.taskId) return;
+    const tid = fixedDeadlineNegotiateModal.task.taskId;
+    setActionBusy(true);
+    try {
+      await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+      await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
+      setFixedDeadlineNegotiateModal(null);
+      await Promise.all([loadDetail(tid), loadAllTasks()]);
+    } catch (e) { alert(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleFixedDeadlinePropose = async (newDate, newTime) => {
+    if (!fixedDeadlineNegotiateModal?.task?.taskId) return;
+    const tid = fixedDeadlineNegotiateModal.task.taskId;
+    const proposedISO = new Date(`${newDate}T${newTime || "23:59"}`).toISOString();
+    setActionBusy(true);
+    const optimistic = { status: "pending_deadline_approval", proposedFixedDeadline: proposedISO, proposedDeadlineByName: employeeName };
+    ignoreLiveUntilRef.current[tid] = Date.now() + 5000;
+    setAllTasks(prev => prev.map(t => t.taskId === tid ? { ...t, ...optimistic } : t));
+    setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_tasks", tid), {
+        status: "pending_deadline_approval",
+        proposedFixedDeadline: proposedISO,
+        proposedDeadlineByName: employeeName,
+        updatedAt: serverTimestamp(),
+      });
+      setFixedDeadlineNegotiateModal(null);
+    } catch (e) { alert(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleFixedDeadlineCreatorApprove = async (task) => {
+    if (!task?.taskId) return;
+    setActionBusy(true);
+    try {
+      const newDeadline = task.proposedFixedDeadline;
+      await updateDoc(doc(firebaseDb, "cowork_tasks", task.taskId), {
+        fixedDeadline: newDeadline,
+        proposedFixedDeadline: null,
+        status: "confirmed",
+        updatedAt: serverTimestamp(),
+      });
+      const optimistic = { fixedDeadline: newDeadline, proposedFixedDeadline: null, status: "confirmed" };
+      ignoreLiveUntilRef.current[task.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === task.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+      setActiveModal(null);
+    } catch (e) { alert(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleFixedDeadlineCreatorCounter = async (task, counterDate, counterTime) => {
+    if (!task?.taskId) return;
+    const counterISO = new Date(`${counterDate}T${counterTime || "23:59"}`).toISOString();
+    setActionBusy(true);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_tasks", task.taskId), {
+        tlCounterFixedDeadline: counterISO,
+        tlCounterDeadlineByName: employeeName,
+        proposedFixedDeadline: null,
+        status: "pending_employee_deadline_confirmation",
+        updatedAt: serverTimestamp(),
+      });
+      const optimistic = { tlCounterFixedDeadline: counterISO, tlCounterDeadlineByName: employeeName, status: "pending_employee_deadline_confirmation" };
+      ignoreLiveUntilRef.current[task.taskId] = Date.now() + 5000;
+      setAllTasks(prev => prev.map(t => t.taskId === task.taskId ? { ...t, ...optimistic } : t));
+      setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
+      setActiveModal(null);
+    } catch (e) { alert(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleFixedDeadlineAssigneeAcceptCounter = async () => {
+    const task = fixedDeadlineNegotiateModal?.task;
+    if (!task?.taskId) return;
+    setActionBusy(true);
+    try {
+      await updateDoc(doc(firebaseDb, "cowork_tasks", task.taskId), {
+        fixedDeadline: task.tlCounterFixedDeadline,
+        tlCounterFixedDeadline: null,
+        status: "confirmed",
+        updatedAt: serverTimestamp(),
+      });
+      await apiFetch(`/cowork/task/${task.taskId}/confirm`, { method: "POST" });
+      setFixedDeadlineNegotiateModal(null);
+      await Promise.all([loadDetail(task.taskId), loadAllTasks()]);
+    } catch (e) { alert(e.message); }
+    finally { setActionBusy(false); }
   };
 
   // ── Draft chat send handler — writes directly to Firestore ─────────────────
@@ -4897,7 +4998,8 @@ em-emoji-picker,
                       ...((isCEO || isTL) ? [{ l: "Add Subtask", a: () => { setActiveModal({ type: "add_subtask", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(!isCEO && !t.isFolder ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(!isCEO && !t.isFolder ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
-                      ...(isCEO ? [{ l: "Edit Deadline", a: () => { setActiveModal({ type: "deadline", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...(isCEO && t.completionStatus === "submitted" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...((isCEO || isTL || t.assignedBy === employeeId) && t.status === "draft" ? [{ l: "✏️ Edit Draft", a: () => { setEditingDraftTask(t); setRowMenuOpen(null); } }] : []),
                       ...(isCEO && t.completionStatus === "submitted" && t.reviewFlow === "ceo_direct" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isTL && t.completionStatus === "submitted" && ["tl_final", "tl_then_ceo", null, undefined].includes(t.reviewFlow) ? [{ l: "Review Submission", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO && t.completionStatus === "tl_approved" && t.reviewFlow === "tl_then_ceo" ? [{ l: "CEO Final Approval", a: () => { setActiveModal({ type: "ceo_review", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
@@ -5736,14 +5838,40 @@ em-emoji-picker,
                               )}
                             </div>
 
-                            {/* Right: status badge */}
-                            <span style={{
-                              fontSize: 11, fontWeight: 500,
-                              color: st.color, background: st.bg,
-                              padding: "3px 9px", borderRadius: 5,
-                              border: `1px solid ${st.color}22`,
-                              whiteSpace: "nowrap", flexShrink: 0, marginTop: 1,
-                            }}>{st.label}</span>
+                            {/* Right: status badge + edit button for sender */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                              {t.assignedBy === employeeId && ["open", "draft"].includes(t.status) && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); setEditingDraftTask(t); }}
+                                    title="Edit task"
+                                    style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); if (window.confirm("Delete this task?")) deleteTask(t.taskId).then(() => loadAllTasks()).catch(err => alert(err.message)); }}
+                                    title="Delete task"
+                                    style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #FECACA", background: "#FEF2F2", color: "#EF4444", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                    </svg>
+                                  </button>
+                                </>
+                              )}
+                              <span style={{
+                                fontSize: 11, fontWeight: 500,
+                                color: st.color, background: st.bg,
+                                padding: "3px 9px", borderRadius: 5,
+                                border: `1px solid ${st.color}22`,
+                                whiteSpace: "nowrap",
+                              }}>{st.label}</span>
+                            </div>
                           </div>
 
                           {/* Subtasks recursive */}
@@ -7583,6 +7711,104 @@ em-emoji-picker,
         )
       }
 
+      {fixedDeadlineNegotiateModal && (
+        <FixedDeadlineNegotiateModal
+          task={fixedDeadlineNegotiateModal.task}
+          onApprove={handleFixedDeadlineApprove}
+          onPropose={handleFixedDeadlinePropose}
+          onAcceptCounter={handleFixedDeadlineAssigneeAcceptCounter}
+          onClose={() => setFixedDeadlineNegotiateModal(null)}
+          busy={actionBusy}
+        />
+      )}
+
+      {editingDraftTask && (
+        <CreateTaskModal
+          editTask={editingDraftTask}
+          onClose={() => setEditingDraftTask(null)}
+          onSuccess={() => { setEditingDraftTask(null); loadAllTasks(); }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+        />
+      )}
+
+      {/* Modals */}
+      {
+        activeModal?.type === "add_subtask" && <CreateTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async (newTask) => {
+            setActiveModal(null);
+            if (activeModal.task?.taskId) setExpandedIds(prev => new Set([...prev, activeModal.task.taskId]));
+            await loadAllTasks();
+            if (selectedTask) loadDetail(selectedTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+          parentTask={activeModal.task}
+        />
+      }
+      {/* ── Add Goal Task — opens same CreateTaskModal with isGoal=true pre-set ── */}
+      {
+        activeModal?.type === "add_goal_task" && <CreateTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async (newTask) => {
+            setActiveModal(null);
+            if (activeModal.task?.taskId) setExpandedIds(prev => new Set([...prev, activeModal.task.taskId]));
+            await loadAllTasks();
+            if (selectedTask) loadDetail(selectedTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+          parentTask={activeModal.task}
+          initialIsGoal={true}
+        />
+      }
+      {activeModal?.type === "self_assign" && (
+        <SelfAssignTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async (newTask) => {
+            setActiveModal(null);
+            await loadAllTasks();
+            if (newTask?.taskId) loadDetail(newTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+        />
+      )}
+
+      {activeModal?.type === "forward" && <ForwardTaskModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); if (selectedTask) loadDetail(selectedTask.taskId); }} />}
+      {activeModal?.type === "report" && <DailyReportModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); setActiveDetailTab("reports"); }} />}
+      {activeModal?.type === "deadline" && task && (
+        activeModal.task?.hasTimer === false && activeModal.task?.proposedFixedDeadline
+          ? <FixedDeadlineCreatorReviewModal
+            task={activeModal.task}
+            onApprove={() => handleFixedDeadlineCreatorApprove(activeModal.task)}
+            onCounter={(d, t2) => handleFixedDeadlineCreatorCounter(activeModal.task, d, t2)}
+            onClose={() => setActiveModal(null)}
+            busy={actionBusy}
+          />
+          : <EditDeadlineModal
+            task={task}
+            onClose={() => setActiveModal(null)}
+            onSuccess={() => { setActiveModal(null); loadDetail(task.taskId); loadAllTasks(); }}
+          />
+      )}
+
+      {editingDraftTask && (
+        <CreateTaskModal
+          editTask={editingDraftTask}
+          onClose={() => setEditingDraftTask(null)}
+          onSuccess={() => { setEditingDraftTask(null); loadAllTasks(); }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+        />
+      )}
+
       {/* Modals */}
       {
         activeModal?.type === "add_subtask" && <CreateTaskModal
@@ -7631,7 +7857,17 @@ em-emoji-picker,
       )}
       {activeModal?.type === "forward" && <ForwardTaskModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); if (selectedTask) loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "report" && <DailyReportModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); setActiveDetailTab("reports"); }} />}
-      {activeModal?.type === "deadline" && task && <EditDeadlineModal task={task} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(task.taskId); loadAllTasks(); }} />}
+      {activeModal?.type === "deadline" && task && (
+        activeModal.task?.hasTimer === false && activeModal.task?.proposedFixedDeadline
+          ? <FixedDeadlineCreatorReviewModal
+            task={activeModal.task}
+            onApprove={() => handleFixedDeadlineCreatorApprove(activeModal.task)}
+            onCounter={(d, t2) => handleFixedDeadlineCreatorCounter(activeModal.task, d, t2)}
+            onClose={() => setActiveModal(null)}
+            busy={actionBusy}
+          />
+          : <EditDeadlineModal task={task} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(task.taskId); loadAllTasks(); }} />
+      )}
       {activeModal?.type === "submit_completion" && <SubmitCompletionModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "review_completion" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="review_completion" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "ceo_review" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="ceo_review" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
@@ -7741,6 +7977,107 @@ em-emoji-picker,
       />
 
       {/* Request panel is now universal — opened via window event from toolbar/mobile */}
+    </>
+  );
+}
+
+function FixedDeadlineCreatorReviewModal({ task, onApprove, onCounter, onClose, busy }) {
+  const [mode, setMode] = React.useState("review");
+  const [counterDate, setCounterDate] = React.useState("");
+  const [counterTime, setCounterTime] = React.useState("10:00");
+  const proposed = task?.proposedFixedDeadline ? new Date(task.proposedFixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
+  const F = { fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif" };
+  const inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, ...F, width: "100%", boxSizing: "border-box" };
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.3)", zIndex: 8998, backdropFilter: "blur(2px)" }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 8999, background: "#fff", borderRadius: 12, padding: "20px 22px", width: "min(400px,92vw)", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", ...F }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 4 }}>Review Deadline Proposal</div>
+        <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 14 }}>{task?.title}</div>
+        {proposed && <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#92400E", marginBottom: 14 }}>
+          {task.proposedDeadlineByName || "Assignee"} proposed: <strong>{proposed}</strong>
+        </div>}
+        {mode === "review" ? (
+          <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+            <button onClick={onApprove} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Approve proposed date</button>
+            <button onClick={() => setMode("counter")} style={{ padding: "9px", background: "#fff", color: "#D97706", border: "1px solid #D97706", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Suggest a different date</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Date *</label><input type="date" value={counterDate} onChange={e => setCounterDate(e.target.value)} style={inp} /></div>
+              <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={counterTime} onChange={e => setCounterTime(e.target.value)} style={inp} /></div>
+            </div>
+            <button onClick={() => { if (!counterDate) return; onCounter(counterDate, counterTime); }} disabled={!counterDate || busy} style={{ width: "100%", padding: "9px", background: counterDate ? "#D97706" : "#E5E7EB", color: counterDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: counterDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Send Counter-Proposal"}</button>
+            <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+          </>
+        )}
+        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, width: 24, height: 24, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
+function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCounter, onClose, busy }) {
+  const [mode, setMode] = React.useState("review");
+  const [newDate, setNewDate] = React.useState("");
+  const [newTime, setNewTime] = React.useState("10:00");
+  const isCounter = task?.status === "pending_employee_deadline_confirmation";
+  const existingDL = task?.fixedDeadline ? new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
+  const counterDL = task?.tlCounterFixedDeadline ? new Date(task.tlCounterFixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
+  const F = { fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif" };
+  const inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, ...F, width: "100%", boxSizing: "border-box" };
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.3)", zIndex: 8998, backdropFilter: "blur(2px)" }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 8999, background: "#fff", borderRadius: 12, padding: "20px 22px", width: "min(400px,92vw)", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", ...F }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{isCounter ? "Counter-Proposal Received" : "Deadline Approval"}</div>
+        <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{task?.title}</div>
+        {isCounter ? (
+          <>
+            <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#92400E", marginBottom: 14 }}>Your manager counter-proposed: <strong>{counterDL}</strong></div>
+            {mode === "review" ? (
+              <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                <button onClick={onAcceptCounter} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Accept this date</button>
+                <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#1B4F8A", border: "1px solid #1B4F8A", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Propose a different date</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
+                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+                </div>
+                <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#1B4F8A" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
+                <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {existingDL && <div style={{ background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#1E40AF", marginBottom: 14 }}>Deadline: <strong>{existingDL}</strong></div>}
+            {mode === "review" ? (
+              <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+                <button onClick={onApprove} disabled={busy} style={{ padding: "9px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>✓ Approve deadline & Start</button>
+                <button onClick={() => setMode("propose")} style={{ padding: "9px", background: "#fff", color: "#D97706", border: "1px solid #D97706", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", ...F }}>Request a different date</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Proposed Date *</label><input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={inp} /></div>
+                  <div><label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", display: "block", marginBottom: 4, textTransform: "uppercase" }}>Time</label><input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} style={inp} /></div>
+                </div>
+                <button onClick={() => { if (!newDate) return; onPropose(newDate, newTime); }} disabled={!newDate || busy} style={{ width: "100%", padding: "9px", background: newDate ? "#D97706" : "#E5E7EB", color: newDate ? "#fff" : "#9CA3AF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: newDate ? "pointer" : "not-allowed", ...F }}>{busy ? "Submitting…" : "Propose New Date"}</button>
+                <button onClick={() => setMode("review")} style={{ width: "100%", marginTop: 6, padding: "7px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 11, cursor: "pointer", ...F }}>← Back</button>
+              </>
+            )}
+          </>
+        )}
+        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, width: 24, height: 24, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+      </div>
     </>
   );
 }
