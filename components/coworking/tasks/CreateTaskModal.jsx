@@ -84,6 +84,8 @@ export default function CreateTaskModal({
     deadline: _fixedDL ? _fixedDL.toISOString().split("T")[0] : "",
     deadlineTime: _fixedDL ? _fixedDL.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "",
     priority: editTask?.priority || 5,
+    timerDurationVal: editTask?.timerDurationVal || "",
+    timerDurationUnit: editTask?.timerDurationUnit || "hours",
   });
 
   // Auto-priority for new tasks: max existing priority + 1
@@ -740,7 +742,7 @@ export default function CreateTaskModal({
                   )}
 
                   {!isFolder && !isRepeat && !isThirdParty && !isGoal && (
-                    <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} />
+                    <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationVal={form.timerDurationVal} timerDurationUnit={form.timerDurationUnit} />
                   )}
 
                   {/* Repeat config */}
