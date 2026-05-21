@@ -1792,7 +1792,10 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     "task_assigned", "task_update", "task_confirmed", "task_started",
     "task_forwarded", "deadline_changed", "completion_submitted",
     "completion_tl_approved", "completion_rejected",
-    "completion_ceo_approved", "completion_ceo_rejected",
+    "deadline_extension_requested", "deadline_extension_reviewed",
+    "deadline_proposed", "deadline_approved", "deadline_rejected",
+    "deadline_counter_proposed", "deadline_accepted", "deadline_counter_rejected",
+    "daily_report", "task_chat", "self_assign_approved", "self_assign_rejected",
   ]);
   const taskNotifUnreadCount = notifications.filter(n => !n.read && TASK_NOTIF_TYPES.has(n.type)).length;
 
@@ -2357,7 +2360,10 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
       "task_assigned", "task_update", "task_confirmed", "task_started",
       "task_chat", "task_forwarded", "daily_report", "deadline_changed",
       "completion_submitted", "completion_tl_approved", "completion_rejected",
-      "completion_ceo_approved", "completion_ceo_rejected",
+      "deadline_extension_requested", "deadline_extension_reviewed",
+      "deadline_proposed", "deadline_approved", "deadline_rejected",
+      "deadline_counter_proposed", "deadline_accepted", "deadline_counter_rejected",
+      "self_assign_approved", "self_assign_rejected",
     ],
     "/coworking/direct-messages": ["direct_message"],
     "/coworking/create-group": ["group_message", "group_added"],
@@ -3073,9 +3079,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   >
                     <NavIcon name={item.icon} size={18} />
                     <span style={{ flex: 1 }}>Tasks</span>
-                    {(taskChatUnreadCount + taskNotifUnreadCount) > 0 && (
+                    {taskChatUnreadCount > 0 && (
                       <span style={{ fontSize: 10, fontWeight: 800, color: "#fff", background: "#8B5CF6", padding: "1px 6px", borderRadius: 99, flexShrink: 0, marginRight: 4 }}>
-                        {(taskChatUnreadCount + taskNotifUnreadCount) > 99 ? "99+" : (taskChatUnreadCount + taskNotifUnreadCount)}
+                        {taskChatUnreadCount > 99 ? "99+" : taskChatUnreadCount}
                       </span>
                     )}
                     <svg
@@ -3193,7 +3199,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                     const cnt =
                       item.id === "messages" ? dmUnreadCount
                         : item.id === "groups" ? groupUnreadCount
-                          : item.id === "tasks" ? (taskChatUnreadCount + taskNotifUnreadCount)
+                          : item.id === "tasks" ? taskChatUnreadCount
                             : item.id === "meetings" ? meetingUnreadCount
                               : item.id === "sop" ? pendingRecheckCount
                                 : 0;

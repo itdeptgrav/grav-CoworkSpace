@@ -262,172 +262,215 @@ export default function TaskActionBanner({
     const barColor = isOver ? "#DC2626" : pct > 80 ? "#D97706" : "#1B4F8A";
 
     return (
-      <div style={{
-        padding: "10px 14px",
-        background: isOver ? "#FEF2F2" : "#F8FAFC",
-        borderBottom: `1px solid ${isOver ? "#FECACA" : "#E2E8F0"}`,
-        flexShrink: 0,
-        fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
-      }}>
-        {/* Row: play/pause + time info + submit button */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <>
+        <div style={{
+          padding: "10px 14px",
+          background: isOver ? "#FEF2F2" : "#F8FAFC",
+          borderBottom: `1px solid ${isOver ? "#FECACA" : "#E2E8F0"}`,
+          flexShrink: 0,
+          fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+        }}>
+          {/* Row: play/pause + time info + submit button */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
 
-          {/* Play / Pause */}
-          <button
-            type="button"
-            disabled={actionBusy}
-            onClick={() => isRunning
-              ? handleTimerPause?.(task.taskId, task.title)
-              : handleTimerStart?.(task.taskId, task.title)
-            }
-            style={{
-              width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-              border: `1.5px solid ${isRunning ? "#BBF7D0" : "#1B4F8A"}`,
-              background: isRunning ? "#DCFCE7" : "#1B4F8A",
-              color: isRunning ? "#16A34A" : "#fff",
-              cursor: actionBusy ? "not-allowed" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "all 0.15s", opacity: actionBusy ? 0.6 : 1,
-            }}
-            title={isRunning ? "Pause timer" : "Resume timer"}
-          >
-            {isRunning ? (
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
-                <rect x="2" y="1.5" width="3" height="9" rx="1" />
-                <rect x="7" y="1.5" width="3" height="9" rx="1" />
-              </svg>
-            ) : (
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
-                <path d="M2.5 1.5l8 4.5-8 4.5V1.5z" />
-              </svg>
-            )}
-          </button>
-
-          {/* Time info */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              {isRunning && (
-                <span style={{
-                  width: 7, height: 7, borderRadius: "50%", background: "#16A34A",
-                  display: "inline-block", flexShrink: 0,
-                  animation: "tab-banner-pulse 1.4s ease-in-out infinite",
-                }} />
-              )}
-              <span style={{ fontSize: 12, fontWeight: 700, color: isOver ? "#DC2626" : "#0F172A", fontFamily: "monospace" }}>
-                {workedStr}
-              </span>
-              <span style={{ fontSize: 11, color: "#94A3B8" }}>of</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#64748B", fontFamily: "monospace" }}>
-                {totalStr}
-              </span>
-              {isOver ? (
-                <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", background: "#FEE2E2", padding: "1px 7px", borderRadius: 99 }}>
-                  {fmtSecs(worked - total)} over
-                </span>
+            {/* Play / Pause */}
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={() => isRunning
+                ? handleTimerPause?.(task.taskId, task.title)
+                : handleTimerStart?.(task.taskId, task.title)
+              }
+              style={{
+                width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                border: `1.5px solid ${isRunning ? "#BBF7D0" : "#1B4F8A"}`,
+                background: isRunning ? "#DCFCE7" : "#1B4F8A",
+                color: isRunning ? "#16A34A" : "#fff",
+                cursor: actionBusy ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s", opacity: actionBusy ? 0.6 : 1,
+              }}
+              title={isRunning ? "Pause timer" : "Resume timer"}
+            >
+              {isRunning ? (
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+                  <rect x="2" y="1.5" width="3" height="9" rx="1" />
+                  <rect x="7" y="1.5" width="3" height="9" rx="1" />
+                </svg>
               ) : (
-                <span style={{ fontSize: 10, fontWeight: 600, color: pct > 80 ? "#D97706" : "#6B7280", background: pct > 80 ? "#FFFBEB" : "#F1F5F9", padding: "1px 7px", borderRadius: 99 }}>
-                  {remainingStr} left
-                </span>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+                  <path d="M2.5 1.5l8 4.5-8 4.5V1.5z" />
+                </svg>
               )}
+            </button>
+
+            {/* Time info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {isRunning && (
+                  <span style={{
+                    width: 7, height: 7, borderRadius: "50%", background: "#16A34A",
+                    display: "inline-block", flexShrink: 0,
+                    animation: "tab-banner-pulse 1.4s ease-in-out infinite",
+                  }} />
+                )}
+                <span style={{ fontSize: 12, fontWeight: 700, color: isOver ? "#DC2626" : "#0F172A", fontFamily: "monospace" }}>
+                  {workedStr}
+                </span>
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>of</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#64748B", fontFamily: "monospace" }}>
+                  {totalStr}
+                </span>
+                {isOver ? (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", background: "#FEE2E2", padding: "1px 7px", borderRadius: 99 }}>
+                    {fmtSecs(worked - total)} over
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 10, fontWeight: 600, color: pct > 80 ? "#D97706" : "#6B7280", background: pct > 80 ? "#FFFBEB" : "#F1F5F9", padding: "1px 7px", borderRadius: 99 }}>
+                    {remainingStr} left
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* Submit button */}
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={() => handleAction("submit_completion")}
+              style={{
+                flexShrink: 0, padding: "5px 12px",
+                border: "1px solid #1B4F8A44", borderRadius: 5,
+                background: "#fff", color: "#1B4F8A",
+                fontSize: 11, fontWeight: 600,
+                cursor: actionBusy ? "not-allowed" : "pointer",
+                fontFamily: "inherit", opacity: actionBusy ? 0.6 : 1,
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={e => { if (!actionBusy) e.currentTarget.style.background = "#EBF2FA"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "#fff"; }}
+            >
+              Submit
+            </button>
           </div>
 
-          {/* Submit button */}
-          <button
-            type="button"
-            disabled={actionBusy}
-            onClick={() => handleAction("submit_completion")}
-            style={{
-              flexShrink: 0, padding: "5px 12px",
-              border: "1px solid #1B4F8A44", borderRadius: 5,
-              background: "#fff", color: "#1B4F8A",
-              fontSize: 11, fontWeight: 600,
-              cursor: actionBusy ? "not-allowed" : "pointer",
-              fontFamily: "inherit", opacity: actionBusy ? 0.6 : 1,
-              whiteSpace: "nowrap",
-            }}
-            onMouseEnter={e => { if (!actionBusy) e.currentTarget.style.background = "#EBF2FA"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; }}
-          >
-            Submit
-          </button>
-        </div>
+          {/* Progress bar */}
+          <div style={{ marginTop: 8, height: 3, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", width: `${pct}%`,
+              background: barColor, borderRadius: 99,
+              transition: "width 1s linear",
+            }} />
+          </div>
 
-        {/* Progress bar */}
-        <div style={{ marginTop: 8, height: 3, background: "#E2E8F0", borderRadius: 99, overflow: "hidden" }}>
-          <div style={{
-            height: "100%", width: `${pct}%`,
-            background: barColor, borderRadius: 99,
-            transition: "width 1s linear",
-          }} />
-        </div>
-
-        <style>{`
-          @keyframes tab-banner-pulse {
-            0%,100% { opacity:1; transform:scale(1); }
-            50% { opacity:0.4; transform:scale(0.7); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  // ── Standard banner render ────────────────────────────────────────────────
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 10,
-      padding: "9px 14px",
-      background: banner.bg,
-      borderBottom: `1px solid ${banner.border}`,
-      flexShrink: 0,
-      fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
-    }}>
-      {banner.pulse ? (
-        <span style={{
-          width: 8, height: 8, borderRadius: "50%",
-          background: banner.color, flexShrink: 0,
-          animation: "tab-banner-pulse 1.6s ease-in-out infinite",
-        }} />
-      ) : (
-        <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1 }}>{banner.icon}</span>
-      )}
-
-      <span style={{
-        flex: 1, fontSize: 11, color: banner.color,
-        fontWeight: 500, lineHeight: 1.45,
-        overflow: "hidden", display: "-webkit-box",
-        WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-      }}>
-        {banner.text}
-      </span>
-
-      {banner.cta && (
-        <button
-          type="button"
-          disabled={actionBusy}
-          onClick={banner.action}
-          style={{
-            flexShrink: 0, padding: "5px 12px",
-            border: `1px solid ${banner.color}44`, borderRadius: 5,
-            background: banner.color, color: "#fff",
-            fontSize: 11, fontWeight: 600,
-            cursor: actionBusy ? "not-allowed" : "pointer",
-            fontFamily: "inherit", opacity: actionBusy ? 0.6 : 1,
-            transition: "opacity 0.12s", whiteSpace: "nowrap",
-          }}
-          onMouseEnter={e => { if (!actionBusy) e.currentTarget.style.opacity = "0.85"; }}
-          onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
-        >
-          {actionBusy ? "…" : banner.cta}
-        </button>
-      )}
-
-      <style>{`
+          <style>{`
         @keyframes tab-banner-pulse {
           0%,100% { opacity:1; transform:scale(1); }
           50% { opacity:0.4; transform:scale(0.7); }
         }
-      `}</style>
+     `}</style>
+        </div>
+      </>
+    );
+  }
+
+
+  // ── Standard banner render ────────────────────────────────────────────────
+  const isFixedDeadlinePassed = !task.hasTimer && task.fixedDeadline &&
+    new Date(task.fixedDeadline) < new Date() &&
+    ["in_progress", "confirmed"].includes(task.status) &&
+    (isAssignee || isCEO || isTL);
+
+  const extBanner = isFixedDeadlinePassed ? (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "8px 14px",
+      background: task.deadlineExtRequest?.status === "pending" ? "#FFFBEB" : "#FEF2F2",
+      borderBottom: `1px solid ${task.deadlineExtRequest?.status === "pending" ? "#FDE68A" : "#FECDD3"}`,
+      flexShrink: 0,
+      fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+    }}>
+      <span style={{ fontSize: 13, flexShrink: 0 }}>
+        {task.deadlineExtRequest?.status === "pending" ? "⏳" : "⚠️"}
+      </span>
+      <span style={{
+        flex: 1, fontSize: 11, fontWeight: 500, lineHeight: 1.45,
+        color: task.deadlineExtRequest?.status === "pending" ? "#92400E" : "#991B1B"
+      }}>
+        {task.deadlineExtRequest?.status === "pending"
+          ? "Deadline extension request is pending approval from your manager."
+          : task.deadlineExtRequest?.status === "approved"
+            ? `Deadline extended to ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
+            : `Deadline passed on ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Request an extension from Details tab.`
+        }
+      </span>
     </div>
+  ) : null;
+
+  if (!banner) return extBanner;
+
+  return (
+    <>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10,// ── Default banner render ────────────────────────────────────────────────
+        padding: "9px 14px",
+        background: banner.bg,
+        borderBottom: `1px solid ${banner.border}`,
+        flexShrink: 0,
+        fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+      }}>
+        {
+          banner.pulse ? (
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: banner.color, flexShrink: 0,
+              animation: "tab-banner-pulse 1.6s ease-in-out infinite",
+            }} />
+          ) : (
+            <span style={{ fontSize: 13, flexShrink: 0, lineHeight: 1 }}>{banner.icon}</span>
+          )
+        }
+
+        < span style={{
+          flex: 1, fontSize: 11, color: banner.color,
+          fontWeight: 500, lineHeight: 1.45,
+          overflow: "hidden", display: "-webkit-box",
+          WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        }}>
+          {banner.text}
+        </span >
+
+        {
+          banner.cta && (
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={banner.action}
+              style={{
+                flexShrink: 0, padding: "5px 12px",
+                border: `1px solid ${banner.color}44`, borderRadius: 5,
+                background: banner.color, color: "#fff",
+                fontSize: 11, fontWeight: 600,
+                cursor: actionBusy ? "not-allowed" : "pointer",
+                fontFamily: "inherit", opacity: actionBusy ? 0.6 : 1,
+                transition: "opacity 0.12s", whiteSpace: "nowrap",
+              }}
+              onMouseEnter={e => { if (!actionBusy) e.currentTarget.style.opacity = "0.85"; }}
+              onMouseLeave={e => { e.currentTarget.style.opacity = "1"; }}
+            >
+              {actionBusy ? "…" : banner.cta}
+            </button>
+          )
+        }
+
+        < style > {`
+        @keyframes tab-banner-pulse {
+          0%,100% { opacity:1; transform:scale(1); }
+          50% { opacity:0.4; transform:scale(0.7); }
+        }
+   `}</style>
+      </div>
+      {extBanner}
+    </>
   );
 }

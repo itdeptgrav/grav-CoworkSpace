@@ -176,6 +176,7 @@ export default function DetailBody({
   const isRunningThis = timerActiveTaskId === task.taskId;
   const timerSession = getTimerSession ? getTimerSession(task.taskId) : null;
   const isTimerExceeded = windowSecs > 0 && workedSecs >= windowSecs;
+  const isFixedDeadlinePassed = !task.hasTimer && task.fixedDeadline && new Date(task.fixedDeadline) < new Date() && ["in_progress", "confirmed"].includes(task.status);
   const timerBlocked = timerActiveTaskId && timerActiveTaskId !== task.taskId;
 
   const remainingSecs = windowSecs > 0 ? Math.max(0, windowSecs - workedSecs) : null;
@@ -223,7 +224,7 @@ export default function DetailBody({
         .db-scroll::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 2px; }
       `}</style>
 
-      
+
 
       {/* ── REPORTS / GOAL / TIMELINE / SUBMISSIONS TAB ── */}
       {curTab === "reports" && (
@@ -236,21 +237,21 @@ export default function DetailBody({
               : !dailyReports?.length
                 ? <div style={{ padding: 32, textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>No reports submitted yet.</div>
                 : (() => {
-                    const grouped = {};
-                    [...(dailyReports || [])]
-                      .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0))
-                      .forEach(r => {
-                        if (!r) return;
-                        const ts = r.createdAt?.seconds ? r.createdAt.seconds * 1000 : (r.createdAt ? new Date(r.createdAt).getTime() : Date.now());
-                        const tsMs = isNaN(ts) ? Date.now() : ts;
-                        const key = new Date(tsMs).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-                        if (!grouped[key]) grouped[key] = [];
-                        grouped[key].push(r);
-                      });
-                    return Object.entries(grouped).map(([dateKey, rpts]) => (
-                      <ReportDateGroup key={dateKey} dateLabel={dateKey} reports={rpts || []} />
-                    ));
-                  })()
+                  const grouped = {};
+                  [...(dailyReports || [])]
+                    .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0))
+                    .forEach(r => {
+                      if (!r) return;
+                      const ts = r.createdAt?.seconds ? r.createdAt.seconds * 1000 : (r.createdAt ? new Date(r.createdAt).getTime() : Date.now());
+                      const tsMs = isNaN(ts) ? Date.now() : ts;
+                      const key = new Date(tsMs).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+                      if (!grouped[key]) grouped[key] = [];
+                      grouped[key].push(r);
+                    });
+                  return Object.entries(grouped).map(([dateKey, rpts]) => (
+                    <ReportDateGroup key={dateKey} dateLabel={dateKey} reports={rpts || []} />
+                  ));
+                })()
           )}
         </div>
       )}
@@ -470,6 +471,43 @@ export default function DetailBody({
               <Section title="Actions" />
               <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>
 
+                {/* ── DEADLINE ALERT BANNER (top of actions) ── */}
+                {isFixedDeadlinePassed && (
+                  <div style={{ padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>⚠️ Deadline Passed</div>
+                    <div>Original deadline: <strong>{fmtDateTime(task.fixedDeadline)}</strong></div>
+                    {task.deadlineExtRequest?.status === "pending" && (
+                      <>
+                        <div style={{ marginTop: 4, color: "#D97706", fontWeight: 600 }}>Extension request pending approval.</div>
+                        {task.deadlineExtRequest?.proposedDate && (
+                          <div style={{ marginTop: 2, color: "#92400E" }}>Requested new deadline: <strong>{fmtDateTime(task.deadlineExtRequest.proposedDate)}</strong></div>
+                        )}
+                      </>
+                    )}
+                    {task.deadlineExtRequest?.status === "approved" && (
+                      <div style={{ marginTop: 4, color: "#16A34A", fontWeight: 600 }}>Extension approved — new deadline: <strong>{fmtDateTime(task.fixedDeadline)}</strong></div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── UPCOMING DEADLINE NOTICE (when not passed but due soon) ── */}
+                {!isFixedDeadlinePassed && task.fixedDeadline && ["in_progress", "confirmed"].includes(status) && (() => {
+                  const msLeft = new Date(task.fixedDeadline) - new Date();
+                  const hoursLeft = msLeft / 3600000;
+                  if (hoursLeft > 24) return null;
+                  const color = hoursLeft <= 2 ? "#DC2626" : hoursLeft <= 8 ? "#D97706" : "#2563EB";
+                  const bg = hoursLeft <= 2 ? "#FEF2F2" : hoursLeft <= 8 ? "#FFFBEB" : "#EFF6FF";
+                  const border = hoursLeft <= 2 ? "#FECDD3" : hoursLeft <= 8 ? "#FDE68A" : "#BFDBFE";
+                  const label = hoursLeft <= 0 ? "Deadline passed!" : hoursLeft < 1 ? `${Math.round(msLeft / 60000)} min remaining` : `${hoursLeft.toFixed(1)}h remaining`;
+                  return (
+                    <div style={{ padding: "10px 12px", background: bg, border: `1px solid ${border}`, borderRadius: 6, fontSize: 11, color, lineHeight: 1.6 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 2 }}>🔔 Deadline Soon</div>
+                      <div>Due: <strong>{fmtDateTime(task.fixedDeadline)}</strong></div>
+                      <div style={{ fontWeight: 600, marginTop: 2 }}>{label}</div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── EMPLOYEE: pre-confirm deadline flow ── */}
                 {isAssignee && !isConfirmed && !task.isGoal && !task.isThirdParty && !task.isRepeat && (
                   <>
@@ -635,8 +673,8 @@ export default function DetailBody({
                   </ActionBtn>
                 )}
 
-                {/* ── EXTENSION REQUEST (in progress, timer exceeded) ── */}
-                {isAssignee && isTimerExceeded && status === "in_progress" && !task.isFolder && (
+                {/* ── EXTENSION REQUEST (in progress, timer exceeded OR fixed deadline passed) ── */}
+                {isAssignee && (isTimerExceeded || isFixedDeadlinePassed) && ["in_progress", "confirmed"].includes(status) && !task.isFolder && (
                   <>
                     {!ef.showExtReqForm ? (
                       <ActionBtn variant="outline" onClick={() => ef.setShowExtReqForm?.(true)}>
@@ -645,8 +683,12 @@ export default function DetailBody({
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 6 }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>Request Extension</div>
-                        <input type="date" value={ef.extReqDate || ""} onChange={e => ef.setExtReqDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
-                          style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input type="date" value={ef.extReqDate || ""} onChange={e => ef.setExtReqDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
+                            style={{ flex: 1, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                          <input type="time" value={ef.extReqTime || "23:59"} onChange={e => ef.setExtReqTime?.(e.target.value)}
+                            style={{ width: 90, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                        </div>
                         <textarea placeholder="Reason for extension"
                           value={ef.extReqReason || ""} onChange={e => ef.setExtReqReason?.(e.target.value)} rows={2}
                           style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none", resize: "vertical" }} />
@@ -725,24 +767,37 @@ export default function DetailBody({
                 )}
 
                 {/* ── TL/CEO: extension request review ── */}
-                {(isTL || isCEO) && task.pendingExtension && !task.isFolder && (
+                {(isTL || isCEO) && (task.pendingExtension || task.deadlineExtRequest?.status === "pending") && !task.isFolder && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <div style={{ padding: "10px 12px", background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1E40AF", lineHeight: 1.5 }}>
-                      Extension requested: {fmtSecs(Number(task.pendingExtensionSecs) || 0)} additional time
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>⏰ Deadline Extension Request</div>
+                      <div>From: <strong>{task.deadlineExtRequest?.requestedByName || "Employee"}</strong></div>
+                      {task.deadlineExtRequest?.proposedDate && <div>Proposed new deadline: <strong>{new Date(task.deadlineExtRequest.proposedDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</strong></div>}
+                      {task.deadlineExtRequest?.reason && <div style={{ marginTop: 3, color: "#374151" }}>Reason: {task.deadlineExtRequest.reason}</div>}
                       {task.extensionReason && <div style={{ marginTop: 3, color: "#374151" }}>Reason: {task.extensionReason}</div>}
                     </div>
-                    <input type="date" value={ef.reviewExtDate || ""} onChange={e => ef.setReviewExtDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
-                      style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>Set new deadline:</div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <ActionBtn variant="ghost" danger onClick={() => ef.handleReviewExtension?.(false)} busy={ef.reviewExtBusy}>
-                        Deny
+                      <input type="date" value={ef.reviewExtDate || ""} onChange={e => ef.setReviewExtDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
+                        style={{ flex: 1, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                      <input type="time" value={ef.reviewExtTime || "23:59"} onChange={e => ef.setReviewExtTime?.(e.target.value)}
+                        style={{ width: 90, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <ActionBtn variant="ghost" danger onClick={() => ef.handleReviewExtension?.("reject", "")} busy={ef.reviewExtBusy}>
+                        Reject
                       </ActionBtn>
-                      <ActionBtn onClick={() => ef.handleReviewExtension?.(true)} busy={ef.reviewExtBusy} disabled={!ef.reviewExtDate}>
-                        Approve Extension
+                      <ActionBtn variant="outline" onClick={() => ef.handleReviewExtension?.("counter", ef.reviewExtDate + "T" + (ef.reviewExtTime || "23:59"))} busy={ef.reviewExtBusy} disabled={!ef.reviewExtDate}>
+                        Suggest Date
+                      </ActionBtn>
+                      <ActionBtn onClick={() => ef.handleReviewExtension?.("approve", "")} busy={ef.reviewExtBusy}>
+                        Approve
                       </ActionBtn>
                     </div>
                   </div>
                 )}
+
+
 
                 {/* ── TL: review completion ── */}
                 {isTL && !isCEO && compStatus === "submitted" && task.reviewFlow !== "ceo_direct" && (

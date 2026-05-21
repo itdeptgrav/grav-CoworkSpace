@@ -768,12 +768,13 @@ export default function TasksPage() {
   const [taskFiles, setTaskFiles] = useState([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [extReqDate, setExtReqDate] = useState("");
+  const [extReqTime, setExtReqTime] = useState("23:59");
   const [extReqReason, setExtReqReason] = useState("");
   const [extReqBusy, setExtReqBusy] = useState(false);
   const [showExtReqForm, setShowExtReqForm] = useState(false);
   const [reviewExtDate, setReviewExtDate] = useState("");
+  const [reviewExtTime, setReviewExtTime] = useState("23:59");
   const [reviewExtBusy, setReviewExtBusy] = useState(false);
-
 
   // Load all files when Files tab is opened
   useEffect(() => {
@@ -934,8 +935,24 @@ export default function TasksPage() {
   const [unreadTaskIds, setUnreadTaskIds] = useState(new Set());
   // Per-task unread message counts (accurate, based on live chat subcollection count)
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [taskActivityCounts, setTaskActivityCounts] = useState({});
   // Per-task latest message timestamps (ms) — from live Firestore chat snapshots
   const [lastMsgTimes, setLastMsgTimes] = useState({});
+  useEffect(() => {
+    if (!employeeId) return;
+    const notifRef = collection(firebaseDb, "cowork_notifications");
+    const notifQ = query(notifRef, where("recipientEmployeeId", "==", employeeId), where("read", "==", false));
+    const unsub = onSnapshot(notifQ, snap => {
+      const counts = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const taskId = data.data?.taskId;
+        if (taskId) counts[taskId] = (counts[taskId] || 0) + 1;
+      });
+      setTaskActivityCounts(counts);
+    }, err => console.error("task activity badge:", err));
+    return () => unsub();
+  }, [employeeId]);
 
   const messagesEndRef = useRef(null);
   const pendingMapRef = useRef(new Map());
@@ -1340,34 +1357,43 @@ export default function TasksPage() {
     if (!extReqDate || !selectedTask) return;
     setExtReqBusy(true);
     try {
+      const proposedDateTime = extReqDate ? new Date(extReqDate + "T" + (extReqTime || "23:59")).toISOString() : extReqDate;
       await apiFetch(`/cowork/task/${selectedTask.taskId}/request-deadline-extension`, {
-        method: "POST", body: JSON.stringify({ proposedDate: extReqDate, reason: extReqReason }),
+        method: "POST", body: JSON.stringify({ proposedDate: proposedDateTime, reason: extReqReason }),
       });
-      setShowExtReqForm(false); setExtReqDate(""); setExtReqReason("");
-      setSelectedTask(prev => prev ? { ...prev, deadlineExtRequest: { proposedDate: extReqDate, reason: extReqReason, requestedByName: employeeName, status: "pending" } } : prev);
+      setShowExtReqForm(false); setExtReqDate(""); setExtReqTime("23:59"); setExtReqReason("");
+
+      setSelectedTask(prev => prev ? { ...prev, deadlineExtRequest: { proposedDate: proposedDateTime, reason: extReqReason, requestedByName: employeeName, status: "pending" } } : prev);
     } catch (e) { alert(e.message); }
     finally { setExtReqBusy(false); }
-  }, [extReqDate, extReqReason, selectedTask, employeeName]);
+  }, [extReqDate, extReqTime, extReqReason, selectedTask, employeeName]);
 
   const handleReviewExtension = useCallback(async (action, counterDate) => {
     if (!selectedTask) return;
     setReviewExtBusy(true);
     try {
-      const newDate = action === "approve" ? selectedTask.deadlineExtRequest?.proposedDate : counterDate;
+      let newDate;
+      if (action === "approve") {
+        newDate = selectedTask.deadlineExtRequest?.proposedDate || (reviewExtDate ? new Date(reviewExtDate + "T" + (reviewExtTime || "23:59")).toISOString() : null);
+      } else if (action === "counter") {
+        newDate = counterDate || (reviewExtDate ? new Date(reviewExtDate + "T" + (reviewExtTime || "23:59")).toISOString() : null);
+      }
       await apiFetch(`/cowork/task/${selectedTask.taskId}/review-deadline-extension`, {
         method: "POST",
         body: JSON.stringify({ action, newDate }),
       });
-      setReviewExtDate("");
+      setReviewExtDate(""); setReviewExtTime("23:59");
       setSelectedTask(prev => {
         if (!prev) return prev;
-        const updatedExt = { ...prev.deadlineExtRequest, status: action === "approve" ? "approved" : action === "counter" ? "countered" : "rejected", reviewedByName: employeeName, approvedDate: action === "approve" ? newDate : undefined, counterDate: action === "counter" ? newDate : undefined };
-        return { ...prev, deadlineExtRequest: updatedExt, fixedDeadline: action !== "reject" ? newDate : prev.fixedDeadline };
+        const updatedExt = { ...(prev.deadlineExtRequest || {}), status: action === "approve" ? "approved" : action === "counter" ? "countered" : "rejected", reviewedByName: employeeName, approvedDate: action === "approve" ? newDate : undefined, counterDate: action === "counter" ? newDate : undefined };
+        return { ...prev, deadlineExtRequest: updatedExt, fixedDeadline: action !== "reject" ? (newDate || prev.fixedDeadline) : prev.fixedDeadline };
       });
+      if (action !== "reject" && newDate) {
+        setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, fixedDeadline: newDate } : t));
+      }
     } catch (e) { alert(e.message); }
     finally { setReviewExtBusy(false); }
-  }, [selectedTask, employeeName]);
-
+  }, [selectedTask, employeeName, reviewExtDate, reviewExtTime]);
 
 
 
@@ -1926,6 +1952,29 @@ export default function TasksPage() {
 
     // Call the async function
     markTaskAndSubtasksAsRead(node.taskId);
+
+    // Mark all notifications for this task as read
+    (async () => {
+      try {
+        const notifQ = query(
+          collection(firebaseDb, "cowork_notifications"),
+          where("recipientEmployeeId", "==", employeeId),
+          where("read", "==", false)
+        );
+        const notifSnap = await getDocs(notifQ);
+        const batch = writeBatch(firebaseDb);
+        let hasUnread = false;
+        notifSnap.docs.forEach(d => {
+          if (d.data().data?.taskId === node.taskId) {
+            batch.update(d.ref, { read: true });
+            hasUnread = true;
+          }
+        });
+        if (hasUnread) await batch.commit();
+        // Clear local badge immediately
+        setTaskActivityCounts(prev => ({ ...prev, [node.taskId]: 0 }));
+      } catch (e) { console.error("mark notifs read:", e); }
+    })();
 
     // Update lastReadAt timestamp for UI new message indicator
     lastReadAtRef.current[node.taskId] = Date.now();
@@ -5773,7 +5822,20 @@ em-emoji-picker,
                                 {t.isThirdParty && <span style={{ fontSize: 9, fontWeight: 700, color: "#6D28D9", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>🔗 3rd Party</span>}
                                 {t.isGoal && <span style={{ fontSize: 9, fontWeight: 700, color: "#7E22CE", background: "#FDF4FF", padding: "1px 5px", borderRadius: 3 }}>🎯 Goal</span>}
                                 {t.isSelfAssigned && <span style={{ fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>SELF</span>}
+                                {t.deadlineExtRequest?.status === "pending" && (isCEO || isTL) && (
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "2px 7px", borderRadius: 4, border: "1px solid #FECDD3", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                    ⏰ Ext. Request
+                                  </span>
+                                )}
+                                {(taskActivityCounts?.[t.taskId] || 0) > 0 && (
+                                  <span style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: "#7C3AED", padding: "2px 7px", borderRadius: 99, flexShrink: 0, minWidth: 18, textAlign: "center" }}>
+                                    {taskActivityCounts[t.taskId] > 99 ? "99+" : taskActivityCounts[t.taskId]}
+                                  </span>
+                                )}
                               </div>
+
+                              {/* ROW 2: description
+                                </div>
 
                               {/* ROW 2: description (only if exists, 1 truncated line) */}
                               {t.description && (
@@ -7381,10 +7443,12 @@ em-emoji-picker,
                     extFlow={{
                       showExtReqForm, setShowExtReqForm,
                       extReqDate, setExtReqDate,
+                      extReqTime, setExtReqTime,
                       extReqReason, setExtReqReason,
                       extReqBusy,
                       handleRequestExtension,
                       reviewExtDate, setReviewExtDate,
+                      reviewExtTime, setReviewExtTime,
                       reviewExtBusy,
                       handleReviewExtension,
                     }}
