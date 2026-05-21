@@ -3004,16 +3004,30 @@ export default function TasksPage() {
   // In goal view, stats must reflect the current section (assigned/created), not all tasks
   const statsBaseTasks = (() => {
     const goalOnly = rootOnlyTasks.filter(t => !!t.isGoal);
-    if (!isGoalView) return rootOnlyTasks.filter(t => !t.isGoal);
-    if (taskSection === "assigned") return goalOnly.filter(t => (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId);
-    if (taskSection === "created") return goalOnly.filter(t => t.assignedBy === employeeId);
-    return goalOnly;
+    const normalOnly = rootOnlyTasks.filter(t => !t.isGoal);
+    const base = isGoalView ? goalOnly : normalOnly;
+    if (taskSection === "assigned") return base.filter(t => {
+      if (t.isSelfAssigned) return (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId;
+      return (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId;
+    });
+    if (taskSection === "created") return base.filter(t => {
+      if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
+      return t.assignedBy === employeeId && !t.isSelfAssigned;
+    });
+    if (taskSection === "self") return base.filter(t => t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId));
+    return base;
   })();
   const stats = {
     total: statsBaseTasks.length,
     open: statsBaseTasks.filter(t => ["open", "pending_deadline_approval", "pending_employee_deadline_confirmation", "deadline_approved"].includes(t.status)).length,
     active: statsBaseTasks.filter(t => ["in_progress", "confirmed"].includes(t.status)).length,
     done: statsBaseTasks.filter(t => t.status === "done").length,
+  };
+  const tabStats = {
+    all: stats.total,
+    open: stats.open,
+    in_progress: stats.active,
+    done: stats.done,
   };
   const doExport = () => {
     const allRows = [];
@@ -4618,12 +4632,26 @@ em-emoji-picker,
           const rootTasks = (role === "employee"
             ? dedupedTasks.filter(t => !t.parentTaskId || !allTaskMapRef.current.has(t.parentTaskId))
             : dedupedTasks.filter(t => !t.parentTaskId)
-          ).filter(t => isGoalView ? t.isGoal : true);
+          ).filter(t => {
+            if (isGoalView ? !t.isGoal : t.isGoal) return false;
+            if (taskSection === "assigned") {
+              if (t.isSelfAssigned) return (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId;
+              return (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId;
+            }
+            if (taskSection === "created") {
+              if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
+              return t.assignedBy === employeeId && !t.isSelfAssigned;
+            }
+
+            if (taskSection === "self") return t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId);
+            return true;
+          });
           const filteredRoots = rootTasks.filter(t => {
             const q = listSearch.toLowerCase();
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
+            const isSelfTaskForApprover = t.isSelfAssigned && (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)));
 
-            const matchSt = viewFilter === "completed"
+            const matchSt = isSelfTaskForApprover ? true : viewFilter === "completed"
               ? true
               : activeStatTab === "all"
                 ? true  // show ALL including done — user wants to see completed tasks
@@ -5529,7 +5557,7 @@ em-emoji-picker,
               {/* ── FILTER BAR (new — sits between project info and stats tabs) ── */}
 
               <div className="gv-stats">
-                {[{ key: "all", l: "ALL", v: stats.total, c: "#5B5EF4" }, { key: "open", l: "OPEN", v: stats.open, c: "#EF4444" }, { key: "in_progress", l: "ACTIVE", v: stats.active, c: "#8B5CF6" }, { key: "done", l: "DONE", v: stats.done, c: "#16A34A" }].map(s => (
+                {[{ key: "in_progress", l: "ACTIVE", v: tabStats.in_progress, c: "#8B5CF6" }, { key: "open", l: "OPEN", v: tabStats.open, c: "#EF4444" }, { key: "done", l: "DONE", v: tabStats.done, c: "#16A34A" }, { key: "all", l: "ALL", v: tabStats.all, c: "#5B5EF4" }].map(s => (
                   <div key={s.key} className={`gv-stat${activeStatTab === s.key ? " active-tab" : ""}`} onClick={() => setActiveStatTab(s.key)}>
                     <span className="gv-stat-n" style={{ color: s.c }}>{s.v}</span>
                     <span className="gv-stat-l">{s.l}</span>
@@ -5567,19 +5595,22 @@ em-emoji-picker,
                       return (t.subtaskIds || []).some(sid => hasDescendantCreatedByMe(sid, visited));
                     };
 
-                    // Section A: Assigned to me by others (direct OR folder with my subtask deep inside)
+                    // Section A: Assigned to me by others (direct OR self-assigned OR folder with my subtask deep inside)
                     const assignedToMe = filteredRoots.filter(t => {
+                      if (t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId) return true;
                       if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
                       if (t.isFolder) return hasDescendantAssignedToMe(t.taskId);
                       return false;
                     });
-                    // Section B: Created by me (direct OR folder with subtask I created)
+                    // Section B: Created by me (direct OR folder with subtask I created) — exclude self tasks
                     const createdByMe = filteredRoots.filter(t => {
                       if (assignedToMe.find(x => x.taskId === t.taskId)) return false;
+                      if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
                       if (t.assignedBy === employeeId) return true;
                       if (t.isFolder) return hasDescendantCreatedByMe(t.taskId);
                       return false;
                     });
+
                     // Section C: Other tasks (visible to user but neither assigned nor created by them)
                     const otherTasks = filteredRoots.filter(t => {
                       if (assignedToMe.find(x => x.taskId === t.taskId)) return false;

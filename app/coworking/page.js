@@ -1165,7 +1165,7 @@ export default function Dashboard() {
                           <th>Due Date</th>
                           <th>Priority</th>
                           <th>Status</th>
-                          <th style={{ width: 40 }}>Actions</th>
+
                         </tr>
                       </thead>
                       <tbody>
@@ -1226,35 +1226,7 @@ export default function Dashboard() {
                                 </td>
                                 <td><span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4, color: pri.c, background: pri.bg }}>{pri.l}</span></td>
                                 <td><span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 4, color: sb.c, background: sb.bg }}>{sb.l}</span></td>
-                                <td>
-                                  {(() => {
-                                    const ai = getTaskActionInfo(t);
-                                    const sess = getTimerSession ? getTimerSession(t.taskId) : null;
-                                    const isRunning = timerActiveTaskId === t.taskId || sess?.isActive === true;
-                                    const secs = getDisplaySeconds ? getDisplaySeconds(t.taskId) : (sess?.totalSeconds || 0);
-                                    if (ai.type === "none") return null;
-                                    return (
-                                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                                        {ai.type === "indicator" ? (
-                                          <Ic n={ai.icon} s={14} c={ai.color} />
-                                        ) : (
-                                          <button onClick={e => { e.stopPropagation(); handleTaskAction(t, ai.action); }}
-                                            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4, transition: "background 0.12s" }}
-                                            onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
-                                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                            title={ai.label}>
-                                            <Ic n={ai.icon} s={14} c={ai.color} />
-                                          </button>
-                                        )}
-                                        {(isRunning || secs > 0) && (
-                                          <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color: isRunning ? "#16A34A" : "#94A3B8", lineHeight: 1 }}>
-                                            {formatTimeHMS(secs)}
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </td>
+
                               </tr>
                               {/* Subtask rows */}
                               {isExpanded && subs.map(subId => {

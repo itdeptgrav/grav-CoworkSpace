@@ -157,6 +157,142 @@ function Spin() {
   );
 }
 
+// ── RepeatSlots — shows time slots for repeat tasks ──────────────────────────
+function RepeatSlots({ task, employeeId, isAssignee, isCEO, isTL }) {
+  const rc = task.repeatConfig || {};
+  const times = rc.deadlineTimes || (rc.deadlineTime ? [rc.deadlineTime] : ["10:00"]);
+  const totalSlots = rc.timesPerDay || times.length || 1;
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todaySubs = task.repeatSubmissions?.[todayStr] || {};
+  const now = new Date();
+  const currentHHMM = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
+
+  const [slotStates, setSlotStates] = useState(() =>
+    Array.from({ length: totalSlots }, () => ({ comment: "", files: [], uploading: false, submitting: false, error: "" }))
+  );
+  const updateSlot = (i, patch) =>
+    setSlotStates(prev => prev.map((s, j) => j === i ? { ...s, ...patch } : s));
+
+  const handleFiles = async (i, fileList) => {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+    updateSlot(i, { uploading: true, error: "" });
+    try {
+      const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const uploaded = await Promise.all(files.map(async file => {
+        const isImage = file.type.startsWith("image/");
+        if (isImage) {
+          const { uploadImage } = await import("../../../lib/mediaUploadApi");
+          const r = await uploadImage(file, "cowork-repeat-submissions");
+          return { name: file.name, url: r.url, type: "image", size: file.size };
+        }
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${BASE}/cowork/upload/pdf`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "Upload failed");
+        return { name: file.name, url: d.viewUrl || d.url, downloadUrl: d.downloadUrl, type: "file", size: file.size };
+      }));
+      updateSlot(i, { files: [...slotStates[i].files, ...uploaded], uploading: false });
+    } catch (e) { updateSlot(i, { uploading: false, error: e.message }); }
+  };
+
+  const handleSubmit = async (i) => {
+    if (slotStates[i].submitting) return;
+    updateSlot(i, { submitting: true, error: "" });
+    try {
+      const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const res = await fetch(`${BASE}/cowork/task/${task.taskId}/repeat-submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date: todayStr, slotIndex: i, comment: slotStates[i].comment, files: slotStates[i].files }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Submit failed");
+      updateSlot(i, { submitting: false, comment: "", files: [] });
+    } catch (e) { updateSlot(i, { submitting: false, error: e.message }); }
+  };
+
+  return (
+    <div style={{ padding: "10px 16px", fontFamily: F }}>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#9CA3AF", marginBottom: 8 }}>
+        {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+      </div>
+      {Array.from({ length: totalSlots }, (_, i) => {
+        const slotKey = `slot_${i}`;
+        const existing = todaySubs[slotKey];
+        const deadline = times[i] || times[times.length - 1];
+        const isPast = currentHHMM > deadline;
+        const ss = slotStates[i];
+        const statusColor = existing ? "#16A34A" : isPast ? "#DC2626" : "#D97706";
+        const statusText = existing ? `Submitted ${existing.submittedAt ? new Date(existing.submittedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}` : isPast ? "Missed" : "Pending";
+        return (
+          <div key={i} style={{ borderBottom: "1px solid #F1F5F9", padding: "10px 12px", borderRadius: 6, background: existing ? "#F0FDF4" : "#FAFAFA", marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: existing || (!existing && isAssignee) ? 8 : 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "#1F2937" }}>Slot {i + 1}</span>
+                <span style={{ fontSize: 10, color: "#6B7280" }}>{deadline}</span>
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>{statusText}</span>
+            </div>
+            {existing && (
+              <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.5, paddingLeft: 2 }}>
+                {existing.comment && <div style={{ color: "#1F2937", marginBottom: 4 }}>{existing.comment}</div>}
+                {existing.files?.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {existing.files.map((f, fi) => (
+                      <a key={fi} href={f.url} target="_blank" rel="noreferrer"
+                        style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#F1F5F9", color: "#1B4F8A", textDecoration: "none" }}>
+                        📎 {f.name}
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {(isCEO || isTL) && <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 3 }}>{existing.submittedByName}</div>}
+              </div>
+            )}
+            {!existing && isAssignee && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <textarea placeholder="Message (optional)" value={ss.comment}
+                  onChange={e => updateSlot(i, { comment: e.target.value })} rows={2}
+                  style={{ width: "100%", padding: "6px 8px", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, fontFamily: F, resize: "none", outline: "none", background: "#fff", boxSizing: "border-box", color: "#1F2937" }} />
+                {ss.files.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {ss.files.map((f, fi) => (
+                      <div key={fi} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#F1F5F9", color: "#374151", display: "flex", alignItems: "center", gap: 3 }}>
+                        📎 {f.name}
+                        <button onClick={() => updateSlot(i, { files: ss.files.filter((_, idx) => idx !== fi) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 11, padding: 0, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ss.error && <div style={{ fontSize: 10, color: "#DC2626" }}>{ss.error}</div>}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <label style={{ fontSize: 11, color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", border: "1px solid #E5E7EB", borderRadius: 5, background: "#fff" }}>
+                    <input type="file" multiple style={{ display: "none" }} disabled={ss.uploading} onChange={e => { handleFiles(i, e.target.files); e.target.value = ""; }} />
+                    {ss.uploading ? "Uploading…" : "📎 Attach"}
+                  </label>
+                  <button disabled={ss.submitting || ss.uploading} onClick={() => handleSubmit(i)}
+                    style={{ flex: 1, padding: "5px 10px", borderRadius: 5, border: "none", background: BRAND, color: "#fff", fontSize: 11, fontWeight: 600, cursor: (ss.submitting || ss.uploading) ? "not-allowed" : "pointer", opacity: (ss.submitting || ss.uploading) ? 0.6 : 1, fontFamily: F }}>
+                    {ss.submitting ? "Submitting…" : "Submit"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {!existing && !isAssignee && (
+              <div style={{ fontSize: 10, color: "#9CA3AF" }}>No submission yet.</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 export default function DetailBody({
@@ -230,7 +366,8 @@ export default function DetailBody({
       {curTab === "reports" && (
         <div className="db-scroll" style={{ flex: 1, overflowY: "auto", padding: task.isGoal ? "0" : "14px 16px" }}>
           {task.isThirdParty && <ThirdPartyTask task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} />}
-          {task.isGoal && <GoalTask task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} />}
+          {task.isGoal && <GoalTask task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} currentEmployeeId={employeeId} currentEmployeeName={employeeId} />}
+          {task.isRepeat && <RepeatSlots task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} />}
           {!task.isThirdParty && !task.isGoal && (
             reportsLoading
               ? <div style={{ padding: 24, textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>Loading…</div>
@@ -603,8 +740,8 @@ export default function DetailBody({
                       </div>
                     )}
 
-                    {/* Fixed deadline task confirm */}
-                    {!task.hasTimer && !task.dueDate && task.fixedDeadline && (
+                    {/* Fixed deadline task confirm — only show if deadline NOT yet approved */}
+                    {!task.hasTimer && !task.dueDate && task.fixedDeadline && !task.deadlineApprovedBy && status !== "deadline_approved" && (
                       <ActionBtn onClick={() => handleAction("confirm")} busy={actionBusy}>
                         Confirm &amp; Accept Task
                       </ActionBtn>
@@ -638,8 +775,8 @@ export default function DetailBody({
                   </>
                 )}
 
-                {/* ── EMPLOYEE: confirmed, not started → Start Working ── */}
-                {isAssignee && isConfirmed && !isStarted && status === "confirmed" && (
+                {/* ── EMPLOYEE: confirmed, not started → Start Working (timer tasks only) ── */}
+                {isAssignee && isConfirmed && !isStarted && status === "confirmed" && task.hasTimer !== false && (
                   <ActionBtn onClick={() => handleAction("start")} busy={actionBusy}>
                     Start Working
                   </ActionBtn>

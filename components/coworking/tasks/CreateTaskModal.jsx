@@ -819,16 +819,7 @@ export default function CreateTaskModal({
                           <option value="late">Allow late submission — accept after deadline with a late flag</option>
                         </select>
                       </div>
-                      <div style={{ borderTop: "1px solid #DBEAFE", paddingTop: 9, display: "flex", flexDirection: "column", gap: 7 }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: "#374151" }}>
-                          <input type="checkbox" checked={repeatConfig.hasTimer} onChange={e => setRC("hasTimer", e.target.checked)} style={{ width: 13, height: 13, accentColor: "#1B4F8A", cursor: "pointer" }} />
-                          <span><strong>Enable timer</strong> — assignee can start / pause time tracking per occurrence</span>
-                        </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: "#374151" }}>
-                          <input type="checkbox" checked={repeatConfig.hasDailyReport} onChange={e => setRC("hasDailyReport", e.target.checked)} style={{ width: 13, height: 13, accentColor: "#1B4F8A", cursor: "pointer" }} />
-                          <span><strong>Require submission report</strong> — each slot must include a comment or file upload</span>
-                        </label>
-                      </div>
+
                     </div>
                   )}
 

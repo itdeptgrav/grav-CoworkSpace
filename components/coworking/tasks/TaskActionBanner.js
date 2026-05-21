@@ -133,11 +133,22 @@ export default function TaskActionBanner({
     }
   }
 
-  // ── 5. Fixed-deadline task (no timer) — Approve / Negotiate (Goal/Repeat/ThirdParty exempt)
+  // ── 5a. Fixed-deadline task — deadline approved → Confirm & Start ────────
+  if (!banner && isAssignee && !isStarted && task.hasTimer === false &&
+    (status === "deadline_approved" || status === "confirmed" || (status === "open" && task.deadlineApprovedBy)) &&
+    !task.isGoal && !task.isRepeat && !task.isThirdParty && !task.isSelfAssigned) {
+    const dl = task.fixedDeadline
+      ? new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+      : null;
+    banner = {
+      color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0", icon: "▶",
+      text: `Deadline approved${dl ? ` · Due ${dl}` : ""}. Confirm and start working.`,
+      cta: "Confirm & Start", action: () => handleAction("confirm_and_start"),
+    };
+  }
+  // ── 5b. Fixed-deadline task — needs approval/negotiation
   if (!banner && isAssignee && !isConfirmed && task.hasTimer === false && status === "open" && !task.isSelfAssigned) {
-    if (task.isGoal || task.isRepeat || task.isThirdParty) {
-      // These types keep their own confirm flow (handled above)
-    } else {
+    if (!task.isGoal && !task.isRepeat && !task.isThirdParty) {
       const dl = task.fixedDeadline
         ? new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
         : null;
@@ -412,7 +423,7 @@ export default function TaskActionBanner({
   return (
     <>
       <div style={{
-        display: "flex", alignItems: "center", gap: 10,// ── Default banner render ────────────────────────────────────────────────
+        display: "flex", alignItems: "center", gap: 10,
         padding: "9px 14px",
         background: banner.bg,
         borderBottom: `1px solid ${banner.border}`,
@@ -463,7 +474,7 @@ export default function TaskActionBanner({
           )
         }
 
-        < style > {`
+        <style>{`
         @keyframes tab-banner-pulse {
           0%,100% { opacity:1; transform:scale(1); }
           50% { opacity:0.4; transform:scale(0.7); }
