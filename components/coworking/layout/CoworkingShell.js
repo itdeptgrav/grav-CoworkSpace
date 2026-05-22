@@ -2682,7 +2682,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 24px;
+          padding: 0 4px;
           gap: 16px;
           flex-shrink: 0;
         }
@@ -3332,6 +3332,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               </button>
               <h1 className="cw-topbar-title">{title}</h1>
             </div>
+
+
             <div className="cw-topbar-right">
 
               <button
@@ -3429,7 +3431,20 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </div>
                 )}
               </div>
+
+              {/* Hard Refresh button */}
+              <button
+                className="cw-topbar-icon-btn"
+                title="Hard Refresh"
+                onClick={() => { window.location.reload(true); }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                </svg>
+              </button>
               {/* Universal Request Button */}
+              {/*
               <button
                 className="cw-topbar-icon-btn"
                 title="Requests"
@@ -3446,7 +3461,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </span>
                 )}
               </button>
-
+              */}
               <div className="cw-topbar-avatar" title={employeeName}
                 style={{ overflow: "hidden", padding: 0 }}>
                 {ownProfilePicUrl ? (
