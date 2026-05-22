@@ -1750,6 +1750,7 @@ function NavIcon({ name, size = 20 }) {
     bell: <><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></>,
     search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
     sop: <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" /></>,
+    mrf: <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" /></>
   };
   return <svg {...s}>{icons[name]}</svg>;
 }
@@ -2345,6 +2346,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     { id: "meetings", label: "Meetings", icon: "meetings", path: "/coworking/schedule-meet" },
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),
+    { id: "mrf", label: "Material Requests", icon: "mrf", path: "/coworking/mrf" },
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
     { id: "settings", label: "Profile", icon: "profile", path: "/coworking/settings" },
   ];
