@@ -88,16 +88,24 @@ export default function CreateTaskModal({
     timerDurationUnit: editTask?.timerDurationUnit || "hours",
   });
 
-  // Auto-priority for new tasks: max existing priority + 1
-  useEffect(() => {
-    if (isEditMode) return;
-    getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", currentEmployeeId)))
-      .then(snap => {
-        const priorities = snap.docs.map(d => Number(d.data().priority) || 0).filter(Boolean);
-        set("priority", priorities.length > 0 ? Math.max(...priorities) + 1 : 1);
-      })
-      .catch(() => set("priority", 1));
-  }, [currentEmployeeId, isEditMode]);
+  // Per-assignee priority: queries only tasks that include these specific people,
+  // so Person A's P1 stays P1 regardless of how many tasks other people have.
+  const fetchNextPriorityForAssignees = async (assigneeIds) => {
+    if (!assigneeIds?.length) return 1;
+    try {
+      const snapshots = await Promise.all(
+        assigneeIds.map(aid =>
+          getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", aid)))
+        )
+      );
+      const allPriorities = snapshots
+        .flatMap(snap => snap.docs.map(d => Number(d.data().priority) || 0))
+        .filter(p => p > 0);
+      return allPriorities.length > 0 ? Math.max(...allPriorities) + 1 : 1;
+    } catch {
+      return 1;
+    }
+  };
 
   const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
@@ -344,12 +352,22 @@ export default function CreateTaskModal({
       if (isMultiMode) {
         const validRows = subtaskRows.filter(r => r.title.trim() && r.assigneeIds.length > 0);
         if (!validRows.length) { setError("At least one subtask must have a title and an assignee."); setSubmitting(false); return; }
+        // priorityCache prevents same-person subtasks in one batch getting the same priority
+        const priorityCache = {};
         for (const row of validRows) {
           const fixedDL = (!row.hasTimer && row.deadline)
             ? new Date(`${row.deadline}T${row.deadlineTime || "23:59"}`).toISOString() : null;
+          const cacheKey = [...row.assigneeIds].sort().join(",") || "__empty__";
+          let rowPriority;
+          if (priorityCache[cacheKey] !== undefined) {
+            rowPriority = priorityCache[cacheKey];
+          } else {
+            rowPriority = await fetchNextPriorityForAssignees(row.assigneeIds);
+          }
+          priorityCache[cacheKey] = rowPriority + 1; // bump for any next row with same assignees
           const newTask = await createTask({
             title: row.title.trim(), description: row.description, notes: row.notes,
-            assigneeIds: row.assigneeIds, dueDate: null, priority: row.priority || 5,
+            assigneeIds: row.assigneeIds, dueDate: null, priority: rowPriority,
             hasTimer: row.hasTimer, fixedDeadline: fixedDL,
             parentTaskId: parentTask?.taskId || null,
             createdByRole: currentRole, createdBy: currentEmployeeId,
@@ -373,11 +391,13 @@ export default function CreateTaskModal({
           const unit = form.timerDurationUnit || "hours";
           _senderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
         }
+        
+        const computedPriority = isFolder ? 5 : await fetchNextPriorityForAssignees(selectedIds);
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
           notes: isFolder ? "" : form.notes,
           assigneeIds: isFolder ? [] : selectedIds,
-          dueDate: null, priority: isFolder ? 5 : (form.priority || 5),
+          dueDate: null, priority: computedPriority,
           parentTaskId: parentTask?.taskId || null,
           createdByRole: currentRole, createdBy: currentEmployeeId,
           createdByCeo: currentRole === "ceo" && !parentTask, createdByTl: currentRole === "tl",

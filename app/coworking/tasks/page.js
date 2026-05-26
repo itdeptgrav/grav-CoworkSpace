@@ -1194,40 +1194,24 @@ export default function TasksPage() {
     await executeDrop(dragId, dropOnTaskId, dropParent);
   }, []);
 
-  // ── Execute the actual reorder (called after same-level drop OR warning confirmation) ──
   const executeDrop = useCallback(async (dragId, dropOnTaskId, parentId) => {
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
 
-    // Get all siblings at this level
-    const rawSiblings = [...allTaskMapRef.current.values()]
-      .filter(t => (t.parentTaskId || null) === parentId);
+    // ── SWAP ONLY THE TWO DRAGGED TASKS ──────────────────────────────────────
+    // Previous approach collected ALL siblings and renumbered them all 1,2,3...
+    // That corrupted other assignees' priorities (Person A drag → Person B gets P3, P4).
+    // Fix: just exchange the two tasks' priority/order values — nothing else changes.
+    const dragPriority = Number(dragTask.priority ?? 5);
+    const dropPriority = Number(dropTask.priority ?? 5);
+    const dragOrder = dragTask.order !== undefined ? dragTask.order : dragPriority * 1000;
+    const dropOrder = dropTask.order !== undefined ? dropTask.order : dropPriority * 1000;
 
-    // Sort by current order/priority to get the real current positions
-    const sorted = [...rawSiblings].sort((a, b) => {
-      const ao = a.order !== undefined ? a.order : (Number(a.priority ?? 99)) * 1000;
-      const bo = b.order !== undefined ? b.order : (Number(b.priority ?? 99)) * 1000;
-      if (ao !== bo) return ao - bo;
-      return (a.createdAt?.seconds ?? 0) - (b.createdAt?.seconds ?? 0);
-    });
-
-    const dragIdx = sorted.findIndex(t => t.taskId === dragId);
-    const dropIdx = sorted.findIndex(t => t.taskId === dropOnTaskId);
-    if (dragIdx < 0 || dropIdx < 0) return;
-
-    // TRUE SWAP: just exchange the two tasks' positions, everything else stays
-    const reordered = [...sorted];
-    reordered[dragIdx] = { ...sorted[dropIdx], parentTaskId: parentId };
-    reordered[dropIdx] = { ...sorted[dragIdx], parentTaskId: parentId };
-
-    // Reassign order + priority based on final position
-    const updates = reordered.map((t, i) => ({
-      taskId: t.taskId,
-      order: i * 10,
-      priority: i + 1,
-      parentTaskId: parentId,
-    }));
+    const updates = [
+      { taskId: dragId, order: dropOrder, priority: dropPriority, parentTaskId: parentId },
+      { taskId: dropOnTaskId, order: dragOrder, priority: dragPriority, parentTaskId: parentId },
+    ];
 
     // Block live listener for 8s so optimistic update isn't overwritten
     const now8 = Date.now() + 8000;
@@ -1246,7 +1230,9 @@ export default function TasksPage() {
     // Sync allTaskMapRef immediately
     updates.forEach(u => {
       const existing = allTaskMapRef.current.get(u.taskId);
-      if (existing) allTaskMapRef.current.set(u.taskId, { ...existing, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId });
+      if (existing) allTaskMapRef.current.set(u.taskId, {
+        ...existing, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId,
+      });
     });
 
     // Persist to Firestore
