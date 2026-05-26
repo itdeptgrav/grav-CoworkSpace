@@ -1349,7 +1349,12 @@ export default function TasksPage() {
       });
       setShowExtReqForm(false); setExtReqDate(""); setExtReqTime("23:59"); setExtReqReason("");
 
-      setSelectedTask(prev => prev ? { ...prev, deadlineExtRequest: { proposedDate: proposedDateTime, reason: extReqReason, requestedByName: employeeName, status: "pending" } } : prev);
+      // Block live listener — otherwise Firestore snapshot overwrites optimistic update before it persists
+      ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 6000;
+      const extReqData = { proposedDate: proposedDateTime, reason: extReqReason, requestedByName: employeeName, status: "pending" };
+      setSelectedTask(prev => prev ? { ...prev, deadlineExtRequest: extReqData } : prev);
+      setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, deadlineExtRequest: extReqData } : t));
+
     } catch (e) { alert(e.message); }
     finally { setExtReqBusy(false); }
   }, [extReqDate, extReqTime, extReqReason, selectedTask, employeeName]);
@@ -1372,10 +1377,33 @@ export default function TasksPage() {
       setSelectedTask(prev => {
         if (!prev) return prev;
         const updatedExt = { ...(prev.deadlineExtRequest || {}), status: action === "approve" ? "approved" : action === "counter" ? "countered" : "rejected", reviewedByName: employeeName, approvedDate: action === "approve" ? newDate : undefined, counterDate: action === "counter" ? newDate : undefined };
-        return { ...prev, deadlineExtRequest: updatedExt, fixedDeadline: action !== "reject" ? (newDate || prev.fixedDeadline) : prev.fixedDeadline };
+        return {
+          ...prev,
+          deadlineExtRequest: updatedExt,
+          // Update BOTH fields — fixedDeadline (fixed-deadline tasks) + dueDate (timer tasks)
+          fixedDeadline: action !== "reject" ? (newDate || prev.fixedDeadline) : prev.fixedDeadline,
+          dueDate:       action !== "reject" ? (newDate || prev.dueDate)       : prev.dueDate,
+        };
       });
       if (action !== "reject" && newDate) {
-        setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, fixedDeadline: newDate } : t));
+        // Block listener on BOTH sides so optimistic update isn't overwritten
+        ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 8000;
+        setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? {
+          ...t,
+          fixedDeadline: newDate,
+          dueDate: newDate,   // ← this is what the employee's timer reads
+          deadlineExtRequest: { ...(t.deadlineExtRequest || {}), status: action === "approve" ? "approved" : "countered" },
+        } : t));
+        // Write directly to Firestore so the employee's live listener picks it up instantly
+        try {
+          await updateDoc(doc(firebaseDb, "cowork_tasks", selectedTask.taskId), {
+            dueDate: newDate,
+            fixedDeadline: newDate,
+            "deadlineExtRequest.status": action === "approve" ? "approved" : "countered",
+            "deadlineExtRequest.reviewedByName": employeeName,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (e) { console.error("[ext approve] direct write:", e.message); }
       }
     } catch (e) { alert(e.message); }
     finally { setReviewExtBusy(false); }
@@ -2177,7 +2205,7 @@ export default function TasksPage() {
     setApprovingSenderTimer(true);
     // Optimistic update
     const optimistic = {
-      status: "deadline_approved",
+      status: "in_progress",
       deadlineWindowSecs: approvedSecs,
       originalWindowSecs: approvedSecs,
       dueDate: new Date(Date.now() + approvedSecs * 1000).toISOString(),
@@ -2189,6 +2217,9 @@ export default function TasksPage() {
     setSenderTimerNegotiateModal(null);
     try {
       await apiFetch(`/cowork/task/${selectedTask.taskId}/approve-sender-timer`, { method: "POST" });
+      // Confirm & start in the same action — no second "Confirm & Start" step needed
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/confirm`, { method: "POST" });
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/start`, { method: "POST" });
     } catch (e) {
       alert(e.message);
       // Rollback
@@ -8129,7 +8160,33 @@ em-emoji-picker,
           />
           : <EditDeadlineModal task={task} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(task.taskId); loadAllTasks(); }} />
       )}
-      {activeModal?.type === "submit_completion" && <SubmitCompletionModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
+      {activeModal?.type === "submit_completion" && <SubmitCompletionModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} timerActiveTaskId={timerActiveTaskId} onPauseTimer={async (taskId, taskTitle) => {
+        // Auto-pause silently with a preset commit message — no modal shown
+        try {
+          const sess = timerSessionMap?.get(taskId);
+          const base = sess?.totalSeconds || 0;
+          const start = sess?.lastStartTime || Date.now();
+          const secondsWorked = base + Math.floor((Date.now() - start) / 1000);
+          const { addDoc: _addDoc, collection: _col, serverTimestamp: _st } = await import("firebase/firestore");
+          await _addDoc(_col(firebaseDb, "cowork_work_commits", employeeId, "logs"), {
+            taskId,
+            taskTitle: taskTitle || taskId,
+            message: "✅ Work submitted for review — timer stopped automatically.",
+            secondsWorked,
+            stoppedAt: _st(),
+            empId: employeeId,
+            empName: employeeName,
+            hasMessage: true,
+            attachments: [],
+            hasAttachments: false,
+            autoStopped: true,
+            reason: "submission",
+          });
+        } catch (e) {
+          console.error("[auto-pause on submit]", e.message);
+        }
+        timerPause(taskId, taskTitle);
+      }} />}
       {activeModal?.type === "review_completion" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="review_completion" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
       {activeModal?.type === "ceo_review" && <ReviewCompletionModal task={getModalTask()} currentEmployeeId={employeeId} role={role} reviewType="ceo_review" onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); }} />}
 

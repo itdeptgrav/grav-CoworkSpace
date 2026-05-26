@@ -42,6 +42,67 @@ const TYPE_COPY = {
   goal: { titlePlaceholder: "e.g. Achieve ₹5 Crore Revenue — Q2 2025", descPlaceholder: "Describe the goal, its context, and why it matters to the organisation.", notesPlaceholder: "List the strategy, key actions, or sub-objectives the assignee should pursue.", notesLabel: "Strategy / Key Actions" },
 };
 
+// ── TimeTrackingSection — MODULE SCOPE ───────────────────────────────────────
+// MUST be outside CreateTaskModal. If defined inside, React sees a new function
+// reference on every render → unmounts + remounts the input DOM node → focus
+// lost mid-keystroke → deadline field appears to auto-disable.
+function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDurationVal, timerDurationUnit }) {
+  const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none", transition: "border-color 0.12s" };
+  const _lbl = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 };
+  // Local date string avoids UTC midnight drift for IST / UTC+ users
+  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  return (
+    <div>
+      <label style={_lbl}>Time Tracking</label>
+      <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
+        {[{ val: true, label: "Timer — Start / Pause" }, { val: false, label: "Fixed Deadline" }].map(opt => (
+          <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
+            style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {hasTimer && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ padding: "7px 10px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, color: "#6B7280", lineHeight: 1.5 }}>
+            The assignee will start a timer when beginning work. Time worked is recorded automatically.
+          </div>
+          <div>
+            <label style={_lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(optional — assignee can negotiate)</span></label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3"
+                value={timerDurationVal || ""}
+                onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationVal", v); }} />
+              <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }}
+                value={timerDurationUnit || "hours"} onChange={e => onSet("timerDurationUnit", e.target.value)}>
+                <option value="minutes">Minutes</option>
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+      {!hasTimer && (
+        <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+          <div style={{ flex: 2 }}>
+            <label style={_lbl}>Deadline Date *</label>
+            <input className="ctm-inp" style={_inp} type="date"
+              value={deadline || ""} min={todayStr}
+              onChange={e => onSet("deadline", e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={_lbl}>Time *</label>
+            <input className="ctm-inp" style={_inp} type="time"
+              value={deadlineTime || ""}
+              onChange={e => onSet("deadlineTime", e.target.value)} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CreateTaskModal({
   onClose, onSuccess,
   currentEmployeeId, currentEmployeeName, currentRole,
@@ -391,7 +452,7 @@ export default function CreateTaskModal({
           const unit = form.timerDurationUnit || "hours";
           _senderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
         }
-        
+
         const computedPriority = isFolder ? 5 : await fetchNextPriorityForAssignees(selectedIds);
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
@@ -528,60 +589,7 @@ export default function CreateTaskModal({
   );
 
   // ── TimeTrackingSection ──
-  const TimeTrackingSection = ({ hasTimer, deadline, deadlineTime, onSet, timerDurationVal, timerDurationUnit }) => (<div>
-    <label style={lbl}>Time Tracking</label>
-    <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
-      {[
-        { val: true, label: "Timer — Start / Pause" },
-        { val: false, label: "Fixed Deadline" },
-      ].map(opt => (
-        <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
-          style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
-          {opt.label}
-        </button>
-      ))}
-    </div>
-    {hasTimer && (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ padding: "7px 10px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, color: "#6B7280", lineHeight: 1.5 }}>
-          The assignee will start a timer when beginning work. Time worked is recorded automatically.
-        </div>
-        <div>
-          <label style={lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(optional — assignee can negotiate)</span></label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              className="ctm-inp" style={{ ...inp, width: 80 }}
-              type="text" inputMode="numeric" pattern="[0-9]*"
-              placeholder="e.g. 3"
-              value={timerDurationVal || ""}
-              onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationVal", v); }}
-            />
-            <select className="ctm-inp" style={{ ...inp, flex: 1, cursor: "pointer" }}
-              value={timerDurationUnit || "hours"}
-              onChange={e => onSet("timerDurationUnit", e.target.value)}
-            >
-              <option value="minutes">Minutes</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    )}
-    {!hasTimer && (
-      <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
-        <div style={{ flex: 2 }}>
-          <label style={lbl}>Deadline Date *</label>
-          <input className="ctm-inp" style={inp} type="date" value={deadline} min={new Date().toISOString().split("T")[0]} onChange={e => onSet("deadline", e.target.value)} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={lbl}>Time *</label>
-          <input className="ctm-inp" style={inp} type="time" value={deadlineTime} onChange={e => onSet("deadlineTime", e.target.value)} />
-        </div>
-      </div>
-    )}
-  </div>
-  );
+
 
   // ── Multi-mode render ──
   const [rowStep, setRowStep] = useState(1);

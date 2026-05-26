@@ -16,13 +16,12 @@
  * - IBM Plex Sans, #1B4F8A brand color
  */
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GwAvatar } from "../shared/CoworkShared";
 import { ReportCard, ReportDateGroup } from "./ReportCard";
 import ThirdPartyTask from "./ThirdPartyTask";
 import GoalTask from "./GoalTask";
 import DeadlineBreakdown from "./DeadlineBreakdown";
-import { fmtLiveDeadlineDateTime } from "../../../lib/tasksPageHelpers";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
@@ -293,6 +292,291 @@ function RepeatSlots({ task, employeeId, isAssignee, isCEO, isTL }) {
   );
 }
 
+// ── WorkLogsSection ───────────────────────────────────────────────────────────
+// Collapsible. Shows: approved vs used time summary, progress bar, extension
+// history, and a tree-style list of every timer-pause commit log.
+// Visible to all roles — sender / TL / CEO can audit the full work timeline.
+function WorkLogsSection({ task }) {
+  const [expanded, setExpanded] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [logError, setLogError] = useState("");
+
+  const windowSecs = Number(task.deadlineWindowSecs) || 0;
+
+  useEffect(() => {
+    if (!expanded || !task.taskId) return;
+    const assigneeIds = task.assigneeIds || [];
+    if (!assigneeIds.length) { setLoading(false); return; }
+    setLoading(true);
+    setLogError("");
+    (async () => {
+      try {
+        // No orderBy — avoids requiring a Firestore composite index.
+        // We sort the results in JS after fetching.
+        const { collection, query, where, getDocs } = await import("firebase/firestore");
+        const { firebaseDb } = await import("../../../lib/coworkFirebase");
+        const all = [];
+        for (const aid of assigneeIds) {
+          const q = query(
+            collection(firebaseDb, "cowork_work_commits", aid, "logs"),
+            where("taskId", "==", task.taskId)
+          );
+          const snap = await getDocs(q);
+          snap.docs.forEach(d => all.push({ ...d.data(), id: d.id }));
+        }
+        // Sort chronologically by stoppedAt (Firestore Timestamp or ISO string)
+        all.sort((a, b) => {
+          const ta = a.stoppedAt?.seconds ?? (a.stoppedAt ? new Date(a.stoppedAt).getTime() / 1000 : 0);
+          const tb = b.stoppedAt?.seconds ?? (b.stoppedAt ? new Date(b.stoppedAt).getTime() / 1000 : 0);
+          return ta - tb;
+        });
+        setLogs(all);
+      } catch (e) {
+        console.error("WorkLogsSection fetch error:", e);
+        setLogError(e?.message || "Failed to load logs.");
+      }
+      finally { setLoading(false); }
+    })();
+  }, [expanded, task.taskId]);
+
+  const totalWorked = logs.length > 0
+    ? logs.reduce((s, l) => s + (Number(l.secondsWorked) || 0), 0)
+    : Number(task.timerTotalSeconds || task.workedSeconds || 0);
+
+  const overUsed = windowSecs > 0 && totalWorked > windowSecs;
+  const extReq = task.deadlineExtRequest;
+
+  const fmtTs = (ts) => {
+    if (!ts) return "—";
+    const ms = ts?.seconds ? ts.seconds * 1000 : new Date(ts).getTime();
+    if (!ms || isNaN(ms)) return "—";
+    return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div style={{ border: "1px solid #F1F5F9", borderRadius: 8, overflow: "hidden", fontFamily: F }}>
+
+      {/* Header */}
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", background: "#F8FAFC", cursor: "pointer", userSelect: "none" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span style={{ fontSize: 11, fontWeight: 700, color: BRAND }}>Work Timeline</span>
+          {(logs.length > 0 || totalWorked > 0) && (
+            <span style={{ fontSize: 9, fontWeight: 700, background: "#EBF2FA", color: BRAND, padding: "1px 6px", borderRadius: 99 }}>
+              {logs.length > 0 ? `${logs.length} session${logs.length > 1 ? "s" : ""}` : "tracked"}
+            </span>
+          )}
+          {extReq && (
+            <span style={{ fontSize: 9, fontWeight: 700, background: "#FFFBEB", color: "#D97706", padding: "1px 6px", borderRadius: 99 }}>
+              {extReq.status === "approved" ? "ext. approved" : extReq.status === "pending" ? "ext. pending" : "ext. rejected"}
+            </span>
+          )}
+        </div>
+        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"
+          style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s", flexShrink: 0 }}>
+          <path d="M2.5 1.5l4 3-4 3" stroke="#9CA3AF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+          {/* Summary cards */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {windowSecs > 0 && (
+              <div style={{ flex: 1, minWidth: 88, padding: "8px 10px", background: "#EBF2FA", borderRadius: 6, border: "1px solid #BFDBFE" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: BRAND, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>Approved</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: BRAND, fontFamily: "monospace" }}>{fmtSecs(windowSecs)}</div>
+                <div style={{ fontSize: 9, color: "#64748B", marginTop: 2 }}>allocated window</div>
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 88, padding: "8px 10px", background: overUsed ? "#FEF2F2" : "#F0FDF4", borderRadius: 6, border: `1px solid ${overUsed ? "#FECDD3" : "#BBF7D0"}` }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: overUsed ? "#DC2626" : "#16A34A", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>Used</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: overUsed ? "#DC2626" : "#16A34A", fontFamily: "monospace" }}>{fmtSecs(totalWorked)}</div>
+              <div style={{ fontSize: 9, color: "#64748B", marginTop: 2 }}>time worked</div>
+            </div>
+            {windowSecs > 0 && totalWorked > 0 && (
+              <div style={{ flex: 1, minWidth: 88, padding: "8px 10px", background: "#F8FAFC", borderRadius: 6, border: "1px solid #E5E7EB" }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>
+                  {overUsed ? "Over by" : "Remaining"}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: overUsed ? "#DC2626" : "#059669", fontFamily: "monospace" }}>
+                  {overUsed ? fmtSecs(totalWorked - windowSecs) : fmtSecs(windowSecs - totalWorked)}
+                </div>
+                <div style={{ fontSize: 9, color: "#64748B", marginTop: 2 }}>{overUsed ? "past deadline" : "left in window"}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Progress bar */}
+          {windowSecs > 0 && totalWorked > 0 && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: "#9CA3AF" }}>Time usage</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: overUsed ? "#DC2626" : "#374151" }}>
+                  {Math.round((totalWorked / windowSecs) * 100)}% of approved window
+                </span>
+              </div>
+              <div style={{ height: 6, background: "#F1F5F9", borderRadius: 99, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${Math.min(100, (totalWorked / windowSecs) * 100)}%`,
+                  background: overUsed ? "#DC2626" : totalWorked / windowSecs > 0.8 ? "#D97706" : "#16A34A",
+                  borderRadius: 99, transition: "width 0.5s",
+                }} />
+              </div>
+              {overUsed && (
+                <div style={{ fontSize: 10, color: "#DC2626", fontWeight: 600, marginTop: 4 }}>
+                  Exceeded approved window by {fmtSecs(totalWorked - windowSecs)}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Extension history */}
+          {extReq && (
+            <div style={{ padding: "10px 12px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 7 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+                <span style={{ fontSize: 12 }}>⏰</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#D97706", textTransform: "uppercase", letterSpacing: "0.06em" }}>Deadline Extension</span>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 99,
+                  background: extReq.status === "approved" ? "#DCFCE7" : extReq.status === "rejected" ? "#FEE2E2" : "#FEF9C3",
+                  color: extReq.status === "approved" ? "#166534" : extReq.status === "rejected" ? "#991B1B" : "#854D0E",
+                }}>
+                  {(extReq.status || "pending").toUpperCase()}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#374151", lineHeight: 1.6 }}>
+                {extReq.requestedByName && <div>Requested by: <strong>{extReq.requestedByName}</strong></div>}
+                {extReq.proposedDate && <div>Proposed: <strong>{fmtDateTime(extReq.proposedDate)}</strong></div>}
+                {extReq.reason && <div style={{ color: "#6B7280" }}>Reason: "{extReq.reason}"</div>}
+                {extReq.status === "approved" && task.dueDate && (
+                  <div style={{ color: "#166534", fontWeight: 600, marginTop: 3 }}>
+                    ✅ Approved — new deadline: {fmtDateTime(task.dueDate)}
+                  </div>
+                )}
+                {extReq.status === "rejected" && extReq.rejectionReason && (
+                  <div style={{ color: "#991B1B", marginTop: 3 }}>✕ Rejected: "{extReq.rejectionReason}"</div>
+                )}
+                {extReq.status === "countered" && extReq.counterDate && (
+                  <div style={{ color: "#7C3AED", marginTop: 3 }}>↩ Counter proposed: {fmtDateTime(extReq.counterDate)}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Work session logs (tree structure) */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+              Work Sessions {logs.length > 0 ? `(${logs.length})` : ""}
+            </div>
+            {loading ? (
+              <div style={{ fontSize: 11, color: "#9CA3AF", padding: "6px 0", display: "flex", alignItems: "center", gap: 6 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                  style={{ animation: "db-spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
+                Loading sessions…
+              </div>
+            ) : logError ? (
+              <div style={{ fontSize: 11, color: "#DC2626", padding: "6px 8px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 5 }}>
+                ⚠️ {logError}
+              </div>
+            ) : logs.length === 0 ? (
+              <div style={{ fontSize: 11, color: "#9CA3AF", padding: "4px 0" }}>
+                No sessions recorded. Logs appear after the first timer pause.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {logs.map((log, i) => {
+                  const isLast = i === logs.length - 1;
+                  return (
+                    <div key={log.id || i} style={{ display: "flex", gap: 0 }}>
+                      {/* Tree line */}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 22, flexShrink: 0 }}>
+                        <div style={{
+                          width: 9, height: 9, borderRadius: "50%", marginTop: 4, flexShrink: 0,
+                          background: log.autoStopped ? "#D97706" : BRAND,
+                          border: "2px solid #fff", boxShadow: "0 0 0 1px #E5E7EB",
+                        }} />
+                        {!isLast && <div style={{ width: 1, flex: 1, background: "#E5E7EB", minHeight: 12 }} />}
+                      </div>
+                      {/* Log content */}
+                      <div style={{ flex: 1, paddingBottom: isLast ? 2 : 10, paddingLeft: 8 }}>
+                        {/* Session header: duration + auto-stop badge */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#1F2937", fontFamily: "monospace" }}>
+                            {fmtSecs(Number(log.secondsWorked) || 0)}
+                          </span>
+                          {log.autoStopped && (
+                            <span style={{ fontSize: 9, fontWeight: 600, background: "#FEF3C7", color: "#D97706", padding: "1px 5px", borderRadius: 3 }}>
+                              {log.reason === "submission" ? "auto-stopped · submitted"
+                                : log.reason === "deadline_reached" ? "auto-stopped · deadline reached"
+                                  : "auto-stopped"}
+                            </span>
+                          )}
+                        </div>
+                        {/* Start → Pause timestamps */}
+                        {(() => {
+                          const stopMs = log.stoppedAt?.seconds
+                            ? log.stoppedAt.seconds * 1000
+                            : log.stoppedAt ? new Date(log.stoppedAt).getTime() : null;
+                          const startMs = stopMs != null
+                            ? stopMs - (Number(log.secondsWorked) || 0) * 1000
+                            : null;
+                          const fmt = (ms) => ms
+                            ? new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                            : "—";
+                          return (
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: log.message ? 6 : 2, flexWrap: "wrap" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 7px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 4 }}>
+                                <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polygon points="3,1 11,6 3,11" fill="#16A34A" /></svg>
+                                <span style={{ fontSize: 10, color: "#166534", fontWeight: 600 }}>{fmt(startMs)}</span>
+                              </div>
+                              <svg width="10" height="8" viewBox="0 0 14 8" fill="none">
+                                <path d="M1 4h12M9 1l3 3-3 3" stroke="#9CA3AF" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 7px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 4 }}>
+                                <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><rect x="2" y="1" width="3" height="10" rx="1" fill="#DC2626" /><rect x="7" y="1" width="3" height="10" rx="1" fill="#DC2626" /></svg>
+                                <span style={{ fontSize: 10, color: "#991B1B", fontWeight: 600 }}>{fmt(stopMs)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {log.message && (
+                          <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.5, background: "#F8FAFC", border: "1px solid #F1F5F9", borderRadius: 5, padding: "6px 9px", marginBottom: log.attachments?.length ? 5 : 0 }}>
+                            {log.message}
+                          </div>
+                        )}
+                        {log.attachments?.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                            {log.attachments.map((a, ai) => (
+                              <a key={ai} href={a.url} target="_blank" rel="noreferrer"
+                                style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "#EBF2FA", color: BRAND, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                📎 {a.name}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 export default function DetailBody({
@@ -311,16 +595,30 @@ export default function DetailBody({
   const windowSecs = Number(task.deadlineWindowSecs) || 0;
   const isRunningThis = timerActiveTaskId === task.taskId;
   const timerSession = getTimerSession ? getTimerSession(task.taskId) : null;
-  const isTimerExceeded = windowSecs > 0 && workedSecs >= windowSecs;
+
+  // Use wall-clock dueDate when available — handles approved extensions correctly.
+  // Without this, isTimerExceeded stays true even after extension is approved
+  // because workedSecs(2m) >= windowSecs(2m) never resets.
+  const isTimerExceeded = task.dueDate
+    ? new Date(task.dueDate) < new Date()
+    : (windowSecs > 0 && workedSecs >= windowSecs);
   const isFixedDeadlinePassed = !task.hasTimer && task.fixedDeadline && new Date(task.fixedDeadline) < new Date() && ["in_progress", "confirmed"].includes(task.status);
   const timerBlocked = timerActiveTaskId && timerActiveTaskId !== task.taskId;
 
-  const remainingSecs = windowSecs > 0 ? Math.max(0, windowSecs - workedSecs) : null;
-  const overSecs = windowSecs > 0 && workedSecs > windowSecs ? workedSecs - windowSecs : 0;
+  // Wall-clock based remaining/over — reflects approved extensions immediately
+  const remainingSecs = task.dueDate
+    ? Math.max(0, (new Date(task.dueDate).getTime() - Date.now()) / 1000)
+    : (windowSecs > 0 ? Math.max(0, windowSecs - workedSecs) : null);
+  const overSecs = task.dueDate
+    ? Math.max(0, (Date.now() - new Date(task.dueDate).getTime()) / 1000)
+    : (windowSecs > 0 && workedSecs > windowSecs ? workedSecs - windowSecs : 0);
 
-  const liveDeadlineStr = fmtLiveDeadlineDateTime(task, timerSession);
+  // Fixed from the moment the task starts — never recalculates on pause/resume
+  const liveDeadlineStr = task.dueDate ? fmtDateTime(task.dueDate) : null;
+
+  // Show date + time (previously only date)
   const createdAt = task.createdAt
-    ? fmtDate(typeof task.createdAt === "object" && task.createdAt.seconds ? task.createdAt.seconds * 1000 : task.createdAt)
+    ? fmtDateTime(typeof task.createdAt === "object" && task.createdAt.seconds ? task.createdAt.seconds * 1000 : task.createdAt)
     : null;
 
   const compStatus = task.completionStatus;
@@ -508,8 +806,16 @@ export default function DetailBody({
                   {liveDeadlineStr && (
                     <InfoRow label="Due at">
                       <span style={{ fontWeight: 600, color: isTimerExceeded ? "#DC2626" : "#1F2937" }}>{liveDeadlineStr}</span>
+                      {isTimerExceeded && (
+                        <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#DC2626", background: "#FEE2E2", padding: "1px 6px", borderRadius: 4 }}>Passed</span>
+                      )}
                     </InfoRow>
                   )}
+
+                  {/* ── Work Timeline: sessions, usage summary, extension history ── */}
+                  <div style={{ padding: "8px 0" }}>
+                    <WorkLogsSection task={task} />
+                  </div>
                 </>
               )}
 
@@ -519,6 +825,30 @@ export default function DetailBody({
                   {fmtDate(task.dueDate)}
                 </InfoRow>
               )}
+
+              {/* ── Extension request status — shown to ALL roles ── */}
+              {task.deadlineExtRequest && (() => {
+                const ext = task.deadlineExtRequest;
+                const sMap = {
+                  pending: { color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", icon: "⏳", label: "Pending approval" },
+                  approved: { color: "#16A34A", bg: "#F0FDF4", border: "#BBF7D0", icon: "✅", label: "Approved" },
+                  rejected: { color: "#DC2626", bg: "#FEF2F2", border: "#FECDD3", icon: "✕", label: "Rejected" },
+                  countered: { color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE", icon: "↩", label: "Counter proposed" },
+                };
+                const s = sMap[ext.status] || sMap.pending;
+                return (
+                  <InfoRow label="Extension">
+                    <div style={{ padding: "7px 10px", background: s.bg, border: `1px solid ${s.border}`, borderRadius: 6, fontSize: 11, lineHeight: 1.5 }}>
+                      <div style={{ fontWeight: 700, color: s.color, marginBottom: 3 }}>{s.icon} {s.label}</div>
+                      {ext.requestedByName && <div style={{ color: "#374151" }}>By: <strong>{ext.requestedByName}</strong></div>}
+                      {ext.proposedDate && <div style={{ color: "#374151" }}>Proposed: <strong>{fmtDateTime(ext.proposedDate)}</strong></div>}
+                      {ext.reason && <div style={{ color: "#6B7280", marginTop: 2 }}>Reason: {ext.reason}</div>}
+                      {ext.status === "approved" && task.dueDate && <div style={{ color: "#16A34A", marginTop: 2, fontWeight: 600 }}>New deadline: {fmtDateTime(task.dueDate)}</div>}
+                      {ext.status === "rejected" && ext.rejectionReason && <div style={{ color: "#991B1B", marginTop: 2 }}>Rejected: {ext.rejectionReason}</div>}
+                    </div>
+                  </InfoRow>
+                );
+              })()}
             </>
           )}
 
@@ -790,13 +1120,13 @@ export default function DetailBody({
                 )}
 
                 {/* ── EMPLOYEE: in progress actions ── */}
-                {isAssignee && status === "in_progress" && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
+                {/* {isAssignee && status === "in_progress" && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
                   <>
                     <ActionBtn variant="outline" onClick={() => handleAction("report")}>
                       Submit Daily Report
                     </ActionBtn>
                   </>
-                )}
+                )} */}
 
                 {/* ── EMPLOYEE: submit for review ── */}
                 {isAssignee && isStarted && !task.isGoal && !task.isThirdParty && !task.isRepeat && !compStatus && (

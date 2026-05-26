@@ -224,10 +224,21 @@ export default function TaskActionBanner({
   if (!banner && isAssignee && isStarted && status === "in_progress" && task.deadlineWindowSecs > 0 &&
     !["submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(comp)) {
     const isRunning = timerActiveTaskId === task.taskId;
-    const worked = getDisplaySeconds?.(task.taskId) || 0;
-    const total = task.deadlineWindowSecs || 0;
-    const remaining = Math.max(0, total - worked);
-    const isOver = worked >= total && total > 0;
+    const worked    = getDisplaySeconds?.(task.taskId) || 0;
+    // Remaining = wall-clock until fixed dueDate (never shifts on pause/resume)
+    const remaining = task.dueDate
+      ? Math.max(0, (new Date(task.dueDate).getTime() - Date.now()) / 1000)
+      : Math.max(0, (task.deadlineWindowSecs || 0) - worked);
+    const isOver = task.dueDate
+      ? new Date(task.dueDate) < new Date()
+      : (worked >= (task.deadlineWindowSecs || 0));
+    // Total for the progress bar: derive from dueDate when available so that
+    // approved extensions are reflected immediately (worked + remaining = new total).
+    // Without this, total stays at the original deadlineWindowSecs and the bar
+    // shows "2m of 2m / 0m over" even after a 20-minute extension is approved.
+    const total = task.dueDate
+      ? Math.max(worked + remaining, task.deadlineWindowSecs || 0)
+      : (task.deadlineWindowSecs || 0);
     banner = { type: "timer", isRunning, worked, total, remaining, isOver };
   }
 

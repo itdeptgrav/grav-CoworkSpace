@@ -28,7 +28,7 @@ function getFileColor(name = "") {
     return "#5f6368";
 }
 
-export default function SubmitCompletionModal({ task, currentEmployeeId, onClose, onSuccess }) {
+export default function SubmitCompletionModal({ task, currentEmployeeId, onClose, onSuccess, timerActiveTaskId, onPauseTimer }) {
     const [visible, setVisible] = useState(false);
     const [message, setMessage] = useState("");
     const [files, setFiles] = useState([]);
@@ -80,6 +80,11 @@ export default function SubmitCompletionModal({ task, currentEmployeeId, onClose
                 url: f.url, name: f.name, downloadUrl: f.downloadUrl, embedUrl: f.embedUrl, fileId: f.fileId,
             }));
             await submitCompletionRequest({ taskId: task.taskId, message: message.trim(), imageUrls, pdfAttachments });
+            // Auto-pause the timer if it's still running for this task —
+            // employees often forget to stop it after submitting work.
+            if (timerActiveTaskId === task.taskId && onPauseTimer) {
+              onPauseTimer(task.taskId, task.title);
+            }
             onSuccess?.();
         } catch (err) { setError(err.message); }
         finally { setSubmitting(false); }
