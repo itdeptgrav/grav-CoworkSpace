@@ -2349,7 +2349,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     { id: "mrf", label: "Material Requests", icon: "mrf", path: "/coworking/mrf" },
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
     { id: "settings", label: "Profile", icon: "profile", path: "/coworking/settings" },
+    ...(isCEO ? [{ id: "office_settings", label: "Task Settings", icon: "settings", path: "/coworking/task-settings" }] : []),
   ];
+  
 
   const isActive = (path) => {
     if (path === "/coworking") return pathname === "/coworking";
@@ -3338,25 +3340,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
             <div className="cw-topbar-right">
 
-              <button
-                className="cw-topbar-icon-btn"
-                title="Notes"
-                onClick={() => setNotesPanelOpen(true)}
-                style={{ position: "relative" }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="16" y1="13" x2="8" y2="13" />
-                  <line x1="16" y1="17" x2="8" y2="17" />
-                  <polyline points="10 9 9 9 8 9" />
-                </svg>
-                {notesAlertCount > 0 && (
-                  <span style={{ position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: "#EF4444", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "1.5px solid #fff", lineHeight: 1, pointerEvents: "none", letterSpacing: "-0.02em" }}>
-                    {notesAlertCount > 9 ? "9+" : notesAlertCount}
-                  </span>
-                )}
-              </button>
+              
 
               {/* SOP button removed from topbar — accessible via sidebar only */}
 
@@ -3434,19 +3418,6 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 )}
               </div>
 
-              {/* Hard Refresh button */}
-              <button
-                className="cw-topbar-icon-btn"
-                title="Hard Refresh"
-                onClick={() => { window.location.reload(true); }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="23 4 23 10 17 10" />
-                  <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-                </svg>
-              </button>
-              {/* Universal Request Button */}
-              
               <button
                 className="cw-topbar-icon-btn"
                 title="Requests"
@@ -3460,6 +3431,42 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 {reqUnreadCount > 0 && (
                   <span style={{ position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: "#EF4444", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "1.5px solid #fff", lineHeight: 1, pointerEvents: "none", letterSpacing: "-0.02em" }}>
                     {reqUnreadCount > 9 ? "9+" : reqUnreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Hard Refresh button */}
+              <button
+                className="cw-topbar-icon-btn"
+                title="Hard Refresh"
+                onClick={() => { window.location.reload(true); }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+                </svg>
+              </button>
+              {/* Universal Request Button */}
+              
+              
+
+
+              <button
+                className="cw-topbar-icon-btn"
+                title="Notes"
+                onClick={() => setNotesPanelOpen(true)}
+                style={{ position: "relative" }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                {notesAlertCount > 0 && (
+                  <span style={{ position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, background: "#EF4444", color: "#fff", fontSize: 9.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px", border: "1.5px solid #fff", lineHeight: 1, pointerEvents: "none", letterSpacing: "-0.02em" }}>
+                    {notesAlertCount > 9 ? "9+" : notesAlertCount}
                   </span>
                 )}
               </button>
@@ -3938,8 +3945,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
 
-// -> so basically create an setting page (and keep in the sidebar, means in the coworking shell component) so that the admin/ceo will only see that page so he will set for the office timing (office in time out time), 
+// -> so basically create an setting page (and keep in the sidebar, means in the coworking shell component) so that the admin/ceo will only see that page so he will set for the office timing (office in time out time), and one more input that is maximum allowed time for the Task Action : ok so the admin will set in form of minute/hour ok..
 
 
-
-// -> while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is 
+// ->so that while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is by fetching the data from the setting page in order to check that what is the office in time and out time and also what is the maximum allowed time for the Task Action ,
+//  so that first of all check for the maximum allowed time gap from the corresponding task created time ok (so thing that ki an sender create /assign me an task at 4.30 PM and i am seeing /doing the start timer at 6.35) so if the maximum allowed time the user crossed as like me , jsut thing that ki the allowed time gap in the setting is 2 hour ok, so as i exceeded that 2 hour hence the due at time shouldn't be put/fill as per my start time ok, instead it is needed to put as per after that defined allowed gap means as for my case the timegap is 2 hours(which is defined in the setting) so after 2 hours measn as i got the ask at 4.30 pm so after 2 hour means 6.30 PM so as per the 6.30 PM the task due date will goona set ok not as per my start time measn not as per the 6.35 PM ok..
+// one one more twist here also present that is the office in-out timing ok , so just thing that ki the ceo/admin set the in time as 9.30 and out time as 6.30 so hence the due at time will goona set as per this ok means just thing that ki sender create/assigned to me an task at 5.30 PM ok and i saw that at 6.00PM ok.. (so bascially as u know that ki i am inside/within that maximum allowed time gap which is 2 hour) so my due at time will goona auto set as per my start button press ok means on start ok, so basically the timer that the sender have assigned to me as 5 hrs for that task ok. so as i start at 6.00PM so currently without the office in/out time it is putting the due at time as 11.00 PM ok but as per the office in/out time that is defined as 9.30 to 6.30 so hence the due at time will goona set as per the office in-out time so measn if we consider as per the defined office time hence my due at time should need to set at Next working day at 2:00 PM.(7 yes one more thing is that working day, so basically also in the settnig page, keep the option for defining the working day ok so let's ask the office in-out time as per the day wise ok from monday to sunday ok, bydefault keep the timing from 9.30AM to 6.30PM and sunday as off day ok)

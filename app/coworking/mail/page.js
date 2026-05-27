@@ -937,7 +937,12 @@ function MailRow({ mail, active, myId, myPic, folder, empMap, onSelect, onStar, 
     const starred = (mail.starredBy || []).includes(myId);
     const isMe = mail.from === myId;
     const displayName = folder === "sent"
-        ? (mail.toNames?.[mail.to?.[0]] || mail.to?.[0] || "—")
+        ? (() => {
+            const ids = mail.to || [];
+            const first = mail.toNames?.[ids[0]] || ids[0] || "—";
+            const extra = ids.length - 1;
+            return extra > 0 ? `${first} & ${extra} more` : first;
+          })()
         : mail.fromName;
     const displayPic = folder === "sent"
         ? (mail.toPics?.[mail.to?.[0]] || empMap?.[mail.to?.[0]]?.profilePicUrl || null)
@@ -1048,9 +1053,8 @@ function ThreadView({ threadId, myId, myName, myPic, employees, empMap, onReply,
 
                             {open && (
                                 <>
-                                    <div className="cw-mailbody" style={{ padding: "0 18px 16px", paddingLeft: 62, fontSize: 13.5, lineHeight: 1.65 }} dangerouslySetInnerHTML={{ __html: mail.body }} />
                                     {mail.attachments?.length > 0 && (
-                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 18px 14px", paddingLeft: 62 }}>
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "12px 18px 10px", paddingLeft: 62, borderBottom: "1px solid var(--cw-border)" }}>
                                             {mail.attachments.map((a, i) => (
                                                 a.type === "image" || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || "") ? (
                                                     <a key={i} href={a.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginBottom: 4 }}>
@@ -1073,6 +1077,7 @@ function ThreadView({ threadId, myId, myName, myPic, employees, empMap, onReply,
                                             ))}
                                         </div>
                                     )}
+                                    <div className="cw-mailbody" style={{ padding: "14px 18px 16px", paddingLeft: 62, fontSize: 13.5, lineHeight: 1.65 }} dangerouslySetInnerHTML={{ __html: mail.body }} />
                                     {isLast && (
                                         <div style={{ display: "flex", gap: 6, padding: "10px 18px 14px", paddingLeft: 62, borderTop: "1px solid var(--cw-border)", flexWrap: "wrap" }}>
                                             <button onClick={() => onReply(mail)} className="cw-btn-secondary">

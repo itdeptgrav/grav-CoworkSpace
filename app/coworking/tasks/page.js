@@ -1068,7 +1068,68 @@ export default function TasksPage() {
       return;
     }
 
-    // Normal path — plain start/resume, no re-anchoring.
+    // Normal path — plain start/resume.
+    // On FIRST start (status = confirmed / deadline_approved): apply office
+    // settings to compute the correct wall-clock dueDate before starting.
+    const _task = allTaskMapRef.current?.get(newTaskId);
+    const _existingSession = timerSessionMap?.get(newTaskId);
+    const _isFirstStart = _task && (
+      ["confirmed","deadline_approved"].includes(_task.status) ||
+      (
+        _task.status === "in_progress" &&
+        !_existingSession?.lastStartTime &&
+        (_existingSession?.totalSeconds || 0) === 0
+      )
+    );
+
+    if (_isFirstStart && Number(_task.deadlineWindowSecs) > 0) {
+      try {
+        const { getDoc: _gd, doc: _d, updateDoc: _ud, serverTimestamp: _st }
+          = await import("firebase/firestore");
+        const snap = await _gd(_d(firebaseDb, "cowork_settings", "office"));
+        const settings = snap.exists() ? snap.data() : {};
+
+        // Import pure utility (no React, safe to dynamic-import)
+        const { calcDueDate } = await import("../../../lib/officeDueDate");
+
+        const taskCreatedAtMs = _task.createdAt?.seconds
+          ? _task.createdAt.seconds * 1000
+          : _task.createdAt
+            ? new Date(_task.createdAt).getTime()
+            : Date.now();
+
+        const dueDate = calcDueDate(
+          Number(_task.deadlineWindowSecs),
+          settings.schedule   || null,
+          settings.maxTaskActionGapMinutes || 120,
+          taskCreatedAtMs,
+        );
+
+        // Start timer THEN write dueDate so the hook and Firestore are in sync
+        timerStart(newTaskId, newTaskTitle);
+
+        await _ud(_d(firebaseDb, "cowork_tasks", newTaskId), {
+          dueDate,
+          updatedAt: _st(),
+        });
+
+        // Optimistic local update so the banner / DetailBody reflect immediately
+        const _now8 = Date.now() + 8000;
+        ignoreLiveUntilRef.current[newTaskId] = _now8;
+        setAllTasks(prev => prev.map(t => t.taskId === newTaskId ? { ...t, dueDate } : t));
+        setSelectedTask(prev => prev?.taskId === newTaskId ? { ...prev, dueDate } : prev);
+        if (allTaskMapRef.current?.has(newTaskId)) {
+          allTaskMapRef.current.set(newTaskId, {
+            ...allTaskMapRef.current.get(newTaskId), dueDate,
+          });
+        }
+        return;
+      } catch (e) {
+        console.error("[handleTimerStart] office settings:", e.message);
+        // Fallback: start without settings-aware dueDate
+      }
+    }
+
     timerStart(newTaskId, newTaskTitle);
   }, [timerActiveTaskId, timerStart]);
 
