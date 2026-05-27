@@ -298,21 +298,21 @@ export default function TaskActionBanner({
             {/* Play / Pause */}
             <button
               type="button"
-              disabled={actionBusy}
+              disabled={actionBusy || (isOver && !isRunning)}
               onClick={() => isRunning
                 ? handleTimerPause?.(task.taskId, task.title)
                 : handleTimerStart?.(task.taskId, task.title)
               }
               style={{
                 width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-                border: `1.5px solid ${isRunning ? "#BBF7D0" : "#1B4F8A"}`,
-                background: isRunning ? "#DCFCE7" : "#1B4F8A",
-                color: isRunning ? "#16A34A" : "#fff",
-                cursor: actionBusy ? "not-allowed" : "pointer",
+                border: `1.5px solid ${isRunning ? "#BBF7D0" : isOver ? "#FECDD3" : "#1B4F8A"}`,
+                background: isRunning ? "#DCFCE7" : isOver ? "#FEE2E2" : "#1B4F8A",
+                color: isRunning ? "#16A34A" : isOver ? "#DC2626" : "#fff",
+                cursor: (actionBusy || (isOver && !isRunning)) ? "not-allowed" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "all 0.15s", opacity: actionBusy ? 0.6 : 1,
+                transition: "all 0.15s", opacity: (actionBusy || (isOver && !isRunning)) ? 0.4 : 1,
               }}
-              title={isRunning ? "Pause timer" : "Resume timer"}
+              title={isRunning ? "Pause timer" : isOver ? "Deadline passed — request an extension to resume" : "Resume timer"}
             >
               {isRunning ? (
                 <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
@@ -384,6 +384,19 @@ export default function TaskActionBanner({
               transition: "width 1s linear",
             }} />
           </div>
+
+          {/* Overdue message */}
+          {isOver && (
+            <div style={{
+              marginTop: 7, padding: "6px 10px",
+              background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 5,
+              fontSize: 11, color: "#991B1B", lineHeight: 1.45,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span style={{ flexShrink: 0 }}>⚠️</span>
+              <span>Deadline passed — timer stopped. Go to <strong>Details</strong> tab to request an extension and resume work.</span>
+            </div>
+          )}
 
           <style>{`
         @keyframes tab-banner-pulse {

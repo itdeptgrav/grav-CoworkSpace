@@ -3446,7 +3446,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 </svg>
               </button>
               {/* Universal Request Button */}
-              {/*
+              
               <button
                 className="cw-topbar-icon-btn"
                 title="Requests"
@@ -3463,14 +3463,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </span>
                 )}
               </button>
-              */}
-              <div className="cw-topbar-avatar" title={employeeName}
-                style={{ overflow: "hidden", padding: 0 }}>
-                {ownProfilePicUrl ? (
-                  <img src={ownProfilePicUrl} alt={employeeName}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
-                ) : initials(employeeName)}
-              </div>
+             
+              
             </div>
           </header>
 
@@ -3936,28 +3930,16 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
 
-// Ok so let's move to the goal based task ok, where i have provided you the component page code ok so that need to modify which is described as below ok..
+// ok then it is needed to change ok because as u know that if we openly give this freedom then to the employee can start the time after 5 days also so what about the sender, sender though that ki immediately the user can start ok but the user start after 5 days and he didn't face any issue as the due date will goona happen from that start time means after that 5 day onwords...
 
 
 
-// -> first of all as you can see in the activity goal progress, basically an tree structure/component based task creation was happening so here so many things need to modify which are described as below ok..
-
-// -> First of all remove the global delete button from the receiver side ok..
-
-// -> second thing is as you can see both the provider and the receiver can create the component so the receiver shouldn't able to remove the sender created component ok.
-
-// -> and also basically slightly showcase ki who created that component ok slightly just with the created at ok..
+// So just an little changes(but so many twist are there ok) need to perform which is described as below ok... 
 
 
 
-// -> and while creating the Goal task, basically auto create the last node/component ok whose heading need to keep as the goal task name and the description as the goal task description..
-
-// and the timeline/deadline as the defined goal task deadline ok.(so after that auto created last node/below that don't suggest for new component ok)
+// -> so basically create an setting page (and keep in the sidebar, means in the coworking shell component) so that the admin/ceo will only see that page so he will set for the office timing (office in time out time), 
 
 
 
-// ->and the main twist point is now it is needed to remove the manual weightage and points define as per the node /component wise ok because now in the admin side sop setting we are goona need to define the Weightage percentage of Last Goal Task Node/Component ok  and also the second one that is Number of Points in Goal Based task ok..
-
-
-
-// So as per the weig
+// -> while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is 

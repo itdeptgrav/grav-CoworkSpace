@@ -5978,15 +5978,18 @@ em-emoji-picker,
                                           <button
                                             type="button"
                                             title={isRunning ? "Pause" : "Resume"}
+                                            disabled={!isRunning && t.dueDate && new Date(t.dueDate) < new Date()}
                                             onClick={() => isRunning
                                               ? handleTimerPause?.(t.taskId, t.title)
                                               : handleTimerStart?.(t.taskId, t.title)
                                             }
                                             style={{
                                               width: 18, height: 18, borderRadius: "50%", border: "none",
-                                              background: isRunning ? "#DCFCE7" : "#EBF2FA",
-                                              color: isRunning ? "#16A34A" : "#1B4F8A",
-                                              cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                              background: isRunning ? "#DCFCE7" : (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "#FEE2E2" : "#EBF2FA",
+                                              color: isRunning ? "#16A34A" : (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "#DC2626" : "#1B4F8A",
+                                              cursor: (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "not-allowed" : "pointer",
+                                              opacity: (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? 0.4 : 1,
+                                              display: "inline-flex", alignItems: "center", justifyContent: "center",
                                               flexShrink: 0, padding: 0,
                                             }}
                                           >
@@ -8539,3 +8542,13 @@ function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCount
     </>
   );
 }
+
+
+
+
+
+// ok then it is needed to change ok because as u know that if we openly give this freedom then to the employee can start the time after 5 days also so what about the sender, sender though that ki immediately the user can start ok but the user start after 5 days and he didn't face any issue as the due date will goona happen from that start time means after that 5 day onwords...
+
+// So just an little changes(but so many twist are there ok) need to perform which is described as below ok... 
+// -> so basically create an setting page so that 
+// -> while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is 

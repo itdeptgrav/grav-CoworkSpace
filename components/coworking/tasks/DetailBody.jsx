@@ -876,21 +876,6 @@ export default function DetailBody({
             </>
           )}
 
-          {/* ── SECTION: PROGRESS ── */}
-          {!task.isFolder && (
-            <>
-              <Section title="Progress" />
-              <div style={{ padding: "10px 0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, color: "#6B7280" }}>Overall completion</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: pctColor || BRAND }}>{pct || 0}%</span>
-                </div>
-                <div style={{ height: 5, background: "#F1F5F9", borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ height: "100%", borderRadius: 99, width: `${pct || 0}%`, background: pctGradient || BRAND, transition: "width 0.6s ease" }} />
-                </div>
-              </div>
-            </>
-          )}
 
           {/* ── SECTION: TIMER CONTROL (assignee, in progress) ── */}
           {isAssignee && isConfirmed && isStarted && !task.isFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
@@ -918,7 +903,7 @@ export default function DetailBody({
                     {isRunningThis ? "⏸ Pause" : "▶ Resume"}
                   </button>
                 </div>
-                {isTimerExceeded && (
+                {isTimerExceeded && !task.deadlineExtRequest && (
                   <div style={{ padding: "8px 10px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.5 }}>
                     Deadline exceeded. Request an extension to continue working.
                   </div>
@@ -1234,33 +1219,67 @@ export default function DetailBody({
                 )}
 
                 {/* ── TL/CEO: extension request review ── */}
-                {(isTL || isCEO) && (task.pendingExtension || task.deadlineExtRequest?.status === "pending") && !task.isFolder && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ padding: "10px 12px", background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1E40AF", lineHeight: 1.5 }}>
+                {(isTL || isCEO) && !isAssignee && (task.pendingExtension || task.deadlineExtRequest?.status === "pending") && !task.isFolder && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {/* Info box — buttons live inside */}
+                    <div style={{ padding: "10px 12px", background: "#EBF2FA", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1E40AF", lineHeight: 1.6 }}>
                       <div style={{ fontWeight: 700, marginBottom: 4 }}>⏰ Deadline Extension Request</div>
                       <div>From: <strong>{task.deadlineExtRequest?.requestedByName || "Employee"}</strong></div>
-                      {task.deadlineExtRequest?.proposedDate && <div>Proposed new deadline: <strong>{new Date(task.deadlineExtRequest.proposedDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</strong></div>}
-                      {task.deadlineExtRequest?.reason && <div style={{ marginTop: 3, color: "#374151" }}>Reason: {task.deadlineExtRequest.reason}</div>}
-                      {task.extensionReason && <div style={{ marginTop: 3, color: "#374151" }}>Reason: {task.extensionReason}</div>}
+                      {task.deadlineExtRequest?.proposedDate && (
+                        <div>Proposed: <strong>{new Date(task.deadlineExtRequest.proposedDate).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</strong></div>
+                      )}
+                      {(task.deadlineExtRequest?.reason || task.extensionReason) && (
+                        <div style={{ color: "#374151", marginTop: 2 }}>Reason: {task.deadlineExtRequest?.reason || task.extensionReason}</div>
+                      )}
+
+                      {/* Approve + Reject + Suggest — inside the box */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid #BFDBFE" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            disabled={ef.reviewExtBusy}
+                            onClick={() => ef.handleReviewExtension?.("reject", "")}
+                            style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid #FECDD3", background: "#FEF2F2", color: "#DC2626", fontSize: 11, fontWeight: 600, cursor: ef.reviewExtBusy ? "not-allowed" : "pointer", fontFamily: F, opacity: ef.reviewExtBusy ? 0.6 : 1 }}
+                          >
+                            Reject
+                          </button>
+                          <button
+                            disabled={ef.reviewExtBusy}
+                            onClick={() => ef.handleReviewExtension?.("approve", "")}
+                            style={{ padding: "4px 12px", borderRadius: 5, border: "none", background: BRAND, color: "#fff", fontSize: 11, fontWeight: 600, cursor: ef.reviewExtBusy ? "not-allowed" : "pointer", fontFamily: F, opacity: ef.reviewExtBusy ? 0.6 : 1 }}
+                          >
+                            {ef.reviewExtBusy ? "Processing…" : "Approve"}
+                          </button>
+                        </div>
+                        {!ef.reviewExtDate && (
+                          <button
+                            onClick={() => ef.setReviewExtDate?.(new Date().toISOString().split("T")[0])}
+                            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: BRAND, fontFamily: F, fontWeight: 600, textDecoration: "underline", padding: 0 }}
+                          >
+                            Suggest Another Deadline
+                          </button>
+                        )}
+                      </div>
+
                     </div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>Set new deadline:</div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input type="date" value={ef.reviewExtDate || ""} onChange={e => ef.setReviewExtDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
-                        style={{ flex: 1, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
-                      <input type="time" value={ef.reviewExtTime || "23:59"} onChange={e => ef.setReviewExtTime?.(e.target.value)}
-                        style={{ width: 90, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <ActionBtn variant="ghost" danger onClick={() => ef.handleReviewExtension?.("reject", "")} busy={ef.reviewExtBusy}>
-                        Reject
-                      </ActionBtn>
-                      <ActionBtn variant="outline" onClick={() => ef.handleReviewExtension?.("counter", ef.reviewExtDate + "T" + (ef.reviewExtTime || "23:59"))} busy={ef.reviewExtBusy} disabled={!ef.reviewExtDate}>
-                        Suggest Date
-                      </ActionBtn>
-                      <ActionBtn onClick={() => ef.handleReviewExtension?.("approve", "")} busy={ef.reviewExtBusy}>
-                        Approve
-                      </ActionBtn>
-                    </div>
+
+                    {/* Date/time inputs — only when suggest is clicked */}
+                    {ef.reviewExtDate && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 6 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>Suggest a new deadline:</div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input type="date" value={ef.reviewExtDate || ""} onChange={e => ef.setReviewExtDate?.(e.target.value)} min={new Date().toISOString().split("T")[0]}
+                            style={{ flex: 1, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                          <input type="time" value={ef.reviewExtTime || "23:59"} onChange={e => ef.setReviewExtTime?.(e.target.value)}
+                            style={{ width: 90, padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, outline: "none" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <ActionBtn variant="ghost" onClick={() => ef.setReviewExtDate?.("")}>Cancel</ActionBtn>
+                          <ActionBtn variant="outline" onClick={() => ef.handleReviewExtension?.("counter", ef.reviewExtDate + "T" + (ef.reviewExtTime || "23:59"))} busy={ef.reviewExtBusy} disabled={!ef.reviewExtDate}>
+                            Send Suggestion
+                          </ActionBtn>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
