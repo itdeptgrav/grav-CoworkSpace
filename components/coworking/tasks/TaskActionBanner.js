@@ -420,13 +420,13 @@ export default function TaskActionBanner({
     <div style={{
       display: "flex", alignItems: "center", gap: 10,
       padding: "8px 14px",
-      background: task.deadlineExtRequest?.status === "pending" ? "#FFFBEB" : "#FEF2F2",
-      borderBottom: `1px solid ${task.deadlineExtRequest?.status === "pending" ? "#FDE68A" : "#FECDD3"}`,
+      background: task.deadlineExtRequest?.status === "pending" ? "#FFFBEB" : (task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) >= new Date()) ? "#F0FDF4" : "#FEF2F2",
+      borderBottom: `1px solid ${task.deadlineExtRequest?.status === "pending" ? "#FDE68A" : (task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) >= new Date()) ? "#BBF7D0" : "#FECDD3"}`,
       flexShrink: 0,
       fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
     }}>
       <span style={{ fontSize: 13, flexShrink: 0 }}>
-        {task.deadlineExtRequest?.status === "pending" ? "⏳" : "⚠️"}
+        {task.deadlineExtRequest?.status === "pending" ? "⏳" : task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) >= new Date() ? "✅" : "⚠️"}
       </span>
       <span style={{
         flex: 1, fontSize: 11, fontWeight: 500, lineHeight: 1.45,
@@ -434,8 +434,10 @@ export default function TaskActionBanner({
       }}>
         {task.deadlineExtRequest?.status === "pending"
           ? "Deadline extension request is pending approval from your manager."
-          : task.deadlineExtRequest?.status === "approved"
-            ? `Deadline extended to ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
+          : task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) >= new Date()
+            ? `Deadline extended to ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`
+            : task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) < new Date()
+            ? `Extended deadline also passed (${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}). Request another extension from Details tab.`
             : `Deadline passed on ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Request an extension from Details tab.`
         }
       </span>
