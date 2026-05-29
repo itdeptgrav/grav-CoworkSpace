@@ -498,6 +498,11 @@ export default function NewMeetPage() {
                     <div className="sm-field">
                       <label className="sm-label">Date & Time <span className="sm-req">*</span></label>
                       <input type="datetime-local" className="sm-input" value={form.dateTime}
+                        min={(() => {
+                          const now = new Date();
+                          const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+                          return ist.toISOString().slice(0, 16);
+                        })()}
                         onChange={e => setForm(p => ({ ...p, dateTime: e.target.value }))} />
                     </div>
                     <div className="sm-field">

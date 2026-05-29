@@ -57,10 +57,20 @@ const avBg = (id = "") => AV_COLORS[(id.charCodeAt(0) || 0) % AV_COLORS.length];
 
 // ── EditMeetingModal ───────────────────────────────────────────────────────────
 function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
+  const toIST = (iso) => {
+    if (!iso) return "";
+    const ist = new Date(new Date(iso).getTime() + 5.5 * 60 * 60 * 1000);
+    return ist.toISOString().slice(0, 16);
+  };
+  const getISTMin = () => {
+    const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    return ist.toISOString().slice(0, 16);
+  };
+
   const [form, setForm] = React.useState({
     title: meet.title || "",
     description: meet.description || "",
-    dateTime: meet.dateTime ? new Date(meet.dateTime).toISOString().slice(0, 16) : "",
+    dateTime: toIST(meet.dateTime),
     googleMeetLink: meet.googleMeetLink || "",
   });
   const [participantIds, setParticipantIds] = React.useState([...(meet.participants || [])]);
@@ -147,6 +157,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
               className="sm-edit-input"
               type="datetime-local"
               value={form.dateTime}
+              min={getISTMin()}
               onChange={e => setForm(p => ({ ...p, dateTime: e.target.value }))}
             />
           </div>
@@ -768,8 +779,9 @@ export default function MeetingsPage() {
         .smc-popover-item-danger{color:#A85454}
         .smc-popover-item-danger:hover{background:#F7EFEF}
         /* Edit modal */
-        .sm-edit-overlay{position:fixed;inset:0;background:rgba(17,24,39,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
-        .sm-edit-box{background:#fff;border-radius:14px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,0.18);animation:smc-pop 0.18s ease}
+        .sm-edit-overlay{position:fixed;inset:0;background:rgba(17,24,39,0.4);z-index:1000;display:flex;justify-content:flex-end}
+        .sm-edit-box{background:#fff;border-radius:0;width:100%;max-width:520px;height:100vh;max-height:100vh;overflow-y:auto;box-shadow:-6px 0 32px rgba(0,0,0,0.12);animation:sm-slide-right 0.22s ease}
+        @keyframes sm-slide-right{from{transform:translateX(100%)}to{transform:translateX(0)}}
         .sm-edit-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 0}
         .sm-edit-title{font-size:16px;font-weight:700;color:#1F2937}
         .sm-edit-close{width:32px;height:32px;border:1px solid #E5E7EB;background:#FAFAFA;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:18px;transition:background 0.1s}
