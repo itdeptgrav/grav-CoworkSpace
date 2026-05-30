@@ -22,7 +22,7 @@ const useLocalParticipant = dynamic ? null : null; // accessed via window event 
 
 import {
   collection, doc, setDoc, updateDoc, getDocs, getDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch, limit,DocumentReference,
+  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch, limit, DocumentReference,
 } from "firebase/firestore";
 import { docs } from "googleapis/build/src/apis/docs";
 
@@ -1753,6 +1753,7 @@ function NavIcon({ name, size = 20 }) {
     sop: <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" /></>,
     mrf: <><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="13" y2="16" /></>,
     docs: <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>,
+    monitor: <><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></>,
   };
   return <svg {...s}>{icons[name]}</svg>;
 }
@@ -2347,6 +2348,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     { id: "mail", label: "Mail", icon: "mail", path: "/coworking/mail" },
     { id: "meetings", label: "Meetings", icon: "meetings", path: "/coworking/schedule-meet" },
     ...(isCEO ? [{ id: "employees", label: "Employees", icon: "employees", path: "/coworking/create-employee" }] : []),
+    ...(isCEO ? [{ id: "office_monitor", label: "Office Monitor", icon: "monitor", path: "/coworking/office-monitor" }] : []),
     ...((isCEO || isTL) ? [{ id: "status", label: "Live Status", icon: "status", path: "/coworking/status-tracking" }] : []),
     { id: "mrf", label: "Material Requests", icon: "mrf", path: "/coworking/mrf" },
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
@@ -2354,7 +2356,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     ...(isCEO ? [{ id: "office_settings", label: "Task Settings", icon: "settings", path: "/coworking/task-settings" }] : []),
     { id: "docs", label: "Documentation", icon: "docs", path: "/coworking/docs" },
   ];
-  
+
 
   const isActive = (path) => {
     if (path === "/coworking") return pathname === "/coworking";
@@ -3343,7 +3345,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
             <div className="cw-topbar-right">
 
-              
+
 
               {/* SOP button removed from topbar — accessible via sidebar only */}
 
@@ -3450,8 +3452,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                 </svg>
               </button>
               {/* Universal Request Button */}
-              
-              
+
+
 
 
               <button
@@ -3473,8 +3475,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
                   </span>
                 )}
               </button>
-             
-              
+
+
             </div>
           </header>
 
@@ -3944,7 +3946,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
 
-// So just an little changes(but so many twist are there ok) need to perform which is described as below ok... 
+// So just an little changes(but so many twist are there ok) need to perform which is described as below ok...
 
 
 
