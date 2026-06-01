@@ -29,7 +29,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     doc, getDoc, getDocs, setDoc, updateDoc, where,
-    collection, query, orderBy, limit,
+    collection, query, orderBy, limit, limitToLast, endBefore,
     onSnapshot, serverTimestamp, writeBatch, arrayUnion,
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
@@ -303,6 +303,11 @@ export default function GroupChatView({ groupId, onBack }) {
     const messagesEndRef = useRef(null);
     const unsubRef = useRef(null);
     const pendingMapRef = useRef(new Map());
+    const messagesContainerRef = useRef(null);
+    const oldestDocRef = useRef(null);
+    const prevGroupIdRef = useRef(null);
+    const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
 
     // ── Load group doc + member details ──────────────────────
     const loadGroup = useCallback(async () => {
@@ -332,7 +337,7 @@ export default function GroupChatView({ groupId, onBack }) {
         setMsgsLoading(true);
 
         const msgsRef = collection(firebaseDb, "cowork_groups", groupId, "messages");
-        const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+        const q = query(msgsRef, orderBy("createdAt", "asc"), limitToLast(300));
 
         const unsub = onSnapshot(q,
             snap => {

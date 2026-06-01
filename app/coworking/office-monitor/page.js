@@ -79,6 +79,22 @@ export default function OfficeMonitorPage() {
     const [renaming, setRenaming] = useState(null);
     const [newName, setNewName] = useState("");
 
+    const [updateVersion, setUpdateVersion] = useState("")
+    const [updateFile, setUpdateFile] = useState(null)
+    const [updateSaved, setUpdateSaved] = useState(false)
+    const [updateProgress, setUpdateProgress] = useState(0)
+    const [updatePushed, setUpdatePushed] = useState(false)
+    const [deployedVersion, setDeployedVersion] = useState(null)
+    const [pushing, setPushing] = useState(false)
+    const [releasing, setReleasing] = useState(false)
+    const [showSettings, setShowSettings] = useState(false)
+
+    useEffect(() => {
+        return onSnapshot(doc(omDb, "config", "agent_version"), (snap) => {
+            if (snap.exists()) setDeployedVersion(snap.data())
+        })
+    }, [])
+
     useEffect(() => {
         if (!loading && role && role !== "ceo") router.replace("/coworking");
     }, [role, loading, router]);
@@ -109,6 +125,50 @@ export default function OfficeMonitorPage() {
         await updateDoc(doc(omDb, "devices", id), { customName: newName.trim() });
         setRenaming(null); setNewName("");
     };
+
+    const handleSave = () => {
+        if (!updateVersion.trim() || !updateFile) return
+        setUpdateSaved(true)
+        setUpdatePushed(false)
+    }
+
+    const handlePushFirebase = async () => {
+        if (!updateFile || !updateVersion.trim()) return
+        setPushing(true)
+        setUpdateProgress(0)
+        try {
+            const { ref, uploadBytesResumable, getDownloadURL } = await import("firebase/storage")
+            const { omStorage } = await import("../../../lib/officeMonitorFirebase")
+            const { setDoc } = await import("firebase/firestore")
+            const storageRef = ref(omStorage, `agent/MonitorAgent_v${updateVersion}.exe`)
+            const task = uploadBytesResumable(storageRef, updateFile)
+            task.on("state_changed",
+                (snap) => setUpdateProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+                (err) => { console.error(err); setPushing(false) },
+                async () => {
+                    const url = await getDownloadURL(task.snapshot.ref)
+                    await setDoc(doc(omDb, "config", "agent_version"), {
+                        version: updateVersion.trim(),
+                        downloadUrl: url,
+                        status: "draft",
+                        updatedAt: new Date()
+                    })
+                    setUpdatePushed(true)
+                    setPushing(false)
+                }
+            )
+        } catch (e) { console.error(e); setPushing(false) }
+    }
+
+    const handlePushToUsers = async () => {
+        setReleasing(true)
+        await updateDoc(doc(omDb, "config", "agent_version"), {
+            status: "released",
+            releasedAt: new Date()
+        })
+        setReleasing(false)
+    }
+
 
     const pending = devices.filter((d) => d.status === "pending");
     const active = devices.filter((d) => d.status === "active");
@@ -145,6 +205,12 @@ export default function OfficeMonitorPage() {
                             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 4px #10B981" }} />
                             <span style={{ fontSize: 12, fontWeight: 600, color: "#059669" }}>Live</span>
                         </div>
+                        <button
+                            onClick={() => setShowSettings(prev => !prev)}
+                            style={{ padding: "6px 14px", background: showSettings ? "#EEF2FF" : "#F9FAFB", color: showSettings ? "#6366F1" : "#374151", border: `1px solid ${showSettings ? "#C7D2FE" : "#E5E7EB"}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                        >
+                            ⚙ Settings
+                        </button>
                     </div>
                 </div>
             </div>
@@ -288,6 +354,56 @@ export default function OfficeMonitorPage() {
                     ))}
                 </div>
             )}
+
+            {/* ── Update Manager ── */}
+            {showSettings && <div style={{ marginBottom: 24 }}>
+                <div style={sectionHead}>
+                    <span style={{ ...dot, background: "#6366F1" }} />
+                    <span style={sectionTitle}>Agent Update Manager</span>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+
+                    {deployedVersion && (
+                        <div style={{ marginBottom: 16, padding: "10px 14px", background: deployedVersion.status === "released" ? "#ECFDF5" : "#FFFBEB", border: `1px solid ${deployedVersion.status === "released" ? "#A7F3D0" : "#FDE68A"}`, borderRadius: 8, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, color: "#6B7280" }}>Current deployed version:</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "monospace" }}>v{deployedVersion.version}</span>
+                            <span style={{ padding: "1px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: deployedVersion.status === "released" ? "#D1FAE5" : "#FEF3C7", color: deployedVersion.status === "released" ? "#059669" : "#D97706" }}>
+                                {deployedVersion.status === "released" ? "✓ Released" : "Draft"}
+                            </span>
+                            {deployedVersion.releasedAt && (
+                                <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+                                    Released {new Date(deployedVersion.releasedAt.seconds * 1000).toLocaleString()}
+                                </span>
+                            )}
+                        </div>
+                    )}
+
+
+                    <div style={{ marginBottom: 16, fontSize: 12, color: "#6B7280" }}>
+                        Run <code style={{ background: "#F3F4F6", padding: "2px 6px", borderRadius: 4, fontSize: 12 }}>node push-update.js 1.1</code> on dev laptop to upload new version. Then click Push to User Laptops.
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                            onClick={handlePushToUsers}
+                            disabled={!deployedVersion || deployedVersion.status === "released" || releasing}
+                            style={{ padding: "8px 18px", background: "#FEF3C7", color: "#D97706", border: "1px solid #FDE68A", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: (!deployedVersion || deployedVersion.status === "released" || releasing) ? "not-allowed" : "pointer" }}
+                        >
+                            {releasing ? "⏳ Releasing..." : "🚀 Push to User Laptops"}
+                        </button>
+                    </div>
+
+                    {pushing && updateProgress > 0 && (
+                        <div style={{ marginTop: 12, background: "#F3F4F6", borderRadius: 6, height: 6, overflow: "hidden" }}>
+                            <div style={{ height: "100%", background: "#6366F1", borderRadius: 6, width: `${updateProgress}%`, transition: "width 0.3s" }} />
+                        </div>
+                    )}
+
+                    <div style={{ marginTop: 14, fontSize: 11, color: "#9CA3AF", lineHeight: 1.6 }}>
+                        <strong style={{ color: "#6B7280" }}>Workflow:</strong> 1. Build new exe on dev laptop → 2. Run <code style={{ background: "#F3F4F6", padding: "1px 4px", borderRadius: 3 }}>node push-update.js 1.1</code> in CMD → 3. Click Push to User Laptops
+                    </div>
+                </div>
+            </div>}
 
             {/* ── Empty ── */}
             {mounted && devices.length === 0 && (

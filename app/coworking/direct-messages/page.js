@@ -7,10 +7,10 @@
  *  2. Reply fix — replyTo now persisted in Firestore so it renders after send
  *  3. Nested Chat (Sub-Chat) — right-slider panel with list / create / view sub-chat threads
  */
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  collection, query, where, orderBy, limit,
+  collection, query, where, orderBy, limit, limitToLast, startAfter, endBefore,
   onSnapshot, getDocs, getDoc, doc, setDoc, updateDoc,
   serverTimestamp, writeBatch, arrayUnion, increment,
 } from "firebase/firestore";
@@ -432,7 +432,7 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
     setMsgsLoading(true);
     const q = query(
       collection(firebaseDb, "cowork_direct_messages", cid, "sub_chats", subChat.id, "messages"),
-      orderBy("createdAt", "asc"), limit(200)
+      orderBy("createdAt", "asc"), limitToLast(400)
     );
 
     const unsub = onSnapshot(q, snap => {
@@ -529,12 +529,12 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
     } catch (e) { console.error("sc send:", e); }
   };
 
-  // Build list with date separators
+  // Build list with date separators (use tsToMs for robust timestamp parsing)
   const withSep = [];
   let lastDate = null;
   msgs.forEach((msg, i) => {
     if (msg.isSystem) { withSep.push({ ...msg, _sys: true }); return; }
-    const ms = msg.createdAt?.seconds ? msg.createdAt.seconds * 1000 : 0;
+    const ms = tsToMs(msg.createdAt);
     const today = new Date(), yesterday = new Date(Date.now() - 86400000);
     const d = ms ? new Date(ms) : null;
     let ds = null;
@@ -875,6 +875,11 @@ export default function DirectMessagesPage() {
   const editInputRef = useRef(null);
 
   const endRef = useRef(null);
+  const msgsContainerRef = useRef(null);
+  const oldestDocRef = useRef(null);
+  const scrollAnchorRef = useRef(null);    // { scrollHeight, scrollTop } captured before prepend
+  const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const pendingMapRef = useRef(new Map());
   const activeConv = useRef(null);
   const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
@@ -917,14 +922,25 @@ export default function DirectMessagesPage() {
     return () => unsub();
   }, [user, employeeId]);
 
-  // ── Real-time messages ────────────────────────────────────────────────────
+  // ── Real-time messages ── limitToLast(300) so newest always visible ────────
   useEffect(() => {
     if (!selectedPerson || !employeeId) return;
     const cid = convId(employeeId, selectedPerson.employeeId);
     activeConv.current = cid;
     setMsgsLoading(true);
-    const q = query(collection(firebaseDb, "cowork_direct_messages", cid, "messages"), orderBy("createdAt", "asc"), limit(100));
+    setHasMoreMsgs(false);
+    oldestDocRef.current = null;
+
+    // limitToLast: always get NEWEST 300, not the oldest 100
+    const q = query(
+      collection(firebaseDb, "cowork_direct_messages", cid, "messages"),
+      orderBy("createdAt", "asc"),
+      limitToLast(30)
+    );
     const unsub = onSnapshot(q, async snap => {
+      if (snap.docs.length > 0) oldestDocRef.current = snap.docs[0];
+      setHasMoreMsgs(snap.docs.length >= 30);
+
       const incoming = snap.docs.map(d => ({
         ...d.data(), id: d.id,
         createdAt: tsToISO(d.data().createdAt),
@@ -942,11 +958,12 @@ export default function DirectMessagesPage() {
         const pMap = pendingMapRef.current;
         const kept = prev.filter(m => {
           if (m.temp === true) { const r = pMap.get(m.messageId); return r ? !inIds.has(r) : true; }
+          if (m._older === true) return !inIds.has(m.messageId);
           return m.error === true;
         });
         const merged = [...incoming, ...kept].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         return merged.map(m => {
-          if (m.temp || m.error) return m;
+          if (m.temp || m.error || m._older) return m;
           const live = snap.docs.find(d => d.data().messageId === m.messageId);
           if (!live) return m;
           const rb = live.data().readBy || [];
@@ -959,7 +976,95 @@ export default function DirectMessagesPage() {
     return () => { unsub(); activeConv.current = null; };
   }, [selectedPerson, employeeId]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, selectedPerson]);
+  // ── Load older messages on scroll-up ─────────────────────────────────────
+  // HOW SCROLL ANCHORING WORKS:
+  // 1. Before setMessages: save { scrollHeight, scrollTop } into scrollAnchorRef
+  // 2. useLayoutEffect fires synchronously after React commits DOM, before browser paints
+  // 3. At that exact moment: scrollTop = savedScrollTop + (newScrollHeight - savedScrollHeight)
+  // This is the only reliable way — rAF and MutationObserver both fire too late.
+
+  const handleLoadMore = useCallback(async () => {
+    if (!selectedPerson || !employeeId || !hasMoreMsgs || loadingMore || !oldestDocRef.current) return;
+    const cid = convId(employeeId, selectedPerson.employeeId);
+    setLoadingMore(true);
+    try {
+      const container = msgsContainerRef.current;
+      const olderQ = query(
+        collection(firebaseDb, "cowork_direct_messages", cid, "messages"),
+        orderBy("createdAt", "asc"),
+        endBefore(oldestDocRef.current),
+        limitToLast(100)
+      );
+      const snap = await getDocs(olderQ);
+      if (snap.docs.length > 0) {
+        oldestDocRef.current = snap.docs[0];
+        const olderMsgs = snap.docs.map(d => ({
+          ...d.data(), id: d.id,
+          createdAt: tsToISO(d.data().createdAt),
+          temp: false, sending: false, error: false,
+          _older: true,
+        }));
+
+        // ── STEP 1: Snapshot BEFORE React re-renders ──────────────────────
+        if (container) {
+          scrollAnchorRef.current = {
+            scrollHeight: container.scrollHeight,
+            scrollTop: container.scrollTop,
+          };
+        }
+
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.messageId || m.id));
+          const newOnes = olderMsgs.filter(m => !existingIds.has(m.messageId || m.id));
+          return [...newOnes, ...prev].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        });
+        setHasMoreMsgs(snap.docs.length >= 100);
+        // ── STEP 2: useLayoutEffect below restores scroll position ────────
+      } else {
+        setHasMoreMsgs(false);
+      }
+    } catch (e) { console.error("loadMore:", e); }
+    finally { setLoadingMore(false); }
+  }, [selectedPerson, employeeId, hasMoreMsgs, loadingMore]);
+
+  // ── STEP 2: Restore scroll synchronously after DOM commit, before paint ──
+  // useLayoutEffect runs AFTER React updates the DOM but BEFORE the browser paints.
+  // This is the only hook that runs at the right time to prevent visible jump.
+  useLayoutEffect(() => {
+    const anchor = scrollAnchorRef.current;
+    const container = msgsContainerRef.current;
+    if (!anchor || !container) return;
+    // Compute how much height was added at the top and shift scrollTop by that amount
+    const addedHeight = container.scrollHeight - anchor.scrollHeight;
+    if (addedHeight > 0) {
+      container.scrollTop = anchor.scrollTop + addedHeight;
+    }
+    scrollAnchorRef.current = null; // clear so normal message updates aren't affected
+  }, [messages]);
+
+  // Scroll listener — triggers load-more when scrolled within 80px of top
+  useEffect(() => {
+    const container = msgsContainerRef.current;
+    if (!container) return;
+    const onScroll = () => { if (container.scrollTop < 80 && hasMoreMsgs && !loadingMore) handleLoadMore(); };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [hasMoreMsgs, loadingMore, handleLoadMore]);
+
+  // Smart scroll-to-bottom: only on person change OR if already near bottom
+  const prevPersonRef = useRef(null);
+  useEffect(() => {
+    if (scrollAnchorRef.current) return; // don't scroll-to-bottom during load-more
+    const isNewPerson = prevPersonRef.current !== selectedPerson?.employeeId;
+    prevPersonRef.current = selectedPerson?.employeeId || null;
+    const container = msgsContainerRef.current;
+    if (isNewPerson) {
+      setTimeout(() => endRef.current?.scrollIntoView({ behavior: "auto" }), 80);
+    } else if (container) {
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+      if (nearBottom) endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, selectedPerson]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
@@ -1150,22 +1255,15 @@ export default function DirectMessagesPage() {
   });
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
 
-  // ── Build message list with date separators ───────────────────────────────
-  const withSep = [];
-  let lastDate = null;
-  messages.forEach((msg, i) => {
-    const ms2 = tsToMs(msg.createdAt);
-    const today = new Date(); const yesterday = new Date(Date.now() - 86400000);
-    const d = ms2 ? new Date(ms2) : null;
-    let ds = null;
-    if (d) {
-      if (d.toDateString() === today.toDateString()) ds = "Today";
-      else if (d.toDateString() === yesterday.toDateString()) ds = "Yesterday";
-      else ds = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-    }
-    if (ds && ds !== lastDate) { withSep.push({ _sep: true, label: ds }); lastDate = ds; }
-    withSep.push({ ...msg, isMe: msg.senderId === employeeId, showAvatar: i === 0 || messages[i - 1]?.senderId !== msg.senderId });
-  });
+  // ── Sorted flat list of messages (no separators yet — added during render) ─
+  const sortedMessages = messages
+    .filter(m => !m._sep)
+    .map((msg, i) => ({
+      ...msg,
+      isMe: msg.senderId === employeeId,
+      showAvatar: i === 0 || messages.filter(x => !x._sep)[i - 1]?.senderId !== msg.senderId,
+      _ts: msg.createdAt ? (typeof msg.createdAt === "string" ? new Date(msg.createdAt).getTime() : (msg.createdAt?.seconds || 0) * 1000) : 0,
+    }));
 
   const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
   const handleCancelMeet = async (meetId, meetTitle) => {
@@ -1421,20 +1519,63 @@ export default function DirectMessagesPage() {
               </div>
 
               {/* ── Messages ── */}
-              <div className="dm-msgs">
+              <div className="dm-msgs" ref={msgsContainerRef}>
+                {/* Load older messages button */}
+                {hasMoreMsgs && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 4px" }}>
+                    <button
+                      onClick={handleLoadMore}
+                      disabled={loadingMore}
+                      style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 16px", borderRadius: 20, border: "1px solid #BFDBFE", background: "#EFF6FF", color: "#1D4ED8", fontSize: 12, fontWeight: 600, cursor: loadingMore ? "default" : "pointer", fontFamily: "inherit", opacity: loadingMore ? 0.7 : 1 }}
+                    >
+                      {loadingMore ? <><div style={{ width: 11, height: 11, borderRadius: "50%", border: "2px solid rgba(29,78,216,0.25)", borderTopColor: "#1D4ED8", animation: "dm-spin 0.7s linear infinite" }} /> Loading…</> : "↑ Load older messages"}
+                    </button>
+                  </div>
+                )}
                 {msgsLoading && messages.length === 0 ? <div className="dm-center"><GwSpinner size={24} /></div>
-                  : withSep.length === 0 ? (
+                  : sortedMessages.length === 0 ? (
                     <div className="dm-chat-empty">
                       <Av name={selectedPerson.name || "?"} size={48} url={selectedPerson.profilePicUrl || ""} />
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
                       <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
                     </div>
                   ) : (() => {
-                    const reqItems = threadRequests.map(r => ({ _isReq: true, id: r.id, req: r, _ts: r.createdAt?.seconds || 0 }));
-                    const msgItems = withSep.map(m => ({ ...m, _ts: m.createdAt ? (typeof m.createdAt === "string" ? new Date(m.createdAt).getTime() / 1000 : (m.createdAt?.seconds || 0)) : 0 }));
-                    const combined = [...msgItems, ...reqItems].sort((a, b) => a._ts - b._ts);
-                    return combined.map((item, i) => {
-                      if (item._sep) return <div key={"sep" + i} className="dm-datesep"><span className="dm-datesep-label">{item.label}</span></div>;
+                    // Combine messages + request cards by timestamp, then inject date separators
+                    const reqItems = threadRequests.map(r => ({
+                      _isReq: true, id: r.id, req: r,
+                      _ts: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
+                    }));
+                    const combined = [...sortedMessages, ...reqItems].sort((a, b) => a._ts - b._ts);
+
+                    // Inject date separators after sorting (so they are always in correct position)
+                    const withDateSeps = [];
+                    let lastDate = null;
+                    const today = new Date();
+                    const yesterday = new Date(Date.now() - 86400000);
+                    combined.forEach((item, ci) => {
+                      const ms = item._ts;
+                      const d = ms ? new Date(ms) : null;
+                      let ds = null;
+                      if (d) {
+                        if (d.toDateString() === today.toDateString()) ds = "Today";
+                        else if (d.toDateString() === yesterday.toDateString()) ds = "Yesterday";
+                        else ds = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+                      }
+                      if (ds && ds !== lastDate) {
+                        withDateSeps.push({ _sep: true, label: ds, _sepKey: ds + ci });
+                        lastDate = ds;
+                      }
+                      // Fix showAvatar after re-sort (compare against previous non-sep, non-req item)
+                      if (!item._isReq) {
+                        const prevMsg = withDateSeps.filter(x => !x._sep && !x._isReq).slice(-1)[0];
+                        withDateSeps.push({ ...item, showAvatar: !prevMsg || prevMsg.senderId !== item.senderId });
+                      } else {
+                        withDateSeps.push(item);
+                      }
+                    });
+
+                    return withDateSeps.map((item, i) => {
+                      if (item._sep) return <div key={item._sepKey || ("sep" + i)} className="dm-datesep"><span className="dm-datesep-label">{item.label}</span></div>;
                       if (item._isReq) return <div key={item.id} style={{ padding: "0 4px", marginBottom: 6 }}><ThreadRequestCard req={item.req} employeeId={employeeId} /></div>;
                       return (
                         <Bubble
