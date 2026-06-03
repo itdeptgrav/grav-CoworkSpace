@@ -315,6 +315,47 @@ export default function DeviceDetailPage({ params }) {
         const cat = row.category || "Other";
         categoryTotals[cat] = (categoryTotals[cat] || 0) + (row.durationSec || 0);
     });
+    // ── Build session timeline ──
+    const buildTimeline = () => {
+        const allEvents = [
+            ...activity.map(a => ({
+                type: 'activity',
+                time: a.startTime?.toDate?.() || new Date(0),
+                data: a
+            })),
+            ...systemEvents.map(s => ({
+                type: 'system',
+                time: s.timestamp?.toDate?.() || new Date(0),
+                data: s
+            }))
+        ].sort((a, b) => a.time - b.time)
+
+        const sessions = []
+        let current = null
+
+        for (const evt of allEvents) {
+            if (evt.type === 'system' && evt.data.event === 'AGENT_STARTED') {
+                current = { loginTime: evt.time, activities: [], logoutTime: null, logoutType: null }
+                sessions.push(current)
+            } else if (evt.type === 'system' &&
+                (evt.data.event === 'SYSTEM_SHUTDOWN' || evt.data.event === 'SYSTEM_RESTART' || evt.data.event === 'LAPTOP_SLEEP')) {
+                if (current) {
+                    current.logoutTime = evt.time
+                    current.logoutType = evt.data.event
+                }
+                current = null
+            } else if (evt.type === 'activity') {
+                if (!current) {
+                    current = { loginTime: evt.time, activities: [], logoutTime: null, logoutType: null, implicit: true }
+                    sessions.push(current)
+                }
+                current.activities.push(evt.data)
+            }
+        }
+        return sessions
+    }
+
+    const timeline = buildTimeline()
 
     const isToday = selectedDate === todayStr;
 
@@ -348,12 +389,12 @@ export default function DeviceDetailPage({ params }) {
     };
 
     if (loading) return <div style={{ padding: 48, textAlign: "center", color: "#9CA3AF" }}>Loading…</div>;
-
     const TABS = [
         { id: "history", label: "📋 History" },
+        { id: "timeline", label: "📅 Timeline" },
         { id: "raw", label: "📊 Raw Log" },
         { id: "system", label: "🔐 Login / Logout" },
-    ];
+    ]
 
     return (
         <div style={{ padding: "24px 28px", background: "#F8FAFC", minHeight: "100%" }}>
@@ -402,11 +443,13 @@ export default function DeviceDetailPage({ params }) {
 
             {/* ── Live Now card ── */}
             {currentApp && isToday && (
-                <div style={{ background: "#fff", border: "1px solid #A7F3D0", borderLeft: "4px solid #10B981", borderRadius: 10, padding: "16px 20px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                <div style={{ background: "#fff", border: `1px solid ${currentApp?.isIdle ? "#FDE68A" : "#A7F3D0"}`, borderLeft: `4px solid ${currentApp?.isIdle ? "#D97706" : "#10B981"}`, borderRadius: 10, padding: "16px 20px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
                     <div>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 4px #10B981" }} />
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#059669", letterSpacing: "0.08em" }}>LIVE NOW</span>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: currentApp?.isIdle ? "#D97706" : "#10B981", boxShadow: currentApp?.isIdle ? "0 0 4px #D97706" : "0 0 4px #10B981" }} />
+                            <span style={{ fontSize: 11, fontWeight: 700, color: currentApp.isIdle ? "#D97706" : "#059669", letterSpacing: "0.08em" }}>
+                                {currentApp.isIdle ? "⏸ IDLE" : "LIVE NOW"}
+                            </span>
                         </div>
                         <div style={{ fontSize: 18, fontWeight: 700, color: "#111827", marginBottom: 2 }}>{currentApp.siteLabel}</div>
                         {currentApp.pageTitle && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{currentApp.pageTitle}</div>}
@@ -420,7 +463,7 @@ export default function DeviceDetailPage({ params }) {
                         </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 12 }}>
-                        <div style={{ fontSize: 36, fontWeight: 800, color: "#059669", fontFamily: "monospace", letterSpacing: "-2px" }}>{fmt(liveSeconds)}</div>
+                        <div style={{ fontSize: 36, fontWeight: 800, color: currentApp?.isIdle ? "#D97706" : "#059669", fontFamily: "monospace", letterSpacing: "-2px" }}>{fmt(liveSeconds)}</div>
                         <button
                             onClick={screenshotMode ? undefined : startScreenshotMode}
                             disabled={screenshotMode}
@@ -533,7 +576,9 @@ export default function DeviceDetailPage({ params }) {
                     </div>
                     {sortedApps.length === 0 && !currentApp && <div style={emptyRow}>No activity recorded for {selectedDate}</div>}
 
-                    {/* ── Live in-progress session (not yet saved to log) ── */}
+
+
+                    {/* ── Live in-progress session ── */}
                     {currentApp && isToday && (
                         <div style={{ borderBottom: "1px solid #F3F4F6", background: "#F0FDF4" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px" }}>
@@ -626,6 +671,15 @@ export default function DeviceDetailPage({ params }) {
                             )}
                         </div>
                     ))}
+                    {/* ── Logout rows ── */}
+                    {systemEvents.filter(e => ['SYSTEM_SHUTDOWN', 'SYSTEM_RESTART', 'LAPTOP_SLEEP'].includes(e.event)).map((evt, i) => (
+                        <div key={`logout-${i}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", background: evt.event === 'SYSTEM_RESTART' ? "#FFFBEB" : "#FEF2F2", borderTop: "1px solid #FECACA" }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: evt.event === 'SYSTEM_RESTART' ? "#D97706" : evt.event === 'LAPTOP_SLEEP' ? "#2563EB" : "#DC2626", flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, fontWeight: 700, color: evt.event === 'SYSTEM_RESTART' ? "#D97706" : evt.event === 'LAPTOP_SLEEP' ? "#2563EB" : "#DC2626" }}>
+                            </span>
+                            <span style={{ fontSize: 12, fontFamily: "monospace", color: "#6B7280" }}>{evt.timestamp?.toDate?.()?.toLocaleTimeString()}</span>
+                        </div>
+                    ))}
                 </div>
             )}
 
@@ -663,6 +717,99 @@ export default function DeviceDetailPage({ params }) {
                 </div>
             )}
 
+
+
+            {/* ══ TIMELINE TAB ══ */}
+            {activeTab === "timeline" && (
+                <div style={tableWrap}>
+                    <div style={tableHead}>
+                        <span style={tableTitle}>📅 Session Timeline</span>
+                        <span style={{ fontSize: 11, color: "#9CA3AF" }}>{timeline.length} session{timeline.length !== 1 ? 's' : ''}</span>
+                    </div>
+
+                    {timeline.length === 0 && (
+                        <div style={emptyRow}>No session data for {selectedDate}</div>
+                    )}
+
+                    {timeline.map((session, si) => (
+                        <div key={si} style={{ borderBottom: "2px solid #E5E7EB", marginBottom: 4 }}>
+
+
+
+                            {/* Activities grouped by app */}
+                            {Object.values(
+                                session.activities.reduce((acc, row) => {
+                                    const key = row.siteLabel || 'Unknown'
+                                    if (!acc[key]) acc[key] = { siteLabel: key, category: row.category, totalSec: 0, sessions: [], count: 0 }
+                                    acc[key].totalSec += row.durationSec || 0
+                                    acc[key].count += 1
+                                    acc[key].sessions.push(row)
+                                    return acc
+                                }, {})
+                            ).sort((a, b) => b.totalSec - a.totalSec).map((app) => (
+                                <div key={app.siteLabel} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", cursor: "pointer" }}
+                                        onClick={() => setExpandedApps(p => ({ ...p, [`${si}-${app.siteLabel}`]: !p[`${si}-${app.siteLabel}`] }))}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                            <span style={{ fontSize: 10, color: "#9CA3AF", width: 12 }}>{expandedApps[`${si}-${app.siteLabel}`] ? "▼" : "▶"}</span>
+                                            <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{app.siteLabel}</span>
+                                            <span style={{ padding: "1px 8px", borderRadius: 20, fontSize: 10, background: (CAT_COLORS[app.category] || "#94a3b8") + "18", color: CAT_COLORS[app.category] || "#94a3b8" }}>{app.category}</span>
+                                        </div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                            <span style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "monospace" }}>{fmt(app.totalSec)}</span>
+                                            <span style={{ fontSize: 11, color: "#9CA3AF" }}>Opened {app.count}×</span>
+                                        </div>
+                                    </div>
+                                    {expandedApps[`${si}-${app.siteLabel}`] && (
+                                        <div style={{ background: "#F9FAFB", borderTop: "1px solid #F3F4F6", padding: "6px 0" }}>
+                                            {app.sessions.map((s, i) => (
+                                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "5px 18px 5px 42px" }}>
+                                                    <span style={{ fontSize: 13, color: "#D1D5DB" }}>›</span>
+                                                    <span style={{ fontSize: 11, fontFamily: "monospace", color: "#6B7280", minWidth: 180 }}>
+                                                        {s.startTime?.toDate?.()?.toLocaleTimeString()} – {s.endTime?.toDate?.()?.toLocaleTimeString()}
+                                                    </span>
+                                                    <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "monospace", color: "#059669", minWidth: 60 }}>{fmt(s.durationSec)}</span>
+                                                    {s.pageTitle && s.pageTitle !== app.siteLabel && (
+                                                        <span style={{ fontSize: 11, color: "#9CA3AF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>{s.pageTitle}</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+
+                            {session.activities.length === 0 && (
+                                <div style={{ padding: "10px 18px", fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>
+                                    No activity recorded in this session
+                                </div>
+                            )}
+
+
+
+                            {/* Logout */}
+                            {session.logoutTime ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", background: "#FEF2F2", borderTop: "1px solid #FECACA" }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#DC2626", flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626" }}>
+                                        {session.logoutType === 'SYSTEM_RESTART' ? '🟠 Restart' : session.logoutType === 'LAPTOP_SLEEP' ? '🔵 Sleep' : '🔴 Logout / Shutdown'}
+                                    </span>
+                                    <span style={{ fontSize: 12, fontFamily: "monospace", color: "#6B7280" }}>{session.logoutTime?.toLocaleTimeString()}</span>
+                                    <span style={{ fontSize: 11, color: "#9CA3AF", marginLeft: "auto" }}>
+                                        Session: {fmt(Math.floor((session.logoutTime - session.loginTime) / 1000))}
+                                    </span>
+                                </div>
+                            ) : (
+                                <div tyle={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", background: "#FEF2F2", borderTop: "1px solid #FECACA" }}>
+                                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#DC2626", flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626" }}>🔴 Logout / Shutdown</span>
+                                    <span style={{ fontSize: 12, fontFamily: "monospace", color: "#6B7280" }}>{device?.lastSeen?.toDate?.()?.toLocaleTimeString()} (last seen)</span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
             {/* ══ SYSTEM EVENTS TAB ══ */}
             {activeTab === "system" && (
                 <div style={tableWrap}>
