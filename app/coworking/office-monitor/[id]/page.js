@@ -2,6 +2,8 @@
 import { useEffect, useState, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../../hooks/useCoworkAuth";
+import { liveDb } from "../../../../lib/liveScreenshot";
+import { doc as fdoc, onSnapshot as fbSnapshot } from "firebase/firestore";
 import { io } from "socket.io-client";
 import { BACKEND, api, d } from "../../../../lib/monitorApi";
 
@@ -55,6 +57,8 @@ export default function DeviceDetailPage({ params }) {
     const [screenshotPaused, setScreenshotPaused] = useState(false)
     const [countdown, setCountdown] = useState(2)
     const countdownIntervalRef = useRef(null)
+    const screenshotPausedRef = useRef(false)
+    useEffect(() => { screenshotPausedRef.current = screenshotPaused }, [screenshotPaused])
 
     const [expandedApps, setExpandedApps] = useState({})
     const [totalView, setTotalView] = useState(false)
@@ -136,15 +140,29 @@ export default function DeviceDetailPage({ params }) {
             if (dev.machineId === id) setDevice(dev)
         })
 
-        socket.on(`screenshot-${id}`, (ss) => {
-            if (!screenshotPaused) {
-                setScreenshot({ url: ss.url, docId: ss._id, time: new Date(ss.takenAt) })
-                setCountdown(2)
-            }
-        })
+
 
         return () => socket.disconnect()
-    }, [id, selectedDate, screenshotMode, screenshotPaused])
+    }, [id, selectedDate])
+    // Firebase live screenshot
+    useEffect(() => {
+        if (!screenshotMode) return
+        const ref = fdoc(liveDb, 'live_screenshots', id)
+        const unsub = fbSnapshot(ref, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data()
+                if (data.isActive && data.base64 && !screenshotPausedRef.current) {
+                    setScreenshot({
+                        url: `data:image/jpeg;base64,${data.base64}`,
+                        time: data.timestamp ? new Date(data.timestamp) : new Date()
+                    })
+                    setCountdown(5)
+                }
+            }
+        })
+        return () => unsub()
+    }, [id, screenshotMode])
+
 
     // live timer
     useEffect(() => {
@@ -187,10 +205,20 @@ export default function DeviceDetailPage({ params }) {
     }, [screenshotMode, screenshotPaused])
 
     // screenshot functions
-    const openScreenshotMode = () => { setScreenshotMode(true); setScreenshotPaused(false); setCountdown(2) }
+    const openScreenshotMode = () => {
+        setScreenshotMode(true)
+        setScreenshotPaused(false)
+        setCountdown(5)
+        api.patch(`/devices/${id}`, { screenshotMode: true })
+    }
     const pauseScreenshot = () => setScreenshotPaused(true)
     const resumeScreenshot = () => { setScreenshotPaused(false); setCountdown(2) }
-    const closeScreenshot = () => { setScreenshotMode(false); setScreenshotPaused(false); setScreenshot(null) }
+    const closeScreenshot = () => {
+        setScreenshotMode(false)
+        setScreenshotPaused(false)
+        setScreenshot(null)
+        api.patch(`/devices/${id}`, { screenshotMode: false })
+    }
     const saveScreenshot = () => {
         if (!screenshot?.url) return
         fetch(screenshot.url).then(r => r.blob()).then(blob => {
