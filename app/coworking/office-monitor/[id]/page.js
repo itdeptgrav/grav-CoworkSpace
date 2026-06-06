@@ -136,9 +136,7 @@ export default function DeviceDetailPage({ params }) {
             if (dev.machineId === id) setDevice(dev)
         })
 
-        // screenshot from backend
         socket.on(`screenshot-${id}`, (ss) => {
-            if (!screenshotMode) return
             if (!screenshotPaused) {
                 setScreenshot({ url: ss.url, docId: ss._id, time: new Date(ss.takenAt) })
                 setCountdown(2)
