@@ -68,6 +68,9 @@ export default function DeviceDetailPage({ params }) {
     const todayStr = new Date().toISOString().split("T")[0]
     const [selectedDate, setSelectedDate] = useState(todayStr)
 
+    const selectedDateRef = useRef(todayStr)
+    useEffect(() => { selectedDateRef.current = selectedDate }, [selectedDate])
+
     useEffect(() => {
         if (!loading && role && role !== "ceo") router.replace("/coworking")
     }, [role, loading, router])
@@ -80,7 +83,7 @@ export default function DeviceDetailPage({ params }) {
     // fetch activity by date
     useEffect(() => {
         if (!selectedDate) return
-        api.get(`/activity/${id}?date=${selectedDate}`).then(rows => {
+        api.get(`/activity/${id}?date=${selectedDateRef.current}`).then(rows => {
             setActivity(rows || [])
             setTotalTime((rows || []).reduce((sum, r) => sum + (r.durationSec || 0), 0))
         }).catch(() => { })
@@ -89,7 +92,7 @@ export default function DeviceDetailPage({ params }) {
     // fetch system events by date
     useEffect(() => {
         if (!selectedDate) return
-        api.get(`/system-events/${id}?date=${selectedDate}`).then(rows => {
+        api.get(`/system-events/${id}?date=${selectedDateRef.current}`).then(rows => {
             setSystemEvents(rows || [])
         }).catch(() => { })
     }, [id, selectedDate])
@@ -144,9 +147,11 @@ export default function DeviceDetailPage({ params }) {
 
         return () => socket.disconnect()
     }, [id, selectedDate])
-    // Firebase live screenshot
+
     useEffect(() => {
         if (!screenshotMode) return
+
+        // Firebase primary
         const ref = fdoc(liveDb, 'live_screenshots', id)
         const unsub = fbSnapshot(ref, (snap) => {
             if (snap.exists()) {
@@ -160,19 +165,35 @@ export default function DeviceDetailPage({ params }) {
                 }
             }
         })
-        return () => unsub()
+
+        // Socket.io fallback
+        const socket = io(BACKEND)
+        socket.on(`screenshot-live-${id}`, (data) => {
+            if (!screenshotPausedRef.current) {
+                setScreenshot({
+                    url: `data:image/jpeg;base64,${data.base64}`,
+                    time: data.timestamp ? new Date(data.timestamp) : new Date()
+                })
+                setCountdown(5)
+            }
+        })
+
+        return () => { unsub(); socket.disconnect() }
     }, [id, screenshotMode])
+
 
 
     // live timer
     useEffect(() => {
-        if (!currentApp) return
+        if (!currentApp?.startTime) return
+        const startMs = new Date(currentApp.startTime).getTime()
+        if (isNaN(startMs)) return
+        setLiveSeconds(Math.floor((Date.now() - startMs) / 1000))
         const t = setInterval(() => {
-            if (currentApp.startTime)
-                setLiveSeconds(Math.floor((Date.now() - new Date(currentApp.startTime).getTime()) / 1000))
+            setLiveSeconds(Math.floor((Date.now() - startMs) / 1000))
         }, 1000)
         return () => clearInterval(t)
-    }, [currentApp])
+    }, [currentApp?.startTime])
 
     // window focus refresh
     useEffect(() => {
