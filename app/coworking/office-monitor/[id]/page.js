@@ -2,8 +2,7 @@
 import { useEffect, useState, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../../hooks/useCoworkAuth";
-import { liveDb } from "../../../../lib/liveScreenshot";
-import { doc as fdoc, onSnapshot as fbSnapshot } from "firebase/firestore";
+// ← FIX: removed Firebase imports (liveDb, fdoc, fbSnapshot) — socket only now
 import { io } from "socket.io-client";
 import { BACKEND, api, d } from "../../../../lib/monitorApi";
 
@@ -60,12 +59,19 @@ export default function DeviceDetailPage({ params }) {
     const screenshotPausedRef = useRef(false)
     useEffect(() => { screenshotPausedRef.current = screenshotPaused }, [screenshotPaused])
 
+    // ← FIX: liveStartRef tracks when current app was first seen on THIS dashboard session
+    // avoids timezone bug where server startTime (UTC) caused negative diff in IST browser
+    const liveStartRef = useRef(null)
+    const lastSiteRef = useRef(null)
+
     const [expandedApps, setExpandedApps] = useState({})
     const [totalView, setTotalView] = useState(false)
     const [downloading, setDownloading] = useState(false)
     const [activeTab, setActiveTab] = useState("history")
 
-    const todayStr = new Date().toISOString().split("T")[0]
+    // ← FIX: use local date (not UTC) — toISOString() was returning UTC date which
+    // mismatched agent's local IST date before 5:30 AM IST (UTC midnight)
+    const todayStr = new Date().toLocaleDateString('sv') // 'sv' locale = YYYY-MM-DD in local time
     const [selectedDate, setSelectedDate] = useState(todayStr)
 
     const selectedDateRef = useRef(todayStr)
@@ -104,7 +110,6 @@ export default function DeviceDetailPage({ params }) {
                 const diff = Date.now() - new Date(data.updatedAt).getTime()
                 if (diff < 15000) {
                     setCurrentApp(data)
-                    if (data.startTime) setLiveSeconds(Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000))
                 }
             }
         }).catch(() => { })
@@ -120,7 +125,6 @@ export default function DeviceDetailPage({ params }) {
                 const diff = Date.now() - new Date(data.updatedAt).getTime()
                 if (diff < 15000) {
                     setCurrentApp(data)
-                    if (data.startTime) setLiveSeconds(Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000))
                 } else setCurrentApp(null)
             } else { setCurrentApp(null); setLiveSeconds(0) }
         })
@@ -143,30 +147,14 @@ export default function DeviceDetailPage({ params }) {
             if (dev.machineId === id) setDevice(dev)
         })
 
-
-
         return () => socket.disconnect()
     }, [id, selectedDate])
 
+    // ← FIX: screenshot live view — socket ONLY (Firebase removed)
+    // Was: Firebase primary → socket fallback
+    // Now: socket only — backend emits screenshot-live-${machineId} via /api/screenshots/live
     useEffect(() => {
         if (!screenshotMode) return
-
-        // Firebase primary
-        const ref = fdoc(liveDb, 'live_screenshots', id)
-        const unsub = fbSnapshot(ref, (snap) => {
-            if (snap.exists()) {
-                const data = snap.data()
-                if (data.isActive && data.base64 && !screenshotPausedRef.current) {
-                    setScreenshot({
-                        url: `data:image/jpeg;base64,${data.base64}`,
-                        time: data.timestamp ? new Date(data.timestamp) : new Date()
-                    })
-                    setCountdown(5)
-                }
-            }
-        })
-
-        // Socket.io fallback
         const socket = io(BACKEND)
         socket.on(`screenshot-live-${id}`, (data) => {
             if (!screenshotPausedRef.current) {
@@ -177,23 +165,32 @@ export default function DeviceDetailPage({ params }) {
                 setCountdown(5)
             }
         })
-
-        return () => { unsub(); socket.disconnect() }
+        return () => socket.disconnect()
     }, [id, screenshotMode])
 
-
-
-    // live timer
+    // ← FIX: live timer — client-side tracking with liveStartRef
+    // Was: used server startTime (agent sends IST, Render stores as UTC, browser gets wrong time → negative diff → 0s)
+    // Now: records Date.now() when app label first changes on THIS client — always positive, always ticking
     useEffect(() => {
-        if (!currentApp?.startTime) return
-        const startMs = new Date(currentApp.startTime).getTime()
-        if (isNaN(startMs)) return
-        setLiveSeconds(Math.floor((Date.now() - startMs) / 1000))
+        if (!currentApp) {
+            liveStartRef.current = null
+            lastSiteRef.current = null
+            setLiveSeconds(0)
+            return
+        }
+        // New app detected (or first load)
+        if (currentApp.siteLabel !== lastSiteRef.current) {
+            lastSiteRef.current = currentApp.siteLabel
+            liveStartRef.current = Date.now()
+            setLiveSeconds(0)
+        }
         const t = setInterval(() => {
-            setLiveSeconds(Math.floor((Date.now() - startMs) / 1000))
+            if (liveStartRef.current) {
+                setLiveSeconds(Math.floor((Date.now() - liveStartRef.current) / 1000))
+            }
         }, 1000)
         return () => clearInterval(t)
-    }, [currentApp?.startTime])
+    }, [currentApp?.siteLabel])
 
     // window focus refresh
     useEffect(() => {
@@ -203,7 +200,6 @@ export default function DeviceDetailPage({ params }) {
                     const diff = Date.now() - new Date(data.updatedAt).getTime()
                     if (diff < 15000) {
                         setCurrentApp(data)
-                        if (data.startTime) setLiveSeconds(Math.floor((Date.now() - new Date(data.startTime).getTime()) / 1000))
                     } else { setCurrentApp(null); setLiveSeconds(0) }
                 } else { setCurrentApp(null); setLiveSeconds(0) }
             }).catch(() => { })
