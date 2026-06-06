@@ -387,7 +387,7 @@ export default function DeviceDetailPage({ params }) {
                         {currentApp.pageTitle && <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 6 }}>{currentApp.pageTitle}</div>}
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                             {currentApp.category && <span style={{ padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 500, background: (CAT_COLORS[currentApp.category] || "#94a3b8") + "18", color: CAT_COLORS[currentApp.category] || "#94a3b8" }}>{currentApp.category}</span>}
-                            <span style={{ fontSize: 11, color: "#9CA3AF" }}>Started {d(currentApp.startTime)?.toLocaleTimeString()}</span>
+                            <span style={{ fontSize: 11, color: "#9CA3AF" }}></span>
                         </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 12 }}>
