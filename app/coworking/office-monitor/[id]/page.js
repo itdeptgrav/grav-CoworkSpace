@@ -297,6 +297,8 @@ export default function DeviceDetailPage({ params }) {
         setDownloading(true)
         try {
             const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType } = await import("docx")
+            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+                WidthType, BorderStyle, ShadingType, ExternalHyperlink } = await import("docx")
             const { saveAs } = await import("file-saver")
             const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" }
             const borders = { top: border, bottom: border, left: border, right: border }
@@ -428,7 +430,19 @@ export default function DeviceDetailPage({ params }) {
                                         shading: { fill: fillColor, type: ShadingType.CLEAR },
                                         margins: { top: 80, bottom: 80, left: 120, right: 120 },
                                         children: [new Paragraph({
-                                            children: [new TextRun({ text: d.downloadUrl ? "View Screenshot" : "—", size: 18, font: "Arial", color: "1A73E8" })]
+                                            children: [d.downloadUrl
+                                                ? new ExternalHyperlink({
+                                                    link: d.downloadUrl,
+                                                    children: [new TextRun({
+                                                        text: "View Screenshot",
+                                                        style: "Hyperlink",
+                                                        size: 18,
+                                                        font: "Arial",
+                                                        color: "1A73E8",
+                                                        underline: {}
+                                                    })]
+                                                })
+                                                : new TextRun({ text: "—", size: 18, font: "Arial" })]
                                         })]
                                     }),
                                 ]
