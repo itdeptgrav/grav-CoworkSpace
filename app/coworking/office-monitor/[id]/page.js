@@ -68,6 +68,7 @@ export default function DeviceDetailPage({ params }) {
     const [totalView, setTotalView] = useState(false)
     const [downloading, setDownloading] = useState(false)
     const [activeTab, setActiveTab] = useState("history")
+    const [aiLoading, setAiLoading] = useState(false)
 
     // ← FIX: use local date (not UTC) — toISOString() was returning UTC date which
     // mismatched agent's local IST date before 5:30 AM IST (UTC midnight)
@@ -341,6 +342,127 @@ export default function DeviceDetailPage({ params }) {
         { id: "system", label: "🔐 Login / Logout" },
     ]
 
+    const downloadAiReport = async () => {
+        setAiLoading(true)
+        try {
+            // fetch AI descriptions from backend
+            const descriptions = await api.get(`/ai-descriptions/${id}?date=${selectedDateRef.current}`)
+
+            if (!descriptions || descriptions.length === 0) {
+                alert('No AI analysis available for this date yet.\nRun the Python analyzer script first.')
+                setAiLoading(false)
+                return
+            }
+
+            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+                WidthType, BorderStyle, ShadingType } = await import("docx")
+            const { saveAs } = await import("file-saver")
+
+            const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" }
+            const borders = { top: border, bottom: border, left: border, right: border }
+
+            const children = [
+                // title
+                new Paragraph({
+                    children: [new TextRun({
+                        text: "AI Activity Analysis Report",
+                        bold: true, size: 40, font: "Arial"
+                    })],
+                    spacing: { after: 120 }
+                }),
+                // subtitle
+                new Paragraph({
+                    children: [new TextRun({
+                        text: `Employee: ${device?.customName || id}   |   Date: ${selectedDateRef.current}   |   ${descriptions.length} screenshots analyzed`,
+                        size: 22, font: "Arial", color: "666666"
+                    })],
+                    spacing: { after: 400 }
+                }),
+                // table
+                new Table({
+                    width: { size: 9360, type: WidthType.DXA },
+                    columnWidths: [1800, 5760, 1800],
+                    rows: [
+                        // header
+                        new TableRow({
+                            children: ["Time", "AI Description", "Screenshot Link"].map(h =>
+                                new TableCell({
+                                    borders,
+                                    shading: { fill: "1a1a24", type: ShadingType.CLEAR },
+                                    margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                                    children: [new Paragraph({
+                                        children: [new TextRun({ text: h, bold: true, size: 20, font: "Arial", color: "ffffff" })]
+                                    })]
+                                })
+                            )
+                        }),
+                        // rows
+                        ...descriptions.map((d, i) => {
+                            const timeStr = d.takenAt
+                                ? new Date(d.takenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                : '—'
+                            const fillColor = i % 2 === 0 ? "FFFFFF" : "F9FAFB"
+                            return new TableRow({
+                                children: [
+                                    // time
+                                    new TableCell({
+                                        borders,
+                                        shading: { fill: fillColor, type: ShadingType.CLEAR },
+                                        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                                        children: [new Paragraph({
+                                            children: [new TextRun({ text: timeStr, size: 18, font: "Arial", color: "374151" })]
+                                        })]
+                                    }),
+                                    // description
+                                    new TableCell({
+                                        borders,
+                                        shading: { fill: fillColor, type: ShadingType.CLEAR },
+                                        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                                        children: [new Paragraph({
+                                            children: [new TextRun({ text: d.description || '—', size: 18, font: "Arial", color: "111827" })]
+                                        })]
+                                    }),
+                                    // link
+                                    new TableCell({
+                                        borders,
+                                        shading: { fill: fillColor, type: ShadingType.CLEAR },
+                                        margins: { top: 80, bottom: 80, left: 120, right: 120 },
+                                        children: [new Paragraph({
+                                            children: [new TextRun({ text: d.downloadUrl ? "View Screenshot" : "—", size: 18, font: "Arial", color: "1A73E8" })]
+                                        })]
+                                    }),
+                                ]
+                            })
+                        })
+                    ]
+                }),
+                new Paragraph({ children: [], spacing: { after: 200 } }),
+                new Paragraph({
+                    children: [new TextRun({
+                        text: `Generated by Office Monitor AI — ${new Date().toLocaleString()}`,
+                        size: 16, font: "Arial", color: "9CA3AF"
+                    })]
+                })
+            ]
+
+            const doc2 = new Document({
+                sections: [{
+                    properties: { page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+                    children
+                }]
+            })
+
+            saveAs(
+                await Packer.toBlob(doc2),
+                `AI_Analysis_${device?.customName || id}_${selectedDateRef.current}.docx`
+            )
+        } catch (e) {
+            console.error(e)
+            alert('Error generating report: ' + e.message)
+        }
+        setAiLoading(false)
+    }
+
     return (
         <div style={{ padding: "24px 28px", background: "#F8FAFC", minHeight: "100%" }}>
 
@@ -363,6 +485,24 @@ export default function DeviceDetailPage({ params }) {
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", background: activeTab === tab.id ? "#1B4F8A" : "#fff", color: activeTab === tab.id ? "#fff" : "#374151", border: activeTab === tab.id ? "1px solid #1B4F8A" : "1px solid #E5E7EB" }}>{tab.label}</button>
                     ))}
                     <input type="date" value={selectedDate} max={todayStr} onChange={e => setSelectedDate(e.target.value)} style={{ padding: "7px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12, color: "#374151", outline: "none", background: "#fff", fontFamily: "monospace" }} />
+
+                    <button
+                        onClick={downloadAiReport}
+                        disabled={aiLoading}
+                        style={{
+                            padding: "7px 14px",
+                            background: aiLoading ? "#F3F4F6" : "#F0FDF4",
+                            color: aiLoading ? "#9CA3AF" : "#059669",
+                            border: `1px solid ${aiLoading ? "#E5E7EB" : "#A7F3D0"}`,
+                            borderRadius: 8,
+                            fontSize: 12,
+                            fontWeight: 500,
+                            cursor: aiLoading ? "not-allowed" : "pointer"
+                        }}
+                    >
+                        {aiLoading ? "⏳ Generating…" : "🤖 AI Analysis"}
+                    </button>
+
                     {isToday && (
                         <button onClick={screenshotMode ? closeScreenshot : openScreenshotMode} style={{ padding: "7px 14px", background: screenshotMode ? "#FEE2E2" : "#EBF3FE", color: screenshotMode ? "#DC2626" : "#1A73E8", border: `1px solid ${screenshotMode ? "#FECACA" : "#BFDBFE"}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
                             {screenshotMode ? "✕ Close Live View" : "📷 Live View"}
