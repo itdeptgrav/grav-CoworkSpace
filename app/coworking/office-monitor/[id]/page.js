@@ -54,6 +54,10 @@ export default function DeviceDetailPage({ params }) {
     const [downloading, setDownloading] = useState(false)
     const [activeTab, setActiveTab] = useState("history")
     const [aiLoading, setAiLoading] = useState(false)
+    const [analyticsFrom, setAnalyticsFrom] = useState(new Date().toLocaleDateString('sv'))
+    const [analyticsTo, setAnalyticsTo] = useState(new Date().toLocaleDateString('sv'))
+    const [analyticsData, setAnalyticsData] = useState([])
+    const [analyticsLoading, setAnalyticsLoading] = useState(false)
     const todayStr = new Date().toLocaleDateString('sv')
     const [selectedDate, setSelectedDate] = useState(todayStr)
     const selectedDateRef = useRef(todayStr)
@@ -172,6 +176,58 @@ export default function DeviceDetailPage({ params }) {
     const timeline = buildTimeline()
     const isToday = selectedDate === todayStr
     const liveCardColor = currentApp ? (getCatType(currentApp.category) === 'personal' ? { border: "#FCA5A5", left: "#DC2626" } : getCatType(currentApp.category) === 'work' ? { border: "#A7F3D0", left: "#10B981" } : { border: "#E5E7EB", left: "#9CA3AF" }) : { border: "#A7F3D0", left: "#10B981" }
+
+    // ── Analytics helpers ─────────────────────────────────────────
+    const getDatesInRange = (from, to) => {
+        const dates = []
+        const cur = new Date(from)
+        const end = new Date(to)
+        while (cur <= end) { dates.push(cur.toLocaleDateString('sv')); cur.setDate(cur.getDate() + 1) }
+        return dates
+    }
+
+    const loadAnalytics = async () => {
+        setAnalyticsLoading(true)
+        try {
+            const dates = getDatesInRange(analyticsFrom, analyticsTo)
+            const results = await Promise.all(dates.map(date => api.get(`/activity/${id}?date=${date}`).catch(() => [])))
+            setAnalyticsData(results.flat().filter(Boolean))
+        } catch (e) { console.error(e) }
+        setAnalyticsLoading(false)
+    }
+
+    // Analytics calculations
+    const aTotal = analyticsData.reduce((s, r) => s + (r.durationSec || 0), 0)
+    const aWork = analyticsData.filter(r => getCatType(r.category) === 'work').reduce((s, r) => s + (r.durationSec || 0), 0)
+    const aPersonal = analyticsData.filter(r => getCatType(r.category) === 'personal').reduce((s, r) => s + (r.durationSec || 0), 0)
+    const aNeutral = aTotal - aWork - aPersonal
+    const aScore = aTotal > 0 ? Math.round((aWork / aTotal) * 100) : 0
+    const aScoreColor = aScore >= 70 ? "#059669" : aScore >= 40 ? "#D97706" : "#DC2626"
+    const aScoreLabel = aScore >= 70 ? "🟢 Productive" : aScore >= 40 ? "🟡 Moderate" : "🔴 Low"
+
+    // Top apps for bar chart
+    const aAppMap = {}
+    analyticsData.forEach(r => {
+        const k = r.siteLabel || 'Unknown'
+        if (!aAppMap[k]) aAppMap[k] = { siteLabel: k, category: r.category, sec: 0, count: 0 }
+        aAppMap[k].sec += r.durationSec || 0
+        aAppMap[k].count += 1
+    })
+    const aTopApps = Object.values(aAppMap).sort((a, b) => b.sec - a.sec).slice(0, 12)
+
+    // Category breakdown
+    const aCatMap = {}
+    analyticsData.forEach(r => {
+        const c = r.category || 'Other'
+        aCatMap[c] = (aCatMap[c] || 0) + (r.durationSec || 0)
+    })
+    const aCats = Object.entries(aCatMap).sort((a, b) => b[1] - a[1])
+
+    // Pie chart (conic-gradient)
+    const wPct = aTotal > 0 ? Math.round((aWork / aTotal) * 100) : 0
+    const nPct = aTotal > 0 ? Math.round((aNeutral / aTotal) * 100) : 0
+    const pPct = 100 - wPct - nPct
+    const pieGradient = `conic-gradient(#10B981 0% ${wPct}%, #CBD5E1 ${wPct}% ${wPct + nPct}%, #EF4444 ${wPct + nPct}% 100%)`
 
     const downloadWordReport = async () => {
         setDownloading(true)
@@ -302,7 +358,7 @@ export default function DeviceDetailPage({ params }) {
 
     if (loading) return <div style={{ padding: 48, textAlign: "center", color: "#9CA3AF" }}>Loading…</div>
 
-    const TABS = [{ id: "history", label: "📋 History" }, { id: "timeline", label: "📅 Timeline" }, { id: "raw", label: "📊 Raw Log" }, { id: "system", label: "🔐 Login / Logout" }]
+    const TABS = [{ id: "history", label: "📋 History" }, { id: "timeline", label: "📅 Timeline" }, { id: "raw", label: "📊 Raw Log" }, { id: "system", label: "🔐 Login / Logout" }, { id: "analytics", label: "📈 Analytics" }]
 
     return (
         <div style={{ padding: "24px 28px", background: "#F8FAFC", minHeight: "100%" }}>
@@ -645,6 +701,159 @@ export default function DeviceDetailPage({ params }) {
                         </table>
                     </div>
                     {systemEvents.length === 0 && <div style={emptyRow}>No login/logout history for {selectedDate}</div>}
+                </div>
+            )}
+
+            {/* ══ ANALYTICS TAB ══ */}
+            {activeTab === "analytics" && (
+                <div>
+                    {/* Date Range Picker */}
+                    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>From</span>
+                        <input type="date" value={analyticsFrom} max={todayStr} onChange={e => setAnalyticsFrom(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 12, fontFamily: "monospace", outline: "none" }} />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>To</span>
+                        <input type="date" value={analyticsTo} max={todayStr} onChange={e => setAnalyticsTo(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #E5E7EB", borderRadius: 7, fontSize: 12, fontFamily: "monospace", outline: "none" }} />
+                        <button onClick={loadAnalytics} disabled={analyticsLoading} style={{ padding: "7px 18px", background: analyticsLoading ? "#F3F4F6" : "#1B4F8A", color: analyticsLoading ? "#9CA3AF" : "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: analyticsLoading ? "not-allowed" : "pointer" }}>
+                            {analyticsLoading ? "⏳ Loading…" : "📈 Analyse"}
+                        </button>
+                        {analyticsData.length > 0 && <span style={{ fontSize: 11, color: "#9CA3AF" }}>{getDatesInRange(analyticsFrom, analyticsTo).length} day{getDatesInRange(analyticsFrom, analyticsTo).length !== 1 ? 's' : ''} · {analyticsData.length} sessions</span>}
+                    </div>
+
+                    {analyticsData.length === 0 && !analyticsLoading && (
+                        <div style={{ ...tableWrap, padding: "60px 0", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>
+                            Select a date range and click 📈 Analyse
+                        </div>
+                    )}
+
+                    {analyticsData.length > 0 && (
+                        <>
+                            {/* Summary Cards */}
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+                                {[
+                                    { label: "Total Time", value: fmt(aTotal), color: "#1B4F8A", bg: "#EBF3FE" },
+                                    { label: "Productivity", value: `${aScore}%  ${aScoreLabel}`, color: aScoreColor, bg: aScore >= 70 ? "#F0FDF4" : aScore >= 40 ? "#FFFBEB" : "#FEF2F2" },
+                                    { label: "🟢 Work Time", value: fmt(aWork), color: "#059669", bg: "#F0FDF4" },
+                                    { label: "🔴 Personal Time", value: fmt(aPersonal), color: "#DC2626", bg: "#FEF2F2" },
+                                ].map((card, i) => (
+                                    <div key={i} style={{ background: card.bg, border: "1px solid #E5E7EB", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.08em", marginBottom: 6 }}>{card.label.toUpperCase()}</div>
+                                        <div style={{ fontSize: 18, fontWeight: 800, color: card.color, fontFamily: "monospace" }}>{card.value}</div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Pie + Top Apps row */}
+                            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16, marginBottom: 16 }}>
+
+                                {/* Pie Chart */}
+                                <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "20px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 16 }}>Activity Breakdown</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 20, justifyContent: "center" }}>
+                                        <div style={{ position: "relative", width: 130, height: 130, flexShrink: 0 }}>
+                                            <div style={{ width: 130, height: 130, borderRadius: "50%", background: pieGradient }} />
+                                            {/* Center hole */}
+                                            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 70, height: 70, borderRadius: "50%", background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                                                <div style={{ fontSize: 18, fontWeight: 800, color: aScoreColor, fontFamily: "monospace", lineHeight: 1 }}>{aScore}%</div>
+                                                <div style={{ fontSize: 9, color: "#9CA3AF", marginTop: 2 }}>WORK</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                            {[
+                                                { color: "#10B981", label: "Work", value: fmt(aWork), pct: wPct },
+                                                { color: "#CBD5E1", label: "Neutral", value: fmt(aNeutral), pct: nPct },
+                                                { color: "#EF4444", label: "Personal", value: fmt(aPersonal), pct: pPct },
+                                            ].map((item, i) => (
+                                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                    <div style={{ width: 10, height: 10, borderRadius: 2, background: item.color, flexShrink: 0 }} />
+                                                    <div>
+                                                        <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>{item.label}</div>
+                                                        <div style={{ fontSize: 10, color: "#9CA3AF", fontFamily: "monospace" }}>{item.value} ({item.pct}%)</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Top Apps Bar Chart */}
+                                <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "20px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 16 }}>Top Apps / Websites</div>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                        {aTopApps.map((app, i) => {
+                                            const type = getCatType(app.category)
+                                            const barColor = type === 'personal' ? '#EF4444' : type === 'work' ? '#10B981' : '#94a3b8'
+                                            const pct = aTopApps[0]?.sec > 0 ? (app.sec / aTopApps[0].sec) * 100 : 0
+                                            return (
+                                                <div key={i}>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 600, color: type === 'personal' ? '#DC2626' : '#111827' }}>
+                                                            {type === 'personal' ? '🔴 ' : type === 'work' ? '🟢 ' : ''}{app.siteLabel}
+                                                        </span>
+                                                        <span style={{ fontSize: 11, fontFamily: "monospace", color: "#6B7280" }}>{fmt(app.sec)}</span>
+                                                    </div>
+                                                    <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3 }}>
+                                                        <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 3, transition: "width 0.5s" }} />
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Category Breakdown */}
+                            <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, padding: "20px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 16 }}>Category Breakdown</div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                    {aCats.map(([cat, sec], i) => {
+                                        const type = getCatType(cat)
+                                        const barColor = type === 'personal' ? '#EF4444' : type === 'work' ? '#10B981' : CAT_COLORS[cat] || '#94a3b8'
+                                        const pct = aTotal > 0 ? (sec / aTotal) * 100 : 0
+                                        return (
+                                            <div key={i} style={{ padding: "10px 14px", background: type === 'personal' ? '#FFF5F5' : type === 'work' ? '#F0FDF4' : '#F9FAFB', borderRadius: 8, borderLeft: `3px solid ${barColor}` }}>
+                                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                                    <span style={{ fontSize: 12, fontWeight: 600, color: type === 'personal' ? '#DC2626' : '#111827' }}>
+                                                        {type === 'personal' ? '🔴 ' : type === 'work' ? '🟢 ' : ''}{cat}
+                                                    </span>
+                                                    <div style={{ textAlign: "right" }}>
+                                                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace", color: "#111827" }}>{fmt(sec)}</span>
+                                                        <span style={{ fontSize: 10, color: "#9CA3AF", marginLeft: 6 }}>{Math.round(pct)}%</span>
+                                                    </div>
+                                                </div>
+                                                <div style={{ height: 5, background: "#E5E7EB", borderRadius: 3 }}>
+                                                    <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 3, transition: "width 0.5s" }} />
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Full App Table */}
+                            <div style={tableWrap}>
+                                <div style={tableHead}><span style={tableTitle}>📋 All Apps ({Object.keys(aAppMap).length} total)</span></div>
+                                <div style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                        <thead><tr>{["App / Site", "Category", "Total Time", "Sessions", "Type"].map(h => <th key={h} style={{ padding: "9px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>{h}</th>)}</tr></thead>
+                                        <tbody>
+                                            {Object.values(aAppMap).sort((a, b) => b.sec - a.sec).map((app, i) => {
+                                                const type = getCatType(app.category)
+                                                return (
+                                                    <tr key={i} style={{ borderBottom: "1px solid #F3F4F6", background: type === 'personal' ? '#FFF5F5' : 'transparent' }}>
+                                                        <td style={{ ...td, fontWeight: 600, color: type === 'personal' ? '#DC2626' : '#111827' }}>{type === 'personal' ? '🔴 ' : type === 'work' ? '🟢 ' : ''}{app.siteLabel}</td>
+                                                        <td style={td}><span style={{ padding: "1px 8px", borderRadius: 20, fontSize: 11, background: (CAT_COLORS[app.category] || "#94a3b8") + "18", color: CAT_COLORS[app.category] || "#94a3b8" }}>{app.category}</span></td>
+                                                        <td style={{ ...td, fontWeight: 700, fontFamily: "monospace", color: "#111827" }}>{fmt(app.sec)}</td>
+                                                        <td style={td}>{app.count}×</td>
+                                                        <td style={td}><span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: type === 'personal' ? '#FEE2E2' : type === 'work' ? '#D1FAE5' : '#F3F4F6', color: type === 'personal' ? '#DC2626' : type === 'work' ? '#059669' : '#6B7280' }}>{type}</span></td>
+                                                    </tr>
+                                                )
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
         </div>
