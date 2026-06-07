@@ -59,10 +59,6 @@ export default function DeviceDetailPage({ params }) {
     const screenshotPausedRef = useRef(false)
     useEffect(() => { screenshotPausedRef.current = screenshotPaused }, [screenshotPaused])
 
-    // ← FIX: liveStartRef tracks when current app was first seen on THIS dashboard session
-    // avoids timezone bug where server startTime (UTC) caused negative diff in IST browser
-    const liveStartRef = useRef(null)
-    const lastSiteRef = useRef(null)
 
     const [expandedApps, setExpandedApps] = useState({})
     const [totalView, setTotalView] = useState(false)
@@ -169,31 +165,17 @@ export default function DeviceDetailPage({ params }) {
         return () => socket.disconnect()
     }, [id, screenshotMode])
 
-    // ← FIX: live timer — client-side tracking with liveStartRef
-    // Was: used server startTime (agent sends IST, Render stores as UTC, browser gets wrong time → negative diff → 0s)
-    // Now: records Date.now() when app label first changes on THIS client — always positive, always ticking
+    // NEW — uses server startTime (correct UTC, survives page reload)
     useEffect(() => {
-        if (!currentApp) {
-            liveStartRef.current = null
-            lastSiteRef.current = null
-            setLiveSeconds(0)
-            return
-        }
-        // New app detected (or first load)
-        if (currentApp.siteLabel !== lastSiteRef.current) {
-            lastSiteRef.current = currentApp.siteLabel
-            liveStartRef.current = Date.now()
-            setLiveSeconds(0)
-        }
-        const t = setInterval(() => {
-            if (liveStartRef.current) {
-                setLiveSeconds(Math.floor((Date.now() - liveStartRef.current) / 1000))
-            }
-        }, 1000)
+        if (!currentApp?.startTime) { setLiveSeconds(0); return }
+        const startMs = new Date(currentApp.startTime).getTime()
+        if (isNaN(startMs)) { setLiveSeconds(0); return }
+        const calc = () => Math.max(0, Math.floor((Date.now() - startMs) / 1000))
+        setLiveSeconds(calc())
+        const t = setInterval(() => setLiveSeconds(calc()), 1000)
         return () => clearInterval(t)
-    }, [currentApp?.siteLabel])
+    }, [currentApp?.startTime])
 
-    // window focus refresh
     useEffect(() => {
         const handleFocus = () => {
             api.get(`/activity/current/${id}`).then(data => {
@@ -430,19 +412,24 @@ export default function DeviceDetailPage({ params }) {
                                         shading: { fill: fillColor, type: ShadingType.CLEAR },
                                         margins: { top: 80, bottom: 80, left: 120, right: 120 },
                                         children: [new Paragraph({
-                                            children: [d.downloadUrl
-                                                ? new ExternalHyperlink({
-                                                    link: d.downloadUrl,
-                                                    children: [new TextRun({
-                                                        text: "View Screenshot",
-                                                        style: "Hyperlink",
-                                                        size: 18,
-                                                        font: "Arial",
-                                                        color: "1A73E8",
-                                                        underline: {}
+                                            children: (() => {
+                                                const fileId = d.downloadUrl?.match(/id=([^&]+)/)?.[1]
+                                                const viewUrl = fileId
+                                                    ? `https://drive.google.com/file/d/${fileId}/view`
+                                                    : d.downloadUrl
+                                                return viewUrl
+                                                    ? [new ExternalHyperlink({
+                                                        link: viewUrl,
+                                                        children: [new TextRun({
+                                                            text: "View Screenshot",
+                                                            size: 18,
+                                                            font: "Arial",
+                                                            color: "1A73E8",
+                                                            underline: { type: "single" }
+                                                        })]
                                                     })]
-                                                })
-                                                : new TextRun({ text: "—", size: 18, font: "Arial" })]
+                                                    : [new TextRun({ text: "—", size: 18, font: "Arial" })]
+                                            })()
                                         })]
                                     }),
                                 ]
