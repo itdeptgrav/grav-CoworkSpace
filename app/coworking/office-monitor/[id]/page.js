@@ -278,9 +278,7 @@ export default function DeviceDetailPage({ params }) {
     const downloadWordReport = async () => {
         setDownloading(true)
         try {
-            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType } = await import("docx")
-            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-                WidthType, BorderStyle, ShadingType, ExternalHyperlink } = await import("docx")
+
             const { saveAs } = await import("file-saver")
             const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" }
             const borders = { top: border, bottom: border, left: border, right: border }
@@ -339,7 +337,7 @@ export default function DeviceDetailPage({ params }) {
             }
 
             const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-                WidthType, BorderStyle, ShadingType } = await import("docx")
+                WidthType, BorderStyle, ShadingType, ExternalHyperlink } = await import("docx")
             const { saveAs } = await import("file-saver")
 
             const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" }
