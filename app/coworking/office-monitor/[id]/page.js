@@ -332,12 +332,22 @@ export default function DeviceDetailPage({ params }) {
                                         borders, shading: { fill: fillColor, type: ShadingType.CLEAR },
                                         margins: { top: 80, bottom: 80, left: 120, right: 120 },
                                         children: [new Paragraph({
-                                            children: viewUrl
-                                                ? [new ExternalHyperlink({
-                                                    link: viewUrl,
-                                                    children: [new TextRun({ text: "View Screenshot", size: 18, font: "Arial", color: "1A73E8", underline: { type: "single" } })]
-                                                })]
-                                                : [new TextRun({ text: "—", size: 18, font: "Arial" })]
+                                            children: (() => {
+                                                const urls = desc.allUrls || (desc.downloadUrl ? [desc.downloadUrl] : [])
+                                                if (!urls.length) return [new TextRun({ text: "—", size: 18, font: "Arial" })]
+                                                return urls.map((u, idx) => {
+                                                    const fid = u?.match(/id=([^&]+)/)?.[1]
+                                                    const vUrl = fid ? `https://drive.google.com/file/d/${fid}/view` : u
+                                                    return new ExternalHyperlink({
+                                                        link: vUrl,
+                                                        children: [new TextRun({
+                                                            text: `📷 ${idx + 1}  `,
+                                                            size: 18, font: "Arial", color: "1A73E8",
+                                                            underline: { type: "single" }
+                                                        })]
+                                                    })
+                                                })
+                                            })()
                                         })]
                                     }),
                                 ]
