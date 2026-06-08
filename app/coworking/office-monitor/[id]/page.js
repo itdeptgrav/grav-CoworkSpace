@@ -175,7 +175,15 @@ export default function DeviceDetailPage({ params }) {
     }
     const timeline = buildTimeline()
     const isToday = selectedDate === todayStr
-    const liveCardColor = currentApp ? (getCatType(currentApp.category) === 'personal' ? { border: "#FCA5A5", left: "#DC2626" } : getCatType(currentApp.category) === 'work' ? { border: "#A7F3D0", left: "#10B981" } : { border: "#E5E7EB", left: "#9CA3AF" }) : { border: "#A7F3D0", left: "#10B981" }
+    const liveCardColor = currentApp
+        ? (currentApp.isIdle
+            ? { border: "#FDE68A", left: "#D97706" }        // ← ADDED: yellow for idle
+            : getCatType(currentApp.category) === 'personal'
+                ? { border: "#FCA5A5", left: "#DC2626" }
+                : getCatType(currentApp.category) === 'work'
+                    ? { border: "#A7F3D0", left: "#10B981" }
+                    : { border: "#E5E7EB", left: "#9CA3AF" })
+        : { border: "#A7F3D0", left: "#10B981" }
 
     // ── Analytics helpers ─────────────────────────────────────────
     const getDatesInRange = (from, to) => {
