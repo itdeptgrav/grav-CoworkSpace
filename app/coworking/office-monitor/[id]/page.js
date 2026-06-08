@@ -78,14 +78,14 @@ export default function DeviceDetailPage({ params }) {
     }, [id, selectedDate])
     useEffect(() => {
         api.get(`/activity/current/${id}`).then(data => {
-            if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < 15000) setCurrentApp(data)
+            if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < (data.isIdle ? 300000 : 15000)) setCurrentApp(data)
         }).catch(() => { })
     }, [id])
 
     useEffect(() => {
         const socket = io(BACKEND)
         socket.on(`current-activity-${id}`, (data) => {
-            if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < 15000) setCurrentApp(data)
+            if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < (data.isIdle ? 300000 : 15000)) setCurrentApp(data)
             else { setCurrentApp(null); setLiveSeconds(0) }
         })
         socket.on(`activity-update-${id}`, (act) => {
@@ -118,7 +118,7 @@ export default function DeviceDetailPage({ params }) {
     useEffect(() => {
         const handleFocus = () => {
             api.get(`/activity/current/${id}`).then(data => {
-                if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < 15000) setCurrentApp(data)
+                if (data?.isActive && Date.now() - new Date(data.updatedAt).getTime() < (data.isIdle ? 300000 : 15000)) setCurrentApp(data)
                 else { setCurrentApp(null); setLiveSeconds(0) }
             }).catch(() => { })
         }
