@@ -297,7 +297,7 @@ export default function DeviceDetailPage({ params }) {
                 }),
                 new Table({
                     width: { size: 9360, type: WidthType.DXA },
-                    columnWidths: [1800, 5760, 1800],
+                    columnWidths: [1400, 5160, 2800],
                     rows: [
                         new TableRow({
                             children: ["Time", "AI Description", "Screenshot Link"].map(h =>
@@ -311,7 +311,7 @@ export default function DeviceDetailPage({ params }) {
                         }),
                         ...descriptions.map((desc, i) => {
                             const timeStr = desc.takenAt
-                                ? new Date(desc.takenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                ? new Date(desc.takenAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Kolkata' })
                                 : '—'
                             const fillColor = i % 2 === 0 ? "FFFFFF" : "F9FAFB"
                             const fileId = desc.downloadUrl?.match(/id=([^&]+)/)?.[1]
@@ -333,19 +333,15 @@ export default function DeviceDetailPage({ params }) {
                                         margins: { top: 80, bottom: 80, left: 120, right: 120 },
                                         children: [new Paragraph({
                                             children: (() => {
-                                                const urls = desc.allUrls || (desc.downloadUrl ? [desc.downloadUrl] : [])
+                                                const urls = desc.allUrls?.length ? desc.allUrls : (desc.downloadUrl ? [desc.downloadUrl] : [])
                                                 if (!urls.length) return [new TextRun({ text: "—", size: 18, font: "Arial" })]
-                                                return urls.map((u, idx) => {
+                                                return urls.flatMap((u, idx) => {
                                                     const fid = u?.match(/id=([^&]+)/)?.[1]
                                                     const vUrl = fid ? `https://drive.google.com/file/d/${fid}/view` : u
-                                                    return new ExternalHyperlink({
+                                                    return [new ExternalHyperlink({
                                                         link: vUrl,
-                                                        children: [new TextRun({
-                                                            text: `📷 ${idx + 1}  `,
-                                                            size: 18, font: "Arial", color: "1A73E8",
-                                                            underline: { type: "single" }
-                                                        })]
-                                                    })
+                                                        children: [new TextRun({ text: `📷${idx + 1} `, size: 16, font: "Arial", color: "1A73E8", underline: { type: "single" } })]
+                                                    })]
                                                 })
                                             })()
                                         })]
