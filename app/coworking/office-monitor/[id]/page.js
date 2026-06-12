@@ -53,7 +53,11 @@ export default function DeviceDetailPage({ params }) {
     const [totalView, setTotalView] = useState(false)
     const [downloading, setDownloading] = useState(false)
     const [activeTab, setActiveTab] = useState("history")
+
     const [aiLoading, setAiLoading] = useState(false)
+    const [showAiPanel, setShowAiPanel] = useState(false)
+    const [aiDescriptions, setAiDescriptions] = useState([])
+    const [aiPanelLoading, setAiPanelLoading] = useState(false)
     const [analyticsFrom, setAnalyticsFrom] = useState(new Date().toLocaleDateString('sv'))
     const [analyticsTo, setAnalyticsTo] = useState(new Date().toLocaleDateString('sv'))
     const [analyticsData, setAnalyticsData] = useState([])
@@ -286,7 +290,25 @@ export default function DeviceDetailPage({ params }) {
         } catch (e) { console.error(e) }
         setDownloading(false)
     }
+    const openAiPanel = async () => {
+        if (showAiPanel) { setShowAiPanel(false); return }
+        setAiPanelLoading(true)
+        setShowAiPanel(true)
+        try {
+            const data = await api.get(`/ai-descriptions/${id}?date=${selectedDateRef.current}`)
+            setAiDescriptions(data || [])
+        } catch (e) { setAiDescriptions([]) }
+        setAiPanelLoading(false)
+    }
 
+    function classifyDesc(text) {
+        const t = (text || '').toLowerCase()
+        const personal = ['social media', 'facebook', 'instagram', 'youtube', 'game', 'entertainment', 'personal', 'poker', 'movie', 'music', 'spotify', 'tiktok', 'twitter', 'whatsapp', 'non-work', 'browsing', 'video', 'streaming', 'netflix', 'hotstar', 'prime video', 'reels', 'shorts', 'watching', 'stream', 'disney', 'playing video', 'video content', 'video platform']
+        const work = ['work', 'spreadsheet', 'document', 'email', 'coding', 'development', 'presentation', 'professional', 'work-related', 'office', 'tally', 'accounting', 'photoshop', 'design', 'project', 'task']
+        if (personal.some(k => t.includes(k))) return 'personal'
+        if (work.some(k => t.includes(k))) return 'work'
+        return 'neutral'
+    }
     // ← FIX: downloadAiReport had broken bracket structure
     // doc2, saveAs, and last 2 paragraphs were floating outside children[]
     const downloadAiReport = async () => {
@@ -404,8 +426,8 @@ export default function DeviceDetailPage({ params }) {
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", background: activeTab === tab.id ? "#1B4F8A" : "#fff", color: activeTab === tab.id ? "#fff" : "#374151", border: activeTab === tab.id ? "1px solid #1B4F8A" : "1px solid #E5E7EB" }}>{tab.label}</button>
                     ))}
                     <input type="date" value={selectedDate} max={todayStr} onChange={e => setSelectedDate(e.target.value)} style={{ padding: "7px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12, color: "#374151", outline: "none", background: "#fff", fontFamily: "monospace" }} />
-                    <button onClick={downloadAiReport} disabled={aiLoading} style={{ padding: "7px 14px", background: aiLoading ? "#F3F4F6" : "#F0FDF4", color: aiLoading ? "#9CA3AF" : "#059669", border: `1px solid ${aiLoading ? "#E5E7EB" : "#A7F3D0"}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: aiLoading ? "not-allowed" : "pointer" }}>
-                        {aiLoading ? "⏳ Generating…" : "🤖 AI Analysis"}
+                    <button onClick={openAiPanel} style={{ padding: "7px 14px", background: showAiPanel ? "#1B4F8A" : "#F0FDF4", color: showAiPanel ? "#fff" : "#059669", border: `1px solid ${showAiPanel ? "#1B4F8A" : "#A7F3D0"}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                        🤖 AI Analysis
                     </button>
                     {isToday && (
                         <button onClick={screenshotMode ? closeScreenshot : openScreenshotMode} style={{ padding: "7px 14px", background: screenshotMode ? "#FEE2E2" : "#EBF3FE", color: screenshotMode ? "#DC2626" : "#1A73E8", border: `1px solid ${screenshotMode ? "#FECACA" : "#BFDBFE"}`, borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
@@ -414,6 +436,75 @@ export default function DeviceDetailPage({ params }) {
                     )}
                 </div>
             </div>
+
+            {/* AI Analysis Panel */}
+            {showAiPanel && (
+                <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+                    {/* Panel Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", borderBottom: "1px solid #E5E7EB", background: "#F9FAFB" }}>
+                        <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>AI Activity Analysis</div>
+                            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                                {selectedDateRef.current} · {aiDescriptions.length} entries
+                                <span style={{ marginLeft: 12, color: "#DC2626", fontWeight: 600 }}>■ Personal</span>
+                                <span style={{ marginLeft: 8, color: "#059669", fontWeight: 600 }}>■ Work</span>
+                                <span style={{ marginLeft: 8, color: "#9CA3AF", fontWeight: 600 }}>■ Neutral</span>
+                            </div>
+                        </div>
+                        <button onClick={downloadAiReport} disabled={aiLoading} style={{ padding: "7px 16px", background: aiLoading ? "#F3F4F6" : "#1B4F8A", color: aiLoading ? "#9CA3AF" : "#fff", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: aiLoading ? "not-allowed" : "pointer" }}>
+                            {aiLoading ? "⏳ Generating…" : "📥 Download Report"}
+                        </button>
+                    </div>
+
+                    {/* Panel Body */}
+                    {aiPanelLoading ? (
+                        <div style={{ padding: "40px 0", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>Loading analysis…</div>
+                    ) : aiDescriptions.length === 0 ? (
+                        <div style={{ padding: "40px 0", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>No AI analysis available for this date.</div>
+                    ) : (
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                                <tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}>
+                                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6B7280", width: 100 }}>TIME</th>
+                                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6B7280" }}>AI DESCRIPTION</th>
+                                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6B7280", width: 90 }}>SCREENSHOTS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[...aiDescriptions]
+                                    .sort((a, b) => {
+                                        const order = { personal: 0, neutral: 1, work: 2 }
+                                        return order[classifyDesc(a.description)] - order[classifyDesc(b.description)]
+                                    })
+                                    .map((desc, i) => {
+                                        const type = classifyDesc(desc.description)
+                                        const leftColor = type === 'personal' ? '#DC2626' : type === 'work' ? '#059669' : '#D1D5DB'
+                                        const rowBg = type === 'personal' ? '#FFF5F5' : type === 'work' ? '#F0FDF4' : '#fff'
+                                        const timeStr = desc.takenAt
+                                            ? new Date(desc.takenAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Kolkata' })
+                                            : '—'
+                                        const urls = desc.allUrls?.length ? desc.allUrls : (desc.downloadUrl ? [desc.downloadUrl] : [])
+                                        return (
+                                            <tr key={i} style={{ borderBottom: "1px solid #F3F4F6", borderLeft: `3px solid ${leftColor}`, background: rowBg }}>
+                                                <td style={{ padding: "12px 16px", fontSize: 12, color: "#374151", fontFamily: "monospace", verticalAlign: "top" }}>{timeStr}</td>
+                                                <td style={{ padding: "12px 16px", fontSize: 12, color: "#111827", lineHeight: 1.6, verticalAlign: "top" }}>{desc.description || '—'}</td>
+                                                <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
+                                                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                                        {urls.map((u, idx) => {
+                                                            const fid = u?.match(/id=([^&]+)/)?.[1]
+                                                            const vUrl = fid ? `https://drive.google.com/file/d/${fid}/view` : u
+                                                            return <a key={idx} href={vUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#1A73E8", textDecoration: "none", padding: "2px 6px", background: "#EBF3FE", borderRadius: 4, fontFamily: "monospace" }}>📷{idx + 1}</a>
+                                                        })}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            )}
 
             {/* Productivity Score Card */}
             {totalTime > 0 && (
