@@ -128,6 +128,15 @@ export default function DeviceDetailPage({ params }) {
     }, [id])
 
     useEffect(() => {
+        const interval = setInterval(async () => {
+            const res = await fetch(`/api/screenshots/latest/${machineId}`);
+            const { url } = await res.json();
+            if (url) setScreenshotUrl(url);
+        }, 6000);
+        return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
         if (!screenshotMode || screenshotPaused) { if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current); return }
         countdownIntervalRef.current = setInterval(() => setCountdown(prev => prev <= 1 ? 2 : prev - 1), 1000)
         return () => { if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current) }
