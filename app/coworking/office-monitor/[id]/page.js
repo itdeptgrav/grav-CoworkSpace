@@ -132,13 +132,23 @@ export default function DeviceDetailPage({ params }) {
     }, [id])
 
     useEffect(() => {
-        const interval = setInterval(async () => {
-            const res = await fetch(`/api/screenshots/latest/${machineId}`);
-            const { url } = await res.json();
-            if (url) setScreenshotUrl(url);
-        }, 6000);
-        return () => clearInterval(interval);
-    }, []);
+        if (!screenshotMode) return
+
+        const fetchLatest = async () => {
+            try {
+                const data = await api.get(`/screenshots/latest/${id}`)
+                if (data?.url && !screenshotPausedRef.current) {
+                    setScreenshot({ url: data.url, time: new Date() })
+                    setCountdown(6)
+                }
+            } catch (e) { }
+        }
+
+        fetchLatest()                           // ← shows image immediately on click
+        const interval = setInterval(fetchLatest, 6000)
+        return () => clearInterval(interval)
+
+    }, [id, screenshotMode])
 
     useEffect(() => {
         if (!screenshotMode || screenshotPaused) { if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current); return }
