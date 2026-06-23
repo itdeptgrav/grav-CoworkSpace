@@ -67,7 +67,7 @@ function MbCtxMenu({ items, isMe, onClose }) {
 export default function MessageBubble({
     msg, isMe, showSender = true, showAvatar = true,
     isHost = false, onViewSummary = null, onEdit = null, onCancel = null, onCopied,
-    onReply = null, onDeleteMsg = null, onEditMsg = null,
+    onReply = null, onDeleteMsg = null, onEditMsg = null, onImageClick = null,
 }) {
     const [pdfOpen, setPdfOpen] = useState(false);
     const [imgOpen, setImgOpen] = useState(null);
@@ -333,7 +333,7 @@ export default function MessageBubble({
                                     isMe={isMe}
                                     bare
                                     onPDFClick={() => setPdfOpen(att)}
-                                    onImgClick={() => setImgOpen(att.url)}
+                                    onImgClick={() => onImageClick?.(att.url, att.name || "image")}
                                 />
                             ))}
                         </div>
@@ -365,7 +365,7 @@ export default function MessageBubble({
                                 </div>
                             )}
                             {atts.map((att, i) => (
-                                <AttachmentPreview key={i} att={att} isMe={isMe} onPDFClick={() => setPdfOpen(att)} onImgClick={() => setImgOpen(att.url)} />
+                                <AttachmentPreview key={i} att={att} isMe={isMe} onPDFClick={() => setPdfOpen(att)} onImgClick={() => onImageClick?.(att.url, att.name || "image")} />
                             ))}
                             {hasText ? (
                                 <div style={{ whiteSpace: "pre-wrap" }}>
@@ -404,12 +404,50 @@ export default function MessageBubble({
 
             {/* Image lightbox */}
             {imgOpen && (
-                <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setImgOpen(null)}>
-                    <img src={imgOpen} alt="" style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 10, objectFit: "contain" }} onClick={e => e.stopPropagation()} />
-                    <button style={{ position: "absolute", top: 18, right: 18, background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", borderRadius: "50%", width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setImgOpen(null)}>✕</button>
+                <div
+                    style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", zIndex: 9999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}
+                    onClick={() => setImgOpen(null)}
+                    onKeyDown={e => { if (e.key === "Escape") setImgOpen(null); }}
+                    tabIndex={0}
+                >
+                    {/* Top bar */}
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", background: "rgba(0,0,0,0.4)" }} onClick={e => e.stopPropagation()}>
+                        <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13 }}>Image Preview</span>
+                        <div style={{ display: "flex", gap: 10 }}>
+
+                            <a href={typeof imgOpen === "object" ? imgOpen.url : imgOpen}
+                                download={typeof imgOpen === "object" ? (imgOpen.name || "image") : "image"}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 7, textDecoration: "none", cursor: "pointer" }}
+                                onClick={e => e.stopPropagation()}>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                Download
+                            </a>
+                            <button
+                                style={{ width: 36, height: 36, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 18, cursor: "pointer", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}
+                                onClick={() => setImgOpen(null)}
+                            >✕</button>
+                        </div>
+                    </div>
+
+                    {/* Image */}
+                    <img
+                        src={typeof imgOpen === "object" ? imgOpen.url : imgOpen}
+                        alt={typeof imgOpen === "object" ? imgOpen.name : ""}
+                        style={{ maxWidth: "88vw", maxHeight: "80vh", borderRadius: 10, objectFit: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", marginTop: 16 }}
+                        onClick={e => e.stopPropagation()}
+                    />
+
+                    {typeof imgOpen === "object" && imgOpen.name && (
+                        <div style={{ marginTop: 14, color: "rgba(255,255,255,0.6)", fontSize: 12 }} onClick={e => e.stopPropagation()}>
+                            {imgOpen.name}
+                        </div>
+                    )}
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 }
 
@@ -419,7 +457,7 @@ function AttachmentPreview({ att, isMe, onPDFClick, onImgClick, bare = false }) 
         return (
             <img src={att.url} alt={att.name || "image"} onClick={onImgClick}
                 style={{
-                    width: "auto",
+                    width: "100%",
                     maxWidth: bare ? 280 : 240,
                     maxHeight: 260,
                     borderRadius: 12,

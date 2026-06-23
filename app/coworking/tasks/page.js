@@ -1074,7 +1074,7 @@ export default function TasksPage() {
     const _task = allTaskMapRef.current?.get(newTaskId);
     const _existingSession = timerSessionMap?.get(newTaskId);
     const _isFirstStart = _task && (
-      ["confirmed","deadline_approved"].includes(_task.status) ||
+      ["confirmed", "deadline_approved"].includes(_task.status) ||
       (
         _task.status === "in_progress" &&
         !_existingSession?.lastStartTime &&
@@ -1100,7 +1100,7 @@ export default function TasksPage() {
 
         const dueDate = calcDueDate(
           Number(_task.deadlineWindowSecs),
-          settings.schedule   || null,
+          settings.schedule || null,
           settings.maxTaskActionGapMinutes || 120,
           taskCreatedAtMs,
         );
@@ -1443,7 +1443,7 @@ export default function TasksPage() {
           deadlineExtRequest: updatedExt,
           // Update BOTH fields — fixedDeadline (fixed-deadline tasks) + dueDate (timer tasks)
           fixedDeadline: action !== "reject" ? (newDate || prev.fixedDeadline) : prev.fixedDeadline,
-          dueDate:       action !== "reject" ? (newDate || prev.dueDate)       : prev.dueDate,
+          dueDate: action !== "reject" ? (newDate || prev.dueDate) : prev.dueDate,
         };
       });
       if (action !== "reject" && newDate) {
@@ -1471,6 +1471,41 @@ export default function TasksPage() {
   }, [selectedTask, employeeName, reviewExtDate, reviewExtTime]);
 
 
+
+  // ── C1: Extension approve → point deduction decision popup ─────────────────────
+  const [extDeductionPopup, setExtDeductionPopup] = useState(false);
+  const [extDeductionBusy, setExtDeductionBusy] = useState(false);
+  const [c1Notif, setC1Notif] = useState(null);
+  const [c1Config, setC1Config] = useState(null);
+
+  const handleExtensionApproveClick = useCallback(async () => {
+    setExtDeductionPopup(true);
+    try {
+      const cfg = await apiFetch("/c1/config");
+      setC1Config(cfg);
+    } catch { }
+  }, []);
+
+  const handleExtensionDeductionChoice = useCallback(async (waiveDeduction) => {
+    if (!selectedTask) return;
+    setExtDeductionBusy(true);
+    try {
+      const newDeadline = selectedTask.deadlineExtRequest?.proposedDate || null;
+      await apiFetch(`/cowork/task/${selectedTask.taskId}/extension-deduction`, {
+        method: "POST",
+        body: JSON.stringify({ waiveDeduction, newDeadline }),
+      });
+      await handleReviewExtension("approve", "");
+      // ── Show point notification ──
+      if (waiveDeduction) {
+        setC1Notif({ type: "neutral", pts: null, reason: "Extension approved · No deduction · New deadline is now official" });
+      } else {
+        setC1Notif({ type: "deduct", pts: c1Config?.c1ExtensionDeduction || 0.2, reason: "Extension Filed — deducted from final task score" });
+      }
+      setTimeout(() => setC1Notif(null), 5000);
+    } catch (e) { alert(e.message); }
+    finally { setExtDeductionBusy(false); setExtDeductionPopup(false); }
+  }, [selectedTask, handleReviewExtension, c1Config]);
 
   // ── TL counter-propose deadline ──────────────────────────────────────────────
   const handleTlCounterPropose = useCallback(async () => {
@@ -2145,7 +2180,12 @@ export default function TasksPage() {
       if (type === "confirm") await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
       if (type === "start") await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
       if (type === "confirm_and_start") {
-        await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+        try {
+          await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+        } catch (confirmErr) {
+          // Already confirmed is fine — just proceed to start
+          if (!confirmErr.message?.toLowerCase().includes("already confirmed")) throw confirmErr;
+        }
         await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
       }
       // FIXED: Added approve_tl action
@@ -3058,7 +3098,8 @@ export default function TasksPage() {
   // Computed Values
   const task = selectedTask;
   const isAssignee = task?.assigneeIds?.includes(employeeId);
-  const isConfirmed = task?.confirmedBy?.includes(employeeId);
+  const isConfirmed = task?.confirmedBy?.includes(employeeId)
+    || ["confirmed", "in_progress", "done", "submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(task?.status);
   const isStarted = task?.status === "in_progress" || task?.status === "done";
   const st = task ? (STATUS[task.status] || STATUS.open) : null;
   const pri = getPriDisplay(task?.priority);
@@ -7563,6 +7604,7 @@ em-emoji-picker,
                       reviewExtTime, setReviewExtTime,
                       reviewExtBusy,
                       handleReviewExtension,
+                      onExtensionApproveClick: handleExtensionApproveClick,
                     }}
                   />
                 )}
@@ -7722,6 +7764,7 @@ em-emoji-picker,
                   reviewExtDate, setReviewExtDate,
                   reviewExtBusy,
                   handleReviewExtension,
+                  onExtensionApproveClick: handleExtensionApproveClick,
                 }}
               />
             </div>
@@ -7969,6 +8012,7 @@ em-emoji-picker,
                         reviewExtDate, setReviewExtDate,
                         reviewExtBusy,
                         handleReviewExtension,
+                        onExtensionApproveClick: handleExtensionApproveClick,
                       }}
                       timerPause={handleTimerPause}
                       onUpdatePriority={handleUpdatePriority}
@@ -8359,6 +8403,130 @@ em-emoji-picker,
       />
 
       {/* Request panel is now universal — opened via window event from toolbar/mobile */}
+
+      {/* ── C1: Extension Point Deduction Decision Popup ── */}
+
+      {extDeductionPopup && (
+        <>
+          <div onClick={() => !extDeductionBusy && setExtDeductionPopup(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.25)", zIndex: 9200 }} />
+          <div style={{
+            position: "fixed", top: 0, right: 0, bottom: 0,
+            width: "min(460px,100vw)",
+            background: "#fff",
+            borderLeft: "1px solid #E5E7EB",
+            boxShadow: "-6px 0 32px rgba(15,23,42,0.12)",
+            zIndex: 9201,
+            display: "flex", flexDirection: "column",
+            fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif",
+            animation: "slideInRight 0.22s cubic-bezier(0.32,0.72,0,1) both",
+          }}>
+            <style>{`@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>Approve Extension</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 3 }}>Choose how this affects the employee's C1 score</div>
+              </div>
+              <button onClick={() => setExtDeductionPopup(false)} disabled={extDeductionBusy}
+                style={{ width: 28, height: 28, border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB", color: "#6B7280", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0 }}>
+                <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: "20px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+              {/* Task info */}
+              <div style={{ padding: "10px 14px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Extension Request</div>
+                <div style={{ fontSize: 11, color: "#6B7280" }}>Employee filed a deadline extension before the deadline passed.</div>
+              </div>
+
+              {/* Confirm Deduction option */}
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ padding: "11px 14px", borderBottom: "1px solid #E5E7EB", background: "#FAFAFA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Confirm Deduction</div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#DC2626" }}>
+                    −{c1Config?.c1ExtensionDeduction ?? "0.2"} pts
+                  </span>
+                </div>
+                <div style={{ padding: "10px 14px", fontSize: 11, color: "#6B7280", lineHeight: 1.7 }}>
+                  Extension fee applies at approval.<br />
+                  <span style={{ color: "#374151" }}>
+                    Score: {c1Config
+                      ? `${c1Config.c1BaseScore} − ${c1Config.c1ExtensionDeduction} = ${+(c1Config.c1BaseScore - c1Config.c1ExtensionDeduction).toFixed(2)}`
+                      : "1.0 − 0.2 = 0.8"} pts
+                  </span><br />
+                  <span style={{ color: "#374151" }}>
+                    C1 Net: Quality Rate × {c1Config?.c1MaxPoints ?? 35} pts max
+                  </span>
+                </div>
+              </div>
+
+              {/* Waive Deduction option */}
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ padding: "11px 14px", borderBottom: "1px solid #E5E7EB", background: "#FAFAFA", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Waive Deduction</div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#15803D" }}>0 pts</span>
+                </div>
+                <div style={{ padding: "10px 14px", fontSize: 11, color: "#6B7280", lineHeight: 1.7 }}>
+                  No points deducted for this extension.<br />
+                  <span style={{ color: "#374151" }}>
+                    Score: {c1Config?.c1BaseScore ?? "1.0"} pts (full score if delivered on time)
+                  </span><br />
+                  New deadline becomes the official deadline.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "14px 20px", borderTop: "1px solid #E5E7EB", background: "#FAFAFA", flexShrink: 0, display: "flex", gap: 8 }}>
+              <button onClick={() => setExtDeductionPopup(false)} disabled={extDeductionBusy}
+                style={{ flex: 1, padding: "9px", border: "1px solid #E5E7EB", borderRadius: 7, background: "#fff", color: "#374151", fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+              <button onClick={() => handleExtensionDeductionChoice(false)} disabled={extDeductionBusy}
+                style={{ flex: 2, padding: "9px", border: "1px solid #FECACA", borderRadius: 7, background: extDeductionBusy ? "#F9FAFB" : "#FEF2F2", color: extDeductionBusy ? "#9CA3AF" : "#DC2626", fontSize: 12, fontWeight: 600, cursor: extDeductionBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {extDeductionBusy ? "Processing…" : "Confirm Deduction"}
+              </button>
+              <button onClick={() => handleExtensionDeductionChoice(true)} disabled={extDeductionBusy}
+                style={{ flex: 2, padding: "9px", border: "none", borderRadius: 7, background: extDeductionBusy ? "#E5E7EB" : "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: extDeductionBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {extDeductionBusy ? "Processing…" : "Waive Deduction"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── C1 Point Notification ── */}
+      {c1Notif && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          background: "#1F2937", borderRadius: 10, padding: "14px 18px",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+          display: "flex", alignItems: "flex-start", gap: 12,
+          maxWidth: 320, animation: "slideUp 0.3s ease",
+          fontFamily: "'IBM Plex Sans',-apple-system,sans-serif",
+        }}>
+          <style>{`@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+            background: c1Notif.type === "deduct" ? "#DC2626" : c1Notif.type === "reward" ? "#059669" : "#6B7280",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 16, fontWeight: 800, color: "#fff",
+          }}>
+            {c1Notif.type === "deduct" ? "−" : c1Notif.type === "reward" ? "+" : "○"}
+          </div>
+          <div>
+            {c1Notif.pts != null && (
+              <div style={{ fontSize: 16, fontWeight: 800, color: c1Notif.type === "deduct" ? "#FCA5A5" : "#6EE7B7", lineHeight: 1, marginBottom: 4 }}>
+                {c1Notif.type === "deduct" ? `−${c1Notif.pts} pts` : `+${c1Notif.pts} pts`}
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: "#D1D5DB", lineHeight: 1.5 }}>{c1Notif.reason}</div>
+          </div>
+          <button onClick={() => setC1Notif(null)}
+            style={{ background: "none", border: "none", color: "#6B7280", cursor: "pointer", fontSize: 16, padding: 0, flexShrink: 0, marginLeft: "auto" }}>×</button>
+        </div>
+      )}
     </>
   );
 }
@@ -8610,6 +8778,6 @@ function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCount
 
 // ok then it is needed to change ok because as u know that if we openly give this freedom then to the employee can start the time after 5 days also so what about the sender, sender though that ki immediately the user can start ok but the user start after 5 days and he didn't face any issue as the due date will goona happen from that start time means after that 5 day onwords...
 
-// So just an little changes(but so many twist are there ok) need to perform which is described as below ok... 
-// -> so basically create an setting page so that 
-// -> while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is 
+// So just an little changes(but so many twist are there ok) need to perform which is described as below ok...
+// -> so basically create an setting page so that
+// -> while trigerring that due date fillup/set(at the time of start), basically an condition need to check that is

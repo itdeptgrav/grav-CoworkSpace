@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
-import { createEmployee, listEmployees, deleteEmployee, updateEmployeeId } from "../../../lib/coworkApi";
+import { createEmployee, listEmployees, deleteEmployee, updateEmployeeId, getEmployeeBands } from "../../../lib/coworkApi";
 import { GwAvatar } from "../../../components/coworking/shared/CoworkShared";
 import { firebaseAuth } from "../../../lib/coworkFirebase";
 
@@ -68,7 +68,8 @@ export default function CreateEmployeePage() {
   const [roleError, setRoleError] = useState("");
 
   // ── Edit Employee ID modal state ────────────────────────────────────────
-  const [editIdModal, setEditIdModal] = useState(null); // { employeeId, name }
+  const [editIdModal, setEditIdModal] = useState(null);
+  const [employeeBands, setEmployeeBands] = useState({}); // { employeeId, name }
   const [editIdSelected, setEditIdSelected] = useState("");
   const [editIdSearch, setEditIdSearch] = useState("");
   const [editIdBusy, setEditIdBusy] = useState(false);
@@ -109,8 +110,12 @@ export default function CreateEmployeePage() {
 
   const loadEmployees = async () => {
     try {
-      const data = await listEmployees();
+      const [data, bandsData] = await Promise.all([
+        listEmployees(),
+        getEmployeeBands().catch(() => ({ map: {} })),
+      ]);
       setEmployees(data.employees || []);
+      setEmployeeBands(bandsData.map || {});
     } catch (e) {
       console.error("Failed to load employees:", e);
     }
@@ -476,7 +481,7 @@ export default function CreateEmployeePage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: "sans-serif" }}>
               <thead>
                 <tr style={{ background: "#f9fafb", borderBottom: "2px solid #e5e7eb" }}>
-                  {["Employee ID", "Name", "Role", "Department", "Email", "Mobile", "City", "Actions"].map(h => (
+                  {["Employee ID", "Name", "Role", "Department", "Band", "Email", "Mobile", "City", "Actions"].map(h => (
                     <th key={h} style={{ padding: "9px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
                       {h}
                     </th>
@@ -519,6 +524,32 @@ export default function CreateEmployeePage() {
                     {/* Department */}
                     <td style={{ padding: "11px 14px", color: "#374151" }}>
                       {emp.department || <span style={{ color: "#d1d5db" }}>—</span>}
+                    </td>
+
+                    {/* Band */}
+                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
+                      {(() => {
+                        const info = employeeBands[emp.employeeId];
+                        const BAND_STYLE = {
+                          "execution-led": { color: "#1B4F8A", bg: "#EBF2FA", border: "#BFDBFE", label: "Execution-led" },
+                          "balanced": { color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE", label: "Balanced" },
+                          "outcome-led": { color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", label: "Outcome-led" },
+                        };
+                        if (!info?.bandName) return (
+                          <span style={{ fontSize: 11, color: "#d1d5db" }}>
+                            {info?.designation ? `${info.designation} (unassigned)` : "—"}
+                          </span>
+                        );
+                        const st = BAND_STYLE[info.bandName];
+                        return (
+                          <div>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: st.color, background: st.bg, border: `1px solid ${st.border}`, padding: "2px 8px", borderRadius: 4 }}>
+                              {st.label}
+                            </span>
+                            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>{info.designation}</div>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Email */}

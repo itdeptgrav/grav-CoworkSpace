@@ -299,6 +299,7 @@ export default function GroupChatView({ groupId, onBack }) {
         catch { return new Set(); }
     });
     const [selectedMembers, setSelectedMembers] = useState(null);
+    const [imgLightbox, setImgLightbox] = useState(null);
     const messagesEndRef = useRef(null);
     const unsubRef = useRef(null);
     const pendingMapRef = useRef(new Map());
@@ -1045,6 +1046,7 @@ export default function GroupChatView({ groupId, onBack }) {
                                     onReply={handleReply}
                                     onDeleteMsg={handleDeleteMsg}
                                     onEditMsg={handleOpenEdit}
+                                    onImageClick={(url, name) => setImgLightbox({ url, name })}
                                 />
                             );
                         });
@@ -1361,6 +1363,41 @@ export default function GroupChatView({ groupId, onBack }) {
                                 {meetBusy ? "Scheduling…" : "Schedule Meeting"}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {imgLightbox && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }} onClick={() => setImgLightbox(null)}>
+                    {/* Close button top-right */}
+                    <button style={{ position: "absolute", top: 16, right: 16, width: 38, height: 38, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", fontSize: 20, cursor: "pointer", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setImgLightbox(null)}>✕</button>
+
+                    {/* Image */}
+                    <img src={imgLightbox.url} alt={imgLightbox.name} style={{ maxWidth: "88vw", maxHeight: "75vh", borderRadius: 10, objectFit: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={e => e.stopPropagation()} />
+
+                    {/* Bottom bar — Download button clearly visible */}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }} onClick={e => e.stopPropagation()}>
+                        {imgLightbox.name && <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 12 }}>{imgLightbox.name}</div>}
+                        <button
+                            style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "none", color: "#111", fontSize: 14, fontWeight: 700, padding: "10px 28px", borderRadius: 8, cursor: "pointer" }}
+                            onClick={async () => {
+                                try {
+                                    const res = await fetch(imgLightbox.url);
+                                    const blob = await res.blob();
+                                    const blobUrl = URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = blobUrl;
+                                    a.download = imgLightbox.name || "image.jpg";
+                                    a.click();
+                                    URL.revokeObjectURL(blobUrl);
+                                } catch {
+                                    window.open(imgLightbox.url, "_blank");
+                                }
+                            }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                            Download Image
+                        </button>
                     </div>
                 </div>
             )}

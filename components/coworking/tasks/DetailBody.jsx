@@ -1124,9 +1124,8 @@ export default function DetailBody({
                     Re-submit for Review
                   </ActionBtn>
                 )}
-
-                {/* ── EXTENSION REQUEST (in progress, timer exceeded OR fixed deadline passed) ── */}
-                {isAssignee && (isTimerExceeded || isFixedDeadlinePassed) && ["in_progress", "confirmed"].includes(status) && !task.isFolder && (
+                {/* ── EXTENSION REQUEST ── */}
+                {isAssignee && !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
                   <>
                     {!ef.showExtReqForm ? (
                       <ActionBtn variant="outline" onClick={() => ef.setShowExtReqForm?.(true)}>
@@ -1244,7 +1243,19 @@ export default function DetailBody({
                           </button>
                           <button
                             disabled={ef.reviewExtBusy}
-                            onClick={() => ef.handleReviewExtension?.("approve", "")}
+                            onClick={() => {
+                              if (task.deadlineExtRequest?.isPenaltyWaived) {
+                                // Early request (48+ hrs before deadline) → no deduction panel
+                                ef.handleReviewExtension?.("approve", "");
+                              } else {
+                                // Late request → show deduction decision panel
+                                if (ef.onExtensionApproveClick) {
+                                  ef.onExtensionApproveClick();
+                                } else {
+                                  ef.handleReviewExtension?.("approve", "");
+                                }
+                              }
+                            }}
                             style={{ padding: "4px 12px", borderRadius: 5, border: "none", background: BRAND, color: "#fff", fontSize: 11, fontWeight: 600, cursor: ef.reviewExtBusy ? "not-allowed" : "pointer", fontFamily: F, opacity: ef.reviewExtBusy ? 0.6 : 1 }}
                           >
                             {ef.reviewExtBusy ? "Processing…" : "Approve"}

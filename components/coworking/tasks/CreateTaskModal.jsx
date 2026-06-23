@@ -3,8 +3,9 @@ import React from "react";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { createTask, listAllEmployees, uploadImage, uploadPDF } from "../../../lib/mediaUploadApi";
+import { getC2Config, validateC2Weightage } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
-import { collection, doc, setDoc, updateDoc, serverTimestamp, increment, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, doc, setDoc, updateDoc, serverTimestamp, increment, getDocs, query, where, orderBy, getDoc } from "firebase/firestore";
 
 
 const emptySubtask = () => ({
@@ -103,6 +104,32 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
   );
 }
 
+// ── Working hours calculator (ETC auto-calc) ─────────────────────────────────
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+function _calcWorkingHours(start, end, schedule) {
+  let totalMins = 0;
+  const cur = new Date(start);
+  // Move to minute boundary
+  cur.setSeconds(0, 0);
+  while (cur < end) {
+    const dayName = DAY_NAMES[cur.getDay()];
+    const dayCfg = schedule?.[dayName];
+    if (!dayCfg?.isOff) {
+      const [inH, inM] = (dayCfg?.inTime || "09:30").split(":").map(Number);
+      const [outH, outM] = (dayCfg?.outTime || "18:30").split(":").map(Number);
+      const dayIn = new Date(cur); dayIn.setHours(inH, inM, 0, 0);
+      const dayOut = new Date(cur); dayOut.setHours(outH, outM, 0, 0);
+      const effStart = new Date(Math.max(cur.getTime(), dayIn.getTime()));
+      const effEnd = new Date(Math.min(end.getTime(), dayOut.getTime()));
+      if (effEnd > effStart) totalMins += (effEnd - effStart) / 60000;
+    }
+    // Jump to next calendar day at midnight
+    cur.setDate(cur.getDate() + 1);
+    cur.setHours(0, 0, 0, 0);
+  }
+  return +((totalMins / 60).toFixed(2));
+}
+
 export default function CreateTaskModal({
   onClose, onSuccess,
   currentEmployeeId, currentEmployeeName, currentRole,
@@ -113,6 +140,17 @@ export default function CreateTaskModal({
   const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
   const [isGoalUrl, setIsGoalUrl] = useState(false);
+
+  // ── C2 Band (Gold Task) state ─────────────────────────────────────────────
+  const [isGoldTask, setIsGoldTask] = useState(false);
+  const [c2WeightPct, setC2WeightPct] = useState("");
+  const [c2GlobalMaxPts, setC2GlobalMaxPts] = useState(0);
+  const [c2Remaining, setC2Remaining] = useState(100);
+  const [c2TaskMaxPts, setC2TaskMaxPts] = useState(0);
+  const [c2WeightError, setC2WeightError] = useState("");
+  const [c2Validating, setC2Validating] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -128,11 +166,41 @@ export default function CreateTaskModal({
   const [taskType, setTaskType] = useState(defaultType);
   useEffect(() => { if (isGoalUrl && !isEditMode) setTaskType("goal"); }, [isGoalUrl, isEditMode]);
 
+  // Live-recalculate taskMaxPoints whenever weightage input changes
+  useEffect(() => {
+    const w = parseFloat(c2WeightPct) || 0;
+    const g = c2GlobalMaxPts;
+    setC2TaskMaxPts(g > 0 && w > 0 ? +((w * g) / 100).toFixed(2) : 0);
+    setC2WeightError(""); // clear previous error on change
+  }, [c2WeightPct, c2GlobalMaxPts]);
+
+
   const isFolder = taskType === "folder";
   const isRepeat = taskType === "repeat";
   const isThirdParty = taskType === "thirdparty";
   const isGoal = taskType === "goal";
   const copy = TYPE_COPY[taskType] || TYPE_COPY.normal;
+
+  // Fetch C2 config directly from Firestore — same source as SOP Settings panel.
+  // MUST be after `const isGoal` — hooks cannot reference a const before its declaration.
+  // Do NOT use the backend API here: c2Band.routes may not be deployed yet,
+  // and a silent 404 would leave c2GlobalMaxPts=0 and block task creation.
+  useEffect(() => {
+    if (!isGoal) return;
+    getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"))
+      .then(snap => {
+        if (!snap.exists()) return;
+        const maxPts = Number(snap.data().c2GlobalMaxPoints) || 0;
+        setC2GlobalMaxPts(maxPts);
+        // Best-effort: also try backend for remaining pool % (non-blocking)
+        if (maxPts > 0) {
+          getC2Config()
+            .then(d => { if (d?.remaining != null) setC2Remaining(d.remaining); })
+            .catch(() => { /* backend not deployed yet — remaining stays at 100 */ });
+        }
+      })
+      .catch(() => { });
+  }, [isGoal]);
 
   // ── Single-mode state ──
   const [step, setStep] = useState(1);
@@ -177,6 +245,28 @@ export default function CreateTaskModal({
     hasDailyReport: false, hasTimer: false,
   });
   const setRC = (k, v) => setRepeatConfig(prev => ({ ...prev, [k]: v }));
+
+  // ── Auto-calculate ETC from working schedule + deadline ───────────────────
+  const [workSchedule, setWorkSchedule] = useState(null);
+  const [autoEtcHours, setAutoEtcHours] = useState(0);
+
+  useEffect(() => {
+    import("../../../lib/coworkFirebase").then(({ firebaseDb }) => {
+      import("firebase/firestore").then(({ getDoc, doc }) => {
+        getDoc(doc(firebaseDb, "cowork_settings", "office")).then(snap => {
+          if (snap.exists() && snap.data().schedule) setWorkSchedule(snap.data().schedule);
+        }).catch(() => { });
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!workSchedule || !form.deadline) { setAutoEtcHours(0); return; }
+    const deadline = new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`);
+    if (isNaN(deadline) || deadline <= new Date()) { setAutoEtcHours(0); return; }
+    setAutoEtcHours(_calcWorkingHours(new Date(), deadline, workSchedule));
+  }, [form.deadline, form.deadlineTime, workSchedule]);
+
   const toggleDay = (day) => setRC("activeDays",
     repeatConfig.activeDays.includes(day)
       ? repeatConfig.activeDays.filter(d => d !== day)
@@ -453,6 +543,45 @@ export default function CreateTaskModal({
           _senderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
         }
 
+        // ── C2 Band hard-block validation ────────────────────────────────────
+        // Runs before any DB write. Reads c2GlobalMaxPts from Firestore directly
+        // as a fallback in case the useEffect fetch hasn't resolved yet.
+        if (isGoal && isGoldTask) {
+          if (!c2WeightPct || parseFloat(c2WeightPct) <= 0) {
+            setError("C2 Gold Task requires a weightage % (1–100).");
+            setSubmitting(false); return;
+          }
+          // If c2GlobalMaxPts is still 0 (useEffect not yet resolved),
+          // do a synchronous Firestore read right here before blocking the user.
+          let resolvedMaxPts = c2GlobalMaxPts;
+          if (resolvedMaxPts <= 0) {
+            try {
+              const snap = await getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"));
+              if (snap.exists()) {
+                resolvedMaxPts = Number(snap.data().c2GlobalMaxPoints) || 0;
+                if (resolvedMaxPts > 0) setC2GlobalMaxPts(resolvedMaxPts);
+              }
+            } catch (_) { }
+          }
+          if (resolvedMaxPts <= 0) {
+            setError("C2 Band Global Max Points is not configured. Ask your Admin to set it in SOP Settings.");
+            setSubmitting(false); return;
+          }
+          setC2Validating(true);
+          let valResult = { valid: true };
+          try {
+            valResult = await validateC2Weightage({ weightagePercent: parseFloat(c2WeightPct) });
+          } catch (_) {
+            // Backend not deployed — allow optimistic proceed
+          } finally { setC2Validating(false); }
+          if (!valResult.valid) {
+            setC2WeightError(valResult.error || "Weightage validation failed.");
+            setError(valResult.error || "C2 Band weightage exceeds available pool.");
+            setSubmitting(false); return;
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         const computedPriority = isFolder ? 5 : await fetchNextPriorityForAssignees(selectedIds);
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
@@ -466,6 +595,13 @@ export default function CreateTaskModal({
           isRepeat: isRepeat || false, repeatConfig: isRepeat ? repeatConfig : null,
           isThirdParty: isThirdParty || false, thirdPartyConfig: isThirdParty ? thirdPartyConfig : null,
           isGoal: isGoal || false, goalConfig: isGoal ? goalConfig : null,
+          etcHours: (!isGoal && !isFolder && !isRepeat && !isThirdParty) ? autoEtcHours : 0,
+          isGoldTask: (isGoal && isGoldTask) || false,
+          c2Config: (isGoal && isGoldTask && c2WeightPct && c2GlobalMaxPts > 0) ? {
+            weightagePercent: parseFloat(c2WeightPct),
+            taskMaxPoints: c2TaskMaxPts,
+            globalMaxPointsAtCreation: c2GlobalMaxPts,
+          } : null,
           senderTimerWindowSecs: _senderTimerSecs,
         });
         if (parentTask?.taskId && newTask?.taskId) await postSubtaskNotification(parentTask.taskId, form.title.trim(), newTask.taskId);
@@ -778,7 +914,19 @@ export default function CreateTaskModal({
                   )}
 
                   {!isFolder && !isRepeat && !isThirdParty && !isGoal && (
-                    <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationVal={form.timerDurationVal} timerDurationUnit={form.timerDurationUnit} />
+                    <>
+                      <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationVal={form.timerDurationVal} timerDurationUnit={form.timerDurationUnit} />
+                      {/* ── ETC auto-calculated (C1 scoring) ── */}
+                      {autoEtcHours > 0 && (
+                        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6 }}>
+                          <span style={{ fontSize: 10, color: "#15803D", fontWeight: 700 }}>⏱ ETC</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#15803D" }}>
+                            {autoEtcHours >= 1 ? `${autoEtcHours}h` : `${Math.round(autoEtcHours * 60)} min`}
+                          </span>
+                          <span style={{ fontSize: 10, color: "#6B7280" }}>working hours until deadline · used for C1 scoring</span>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Repeat config */}
@@ -911,6 +1059,151 @@ export default function CreateTaskModal({
                         <input className="ctm-inp" style={inp} type="date" value={goalConfig.deadline} onChange={e => setGC("deadline", e.target.value)} />
                         <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 3 }}>This sets the deadline for the final goal node in the roadmap.</div>
                       </div>
+
+                      {/* ── C2 Band (Gold Task) section ──────────────────────── */}
+                      <div style={{
+                        marginTop: 12,
+                        border: isGoldTask ? "1px solid #FCD34D" : "1px dashed #E5E7EB",
+                        borderRadius: 7,
+                        overflow: "hidden",
+                        transition: "border-color 0.15s",
+                      }}>
+                        {/* Toggle header */}
+                        <div
+                          onClick={() => { setIsGoldTask(p => !p); setC2WeightPct(""); setC2WeightError(""); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "10px 12px", cursor: "pointer",
+                            background: isGoldTask
+                              ? "linear-gradient(135deg, #D97706, #B45309)"
+                              : "#F9FAFB",
+                          }}
+                        >
+                          {/* Custom toggle pill */}
+                          <div style={{
+                            width: 32, height: 18, borderRadius: 9, flexShrink: 0,
+                            background: isGoldTask ? "#FFF" : "#D1D5DB",
+                            position: "relative", transition: "background 0.2s",
+                          }}>
+                            <div style={{
+                              position: "absolute", top: 2, left: isGoldTask ? 16 : 2,
+                              width: 14, height: 14, borderRadius: "50%",
+                              background: isGoldTask ? "#B45309" : "#fff",
+                              transition: "left 0.2s",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                            }} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: isGoldTask ? "#fff" : "#374151" }}>
+                              🥇 Mark as C2 Band Gold Task
+                            </div>
+                            <div style={{ fontSize: 10, color: isGoldTask ? "rgba(255,255,255,0.8)" : "#9CA3AF", marginTop: 1 }}>
+                              Points are earned based on global weightage pool
+                            </div>
+                          </div>
+                          {c2GlobalMaxPts <= 0 && isGoldTask && (
+                            <div style={{ marginLeft: "auto", fontSize: 10, color: "#FEF3C7", background: "rgba(0,0,0,0.15)", padding: "2px 8px", borderRadius: 4 }}>
+                              Configure in SOP Settings first
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Expanded C2 config — only when toggled on */}
+                        {isGoldTask && (
+                          <div style={{ padding: "12px 12px 14px", background: "#FFFBEB", display: "flex", flexDirection: "column", gap: 10 }}>
+
+                            {/* Pool status bar */}
+                            <div style={{
+                              padding: "8px 10px",
+                              background: "#FEF3C7",
+                              border: "1px solid #FCD34D",
+                              borderRadius: 6,
+                              display: "flex", alignItems: "center", justifyContent: "space-between",
+                            }}>
+                              <div style={{ fontSize: 11, color: "#92400E" }}>
+                                <strong>Global Max: {c2GlobalMaxPts} pts</strong>
+                                {" · "}Pool remaining: <strong>{c2Remaining}%</strong>
+                              </div>
+                              {c2Remaining <= 0 && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", padding: "2px 7px", borderRadius: 4 }}>
+                                  POOL FULL
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Weightage % input */}
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                                Task Weightage (%)
+                              </div>
+                              <input
+                                type="number"
+                                min="1"
+                                max={c2Remaining > 0 ? c2Remaining : 100}
+                                step="1"
+                                value={c2WeightPct}
+                                onChange={e => setC2WeightPct(e.target.value)}
+                                placeholder={`e.g. 60  (max: ${c2Remaining}%)`}
+                                style={{
+                                  display: "block", width: "100%",
+                                  padding: "8px 10px",
+                                  border: `1px solid ${c2WeightError ? "#FECACA" : "#E5E7EB"}`,
+                                  borderRadius: 6,
+                                  fontSize: 13, fontFamily: "inherit",
+                                  color: "#111827", background: "#fff",
+                                  outline: "none", boxSizing: "border-box",
+                                }}
+                                onFocus={e => e.target.style.borderColor = "#D97706"}
+                                onBlur={e => e.target.style.borderColor = c2WeightError ? "#FECACA" : "#E5E7EB"}
+                              />
+                              <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>
+                                The % of the global C2 pool this task owns.
+                                Total active weightages must equal 100%.
+                              </div>
+                            </div>
+
+                            {/* Live calculation preview */}
+                            {c2TaskMaxPts > 0 && c2GlobalMaxPts > 0 && (
+                              <div style={{
+                                padding: "9px 12px",
+                                background: "#D97706",
+                                borderRadius: 6,
+                                display: "flex", alignItems: "center", justifyContent: "space-between",
+                              }}>
+                                <div style={{ fontSize: 12, color: "#fff" }}>
+                                  Task Max Points =
+                                  <span style={{ fontFamily: "monospace", marginLeft: 6, marginRight: 6 }}>
+                                    ({c2WeightPct}% × {c2GlobalMaxPts}) / 100
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>
+                                  = {c2TaskMaxPts} pts
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Hard block error */}
+                            {c2WeightError && (
+                              <div style={{
+                                padding: "8px 10px",
+                                background: "#FEF2F2", border: "1px solid #FECACA",
+                                borderRadius: 6, fontSize: 11, color: "#B91C1C",
+                              }}>
+                                🚫 {c2WeightError}
+                              </div>
+                            )}
+
+                            {c2Validating && (
+                              <div style={{ fontSize: 11, color: "#B45309", display: "flex", alignItems: "center", gap: 6 }}>
+                                <div style={{ width: 10, height: 10, border: "2px solid #B45309", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                                Validating C2 pool…
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {/* ── end C2 Band section ──────────────────────────────── */}
+
                     </div>
                   )}
                 </>

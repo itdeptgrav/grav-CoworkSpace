@@ -308,6 +308,7 @@ export default function GroupChatView({ groupId, onBack }) {
     const prevGroupIdRef = useRef(null);
     const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [imgLightbox, setImgLightbox] = useState(null);
 
     // ── Load group doc + member details ──────────────────────
     const loadGroup = useCallback(async () => {
@@ -1056,6 +1057,7 @@ export default function GroupChatView({ groupId, onBack }) {
                                     onReply={handleReply}
                                     onDeleteMsg={handleDeleteMsg}
                                     onEditMsg={handleOpenEdit}
+                                    onImageClick={(url, name) => setImgLightbox({ url, name })}
                                 />
                             );
                         });
@@ -1373,6 +1375,25 @@ export default function GroupChatView({ groupId, onBack }) {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {imgLightbox && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }} onClick={() => setImgLightbox(null)}>
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", background: "rgba(0,0,0,0.4)" }} onClick={e => e.stopPropagation()}>
+                        <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13 }}>Image Preview</span>
+                        <div style={{ display: "flex", gap: 10 }}>
+                            <a href={imgLightbox.url} download={imgLightbox.name} target="_blank" rel="noopener noreferrer"
+                                style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 7, textDecoration: "none" }}
+                                onClick={e => e.stopPropagation()}>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                Download
+                            </a>
+                            <button style={{ width: 36, height: 36, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", fontSize: 18, cursor: "pointer", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setImgLightbox(null)}>✕</button>
+                        </div>
+                    </div>
+                    <img src={imgLightbox.url} alt={imgLightbox.name} style={{ maxWidth: "88vw", maxHeight: "80vh", borderRadius: 10, objectFit: "contain", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={e => e.stopPropagation()} />
+                    {imgLightbox.name && <div style={{ marginTop: 14, color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{imgLightbox.name}</div>}
                 </div>
             )}
         </>

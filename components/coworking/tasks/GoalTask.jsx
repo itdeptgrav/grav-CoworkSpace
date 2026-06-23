@@ -454,13 +454,22 @@ function CustomCalendar({ value, onChange, usedDates = [] }) {
 }
 
 // ── Flow Edit Box — renders as a right-side slider drawer ────────────────────
-function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [], readonlyDeadline = false }) {
+function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [], readonlyDeadline = false, isGoldTask = false, taskMaxPoints = 0, usedPoints = 0, remainingPoints = 0 }) {
   const [heading, setHeading] = useState(comp.heading || "");
   const [description, setDescription] = useState(comp.description || "");
   const [deadline, setDeadline] = useState(comp.deadline || "");
+  const [weightagePct, setWeightagePct] = useState(comp.percentage != null ? String(comp.percentage) : "");
   const ref = useRef(null);
   useEffect(() => { setTimeout(() => ref.current?.focus(), 80); }, []);
-  const canSave = heading.trim() && description.trim() && deadline;
+
+  const parsedWeight = parseFloat(weightagePct) || 0;
+  const previewPts = taskMaxPoints > 0 && parsedWeight > 0
+    ? +((parsedWeight / 100) * taskMaxPoints).toFixed(2)
+    : 0;
+
+  const exceedsPool = isGoldTask && previewPts > 0 && previewPts > remainingPoints;
+  const canSave = heading.trim() && description.trim() && deadline &&
+    (!isGoldTask || (parsedWeight > 0 && parsedWeight <= 100 && !exceedsPool));
 
   return (
     <Modal>
@@ -523,6 +532,87 @@ function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [
               />
             )}
           </div>
+
+          {/* Weightage % — Gold Tasks only */}
+          {isGoldTask && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+              {/* Pool status banner */}
+              <div style={{ padding: "9px 12px", background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: T.radius }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#92400E", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>
+                  🥇 Points Pool
+                </div>
+                <div style={{ display: "flex", gap: 0, fontSize: 12 }}>
+                  <div style={{ flex: 1, textAlign: "center", padding: "4px 0", borderRight: "1px solid #FCD34D" }}>
+                    <div style={{ fontWeight: 700, color: "#92400E" }}>{taskMaxPoints} pts</div>
+                    <div style={{ fontSize: 10, color: "#B45309" }}>Total</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "center", padding: "4px 0", borderRight: "1px solid #FCD34D" }}>
+                    <div style={{ fontWeight: 700, color: usedPoints > 0 ? "#B45309" : "#9CA3AF" }}>{+usedPoints.toFixed(2)} pts</div>
+                    <div style={{ fontSize: 10, color: "#B45309" }}>Used</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: "center", padding: "4px 0" }}>
+                    <div style={{ fontWeight: 700, color: remainingPoints > 0 ? "#15803D" : "#B91C1C" }}>{+remainingPoints.toFixed(2)} pts</div>
+                    <div style={{ fontSize: 10, color: "#15803D" }}>Remaining</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Weightage input */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <label style={lbl}>Component Weightage (%) *</label>
+                  {remainingPoints > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setWeightagePct(+((remainingPoints / taskMaxPoints) * 100).toFixed(4).replace(/\.?0+$/, ""))}
+                      style={{
+                        padding: "2px 9px", border: "1px solid #D97706",
+                        borderRadius: 4, background: "#FEF3C7",
+                        color: "#92400E", fontSize: 10, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                      }}
+                    >
+                      Use Remaining ({+remainingPoints.toFixed(2)} pts)
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="number" min="0.1" max="100" step="0.1"
+                  value={weightagePct}
+                  onChange={e => setWeightagePct(e.target.value)}
+                  placeholder={`e.g. ${remainingPoints > 0 ? +((remainingPoints / taskMaxPoints) * 100).toFixed(1) : "0"}`}
+                  style={{ ...inp, borderColor: exceedsPool ? "#FECACA" : T.border }}
+                  onFocus={e => e.target.style.borderColor = "#D97706"}
+                  onBlur={e => e.target.style.borderColor = exceedsPool ? "#FECACA" : T.border}
+                />
+              </div>
+
+              {/* Live preview */}
+              {previewPts > 0 && (
+                <div style={{ padding: "9px 12px", background: exceedsPool ? "#FEF2F2" : "#D97706", border: exceedsPool ? "1px solid #FECACA" : "none", borderRadius: T.radius }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: exceedsPool ? "#B91C1C" : "#fff" }}>
+                      {parsedWeight}% × {taskMaxPoints} pts / 100
+                    </span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: exceedsPool ? "#B91C1C" : "#fff" }}>
+                      = {previewPts} pts
+                    </span>
+                  </div>
+                  {!exceedsPool && previewPts > 0 && (
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.85)", marginTop: 3 }}>
+                      After adding: {+(remainingPoints - previewPts).toFixed(2)} pts remaining in pool
+                    </div>
+                  )}
+                  {exceedsPool && (
+                    <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 3, fontWeight: 600 }}>
+                      🚫 Exceeds remaining pool ({+remainingPoints.toFixed(2)} pts left)
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -530,7 +620,10 @@ function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [
           <Btn onClick={onCancel} variant="ghost" style={{ flex: 1, padding: "9px" }}>Cancel</Btn>
           <Btn
             disabled={!canSave}
-            onClick={() => canSave && onSave({ heading: heading.trim(), description: description.trim(), deadline })}
+            onClick={() => canSave && onSave({
+              heading: heading.trim(), description: description.trim(), deadline,
+              ...(isGoldTask ? { percentage: parsedWeight, points: previewPts } : {})
+            })}
             variant={canSave ? "primary" : "ghost"}
             style={{ flex: 2, padding: "9px", cursor: canSave ? "pointer" : "not-allowed", opacity: canSave ? 1 : 0.45 }}>
             {isNew ? "Add Component" : "Save Changes"}
@@ -557,30 +650,51 @@ function AddBtn({ onClick }) {
 
 // ── Node Card ─────────────────────────────────────────────────────────────────
 function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFinalNode, createdByMe,
-  canMarkDone,    // true only for the assignee/receiver
-  isPrevDone,     // true if this node's previous node is done (or this is the first node)
+  canMarkDone,
+  isPrevDone,
+  isGoldTask = false,
+  isMultiUserGold = false,
+  viewingUserId = "",
   onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject, onReportSubmitted }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
   const [showView, setShowView] = useState(false);
   const [showUndoConfirm, setShowUndoConfirm] = useState(false);
-  const reportSubmitted = comp.reportSubmitted;
-  const isPendingApproval = comp.status === "pending_approval";
+  const effectiveStatus = isMultiUserGold && viewingUserId
+    ? (comp.perUserStatus?.[viewingUserId]?.status || "pending")
+    : comp.status;
+  const reportSubmitted = isMultiUserGold && viewingUserId
+    ? (comp.perUserStatus?.[viewingUserId]?.reportSubmitted || false)
+    : (comp.reportSubmitted || false);
+  const effectiveReport = isMultiUserGold && viewingUserId
+    ? (comp.perUserStatus?.[viewingUserId]?.report || null)
+    : (comp.report || null);
+  const isPendingApproval = effectiveStatus === "pending_approval";
+  const effectiveDone = isMultiUserGold ? (effectiveStatus === "done") : isDone;
+  // Deadline-missed flag — stored on comp or perUserStatus for multi-user
+  const effectiveLate = isMultiUserGold && viewingUserId
+    ? (comp.perUserStatus?.[viewingUserId]?.lateSubmission || false)
+    : (comp.lateSubmission || false);
 
   // Only isHead (TL/CEO) can delete any component
   const canDelete = isHead;
   // Node is locked for receiver if previous node is not done
   const isLocked = canMarkDone && !isPrevDone;
 
-  const statusColor = isDone ? T.success : isPendingApproval ? T.warning : T.textMuted;
-  const statusLabel = isDone ? "Done" : isPendingApproval ? "Awaiting Approval" : "Pending";
-  const statusBg = isDone ? T.successBg : isPendingApproval ? T.warningBg : T.bg;
-  const statusBorder = isDone ? T.successBorder : isPendingApproval ? T.warningBorder : T.border;
+  const isDoneDisplay = isMultiUserGold ? effectiveDone : isDone;
+  const doneAtDisplay = isMultiUserGold
+    ? comp.perUserStatus?.[viewingUserId]?.doneAt
+    : comp.doneAt;
+
+  const statusColor = isDoneDisplay ? T.success : isPendingApproval ? T.warning : T.textMuted;
+  const statusLabel = isDoneDisplay ? "Done" : isPendingApproval ? "Awaiting Approval" : "Pending";
+  const statusBg = isDoneDisplay ? T.successBg : isPendingApproval ? T.warningBg : T.bg;
+  const statusBorder = isDoneDisplay ? T.successBorder : isPendingApproval ? T.warningBorder : T.border;
 
   return (
     <>
       {showSubmit && <SubmitReportModal comp={comp} idx={idx} taskId={taskId} onSuccess={() => { setShowSubmit(false); onPendingApproval(); onReportSubmitted(); }} onCancel={() => setShowSubmit(false)} />}
-      {showView && <ViewReportModal comp={comp} idx={idx} onClose={() => setShowView(false)} />}
+      {showView && <ViewReportModal comp={{ ...comp, report: effectiveReport }} idx={idx} onClose={() => setShowView(false)} />}
       {showUndoConfirm && (
         <ConfirmModal icon="↩" title="Undo completion?" confirmLabel="Yes, Undo" confirmVariant="amber"
           desc={`<b>"${comp.heading}"</b> will be reset to pending.`}
@@ -606,7 +720,7 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
           <span style={{ fontSize: 10, fontWeight: 600, color: statusColor }}>
             {isLocked ? "Locked" : statusLabel}
           </span>
-          {isDone && comp.doneAt && <span style={{ fontSize: 9, color: T.success, fontWeight: 500 }}>· {fmtReadable(comp.doneAt)}</span>}
+          {isDoneDisplay && doneAtDisplay && <span style={{ fontSize: 9, color: T.success, fontWeight: 500 }}>· {fmtReadable(doneAtDisplay)}</span>}
         </div>
 
         {/* Final node badge */}
@@ -619,8 +733,8 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
         {/* Report submitted */}
         {(reportSubmitted || isPendingApproval) && (
           <div style={{ marginBottom: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 8px", background: T.primaryLight, border: `1px solid ${T.primaryBorder}`, borderRadius: T.radius, marginBottom: isHead && !isDone ? 5 : 0 }}>
-              <span style={{ fontSize: 10, fontWeight: 600, color: T.primary }}>Report submitted · {comp.report?.submittedBy}</span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 8px", background: T.primaryLight, border: `1px solid ${T.primaryBorder}`, borderRadius: T.radius, marginBottom: isHead && !isDoneDisplay ? 5 : 0 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, color: T.primary }}>Report submitted · {effectiveReport?.submittedBy}</span>
               <button onClick={() => setShowView(true)} style={{ fontSize: 10, fontWeight: 700, color: T.primary, background: "none", border: "none", cursor: "pointer" }}>View →</button>
             </div>
             {isHead && isPendingApproval && (
@@ -643,11 +757,50 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
               {Number(comp.percentage).toFixed(1)}% weight
             </span>
           )}
-          {comp.points > 0 && (
-            <span style={{ fontSize: 10, fontWeight: 600, color: T.textSub, background: T.bg, border: `1px solid ${T.border}`, padding: "1px 7px", borderRadius: 4 }}>
-              +{comp.points} pts
-            </span>
-          )}
+          {comp.points > 0 && (() => {
+            const isGold = isGoldTask;
+            const compStatus = isMultiUserGold
+              ? (comp.perUserStatus?.[viewingUserId]?.status || comp.status)
+              : comp.status;
+            const isDoneStatus = compStatus === "done";
+
+            // Deadline missed — show 0 pts warning badge
+            if (isDoneStatus && effectiveLate) {
+              return (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: "1px 8px", borderRadius: 4,
+                  background: "#FEF2F2", border: "1px solid #FECACA",
+                  color: "#B91C1C", display: "flex", alignItems: "center", gap: 4,
+                }}>
+                  ⚠ 0 pts · Deadline Missed
+                </span>
+              );
+            }
+
+            return (
+              <span style={{
+                fontSize: 10, fontWeight: 700,
+                padding: "1px 8px", borderRadius: 4,
+                background: isGold
+                  ? (isDoneStatus ? T.successBg : "#FEF3C7")
+                  : T.bg,
+                border: `1px solid ${isGold
+                  ? (isDoneStatus ? T.successBorder : "#FCD34D")
+                  : T.border}`,
+                color: isGold
+                  ? (isDoneStatus ? T.success : "#B45309")
+                  : T.textSub,
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                {isGold ? (
+                  isDoneStatus
+                    ? `✓ +${comp.points} pts`
+                    : `0 / ${comp.points} pts`
+                ) : `+${comp.points} pts`}
+              </span>
+            );
+          })()}
+
           {/* Who created this component */}
           {comp.createdByName && (
             <span style={{ fontSize: 10, color: T.textMuted }}>
@@ -697,7 +850,7 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
             {/* ── RECEIVER (isAssignee / canMarkDone): only Mark Done / Undo ── */}
             {canMarkDone && (
               <div style={{ display: "flex", gap: 5 }}>
-                {isDone ? (
+                {isDoneDisplay ? (
                   <Btn onClick={() => { setMenuOpen(false); setShowUndoConfirm(true); }} variant="amber" style={{ flex: 1, padding: "6px 8px", fontSize: 11 }}>Undo</Btn>
                 ) : isLocked ? (
                   <div style={{ padding: "6px 10px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius, fontSize: 11, color: T.textMuted, flex: 1, textAlign: "center" }}>
@@ -728,6 +881,8 @@ function InteractiveFlowchart({
   components, editingIdx, addingAfter, submitted, canEdit, isHead, editingMode, taskId,
   seenCount, currentEmployeeId, goalTotalPoints, goalFinalWeightPct, goalBonusPoints,
   canMarkDoneOnly,
+  isGoldTask = false, isMultiUserGold = false, viewingUserId = "", setViewingUserId = null,
+  taskAssigneeIds = [],
   onSeen, onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject,
   onAddBetween, onSaveNew, onSaveEdit, onCancelEdit, onCancelAdd,
   onDeleteAll, onToggleEditMode, onRefresh,
@@ -762,7 +917,31 @@ function InteractiveFlowchart({
       <div style={{ background: T.white, border: `1px solid ${T.border}`, borderRadius: T.radius, overflow: "hidden" }}>
         {/* Header */}
         <div style={{ padding: "10px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: T.bg }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Goal Roadmap</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
+            {isMultiUserGold ? "🥇 Gold Task Roadmap" : "Goal Roadmap"}
+          </span>
+          {/* Multi-user gold: assignee switcher for head */}
+          {isMultiUserGold && isHead && (
+            <select
+              value={viewingUserId}
+              onChange={e => setViewingUserId(e.target.value)}
+              style={{
+                padding: "3px 8px", border: `1px solid ${T.border}`,
+                borderRadius: T.radius, fontSize: 11, fontFamily: "inherit",
+                color: T.text, background: "#FEF9E7", outline: "none",
+                cursor: "pointer", fontWeight: 600,
+              }}
+            >
+              {(task.assigneeIds || []).map(uid => (
+                <option key={uid} value={uid}>{uid}</option>
+              ))}
+            </select>
+          )}
+          {isMultiUserGold && !isHead && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: "#B45309", background: "#FEF3C7", border: "1px solid #FCD34D", padding: "2px 7px", borderRadius: 4 }}>
+              🥇 C2 Gold
+            </span>
+          )}
           {components.length > 0 && (
             <span style={{ fontSize: 10, fontWeight: 600, color: T.textSub, background: T.white, border: `1px solid ${T.border}`, padding: "2px 7px", borderRadius: 99 }}>
               {components.length} component{components.length !== 1 ? "s" : ""}
@@ -843,7 +1022,8 @@ function InteractiveFlowchart({
                             {!isEditing && (
                               <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId} allComps={components} isFinalNode={isFinal} createdByMe={createdByMe}
                                 canMarkDone={canMarkDoneOnly}
-                                isPrevDone={i === 0 || components[i - 1]?.status === "done"}
+                                isGoldTask={isGoldTask} isMultiUserGold={isMultiUserGold} viewingUserId={viewingUserId}
+                                isPrevDone={i === 0 || (isMultiUserGold ? components[i - 1]?.perUserStatus?.[viewingUserId]?.status === "done" : components[i - 1]?.status === "done")}
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
@@ -866,7 +1046,8 @@ function InteractiveFlowchart({
                             {isLeft && !isEditing && (
                               <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId} allComps={components} isFinalNode={isFinal} createdByMe={createdByMe}
                                 canMarkDone={canMarkDoneOnly}
-                                isPrevDone={i === 0 || components[i - 1]?.status === "done"}
+                                isGoldTask={isGoldTask} isMultiUserGold={isMultiUserGold} viewingUserId={viewingUserId}
+                                isPrevDone={i === 0 || (isMultiUserGold ? components[i - 1]?.perUserStatus?.[viewingUserId]?.status === "done" : components[i - 1]?.status === "done")}
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
@@ -882,7 +1063,8 @@ function InteractiveFlowchart({
                             {!isLeft && !isEditing && (
                               <NodeCard comp={comp} idx={i} isDone={isDone} canEdit={canEdit} isHead={isHead} taskId={taskId} allComps={components} isFinalNode={isFinal} createdByMe={createdByMe}
                                 canMarkDone={canMarkDoneOnly}
-                                isPrevDone={i === 0 || components[i - 1]?.status === "done"}
+                                isGoldTask={isGoldTask} isMultiUserGold={isMultiUserGold} viewingUserId={viewingUserId}
+                                isPrevDone={i === 0 || (isMultiUserGold ? components[i - 1]?.perUserStatus?.[viewingUserId]?.status === "done" : components[i - 1]?.status === "done")}
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
@@ -966,7 +1148,34 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   const [seenCount, setSeenCountRaw] = useState(() => { try { return parseInt(localStorage.getItem(seenKey) || "0", 10) || 0; } catch { return 0; } });
   const handleSeen = (n) => { setSeenCountRaw(n); try { localStorage.setItem(seenKey, String(n)); } catch { } };
 
+  // ── Multi-user Gold Task: TL/CEO can switch between assignees ───────────────
+  // For gold tasks with multiple assignees, the head selects which user to
+  // view and approve. Defaults to first assignee.
+  const isMultiUserGold = task.isGoldTask && (task.assigneeIds || []).length > 1;
+  const [viewingUserId, setViewingUserId] = useState(
+    isMultiUserGold ? (task.assigneeIds?.[0] || "") : ""
+  );
+
+  // Effective user for component status reads in multi-user mode.
+  // In single-user mode (gold or non-gold), effectiveUserId is unused.
+  const effectiveUserId = isMultiUserGold ? viewingUserId : (task.assigneeIds?.[0] || "");
+
+  // Helpers: get per-user status/report for a component
+  function getCompStatus(comp) {
+    if (!isMultiUserGold) return comp.status;
+    return comp.perUserStatus?.[viewingUserId]?.status || "pending";
+  }
+  function getCompReport(comp) {
+    if (!isMultiUserGold) return comp.report;
+    return comp.perUserStatus?.[viewingUserId]?.report || null;
+  }
+  function getCompReportSubmitted(comp) {
+    if (!isMultiUserGold) return comp.reportSubmitted;
+    return comp.perUserStatus?.[viewingUserId]?.reportSubmitted || false;
+  }
+
   // isHead = true only if this person is the SENDER (assignedBy), not just any TL/CEO
+
   // A TL who is the receiver (assignee) should be able to Mark Done, not Edit/Delete
   const isSender = task.assignedBy === currentEmployeeId;
   const isHead = isSender || (isCEO && !isAssignee);
@@ -977,10 +1186,18 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
 
   // Load SOP goal settings; task-level totalPoints overrides SOP default if set
   const loadGoalSettings = useCallback(async () => {
-    // If the task itself has a totalPoints override, use that first
-    const taskTotal = task.goalConfig?.totalPoints;
-    if (taskTotal != null && !isNaN(Number(taskTotal))) {
-      setGoalTotalPoints(Number(taskTotal));
+    // ── C2 Band: Gold Task uses c2Config.taskMaxPoints as the points pool ─────
+    const isGold = task.isGoldTask && task.c2Config?.taskMaxPoints != null;
+    if (isGold) {
+      const goldPts = Number(task.c2Config.taskMaxPoints);
+      if (!isNaN(goldPts) && goldPts > 0) {
+        setGoalTotalPoints(goldPts);
+      }
+    } else {
+      const taskTotal = task.goalConfig?.totalPoints;
+      if (taskTotal != null && !isNaN(Number(taskTotal))) {
+        setGoalTotalPoints(Number(taskTotal));
+      }
     }
     try {
       const { firebaseDb } = await import("../../../lib/coworkFirebase");
@@ -988,12 +1205,14 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
       const snap = await getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"));
       if (snap.exists()) {
         const data = snap.data();
-        setGoalTotalPoints(Number(data.goalTotalPoints) || 0);
-        // Default 40% if admin hasn't set it yet
+        // CRITICAL: For Gold Tasks, do NOT overwrite taskMaxPoints with SOP goalTotalPoints.
+        // The SOP value is only for regular goal tasks.
+        if (!isGold) {
+          setGoalTotalPoints(Number(data.goalTotalPoints) || 0);
+        }
         setGoalFinalWeightPct(data.goalFinalNodeWeightPct != null ? Number(data.goalFinalNodeWeightPct) : 40);
         setGoalBonusPoints(Number(data.goalBonusPoints) || 0);
       } else {
-        // No settings doc yet — use sensible defaults
         setGoalFinalWeightPct(40);
       }
     } catch (e) { console.warn("loadGoalSettings:", e.message); }
@@ -1055,6 +1274,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   // Re-distribute points/weight whenever SOP settings or components change
   useEffect(() => {
     if (!goalTotalPoints && !goalFinalWeightPct) return;
+    if (task.isGoldTask) return; // Gold Tasks: TL sets weightage manually per component
     setComponents(prev => applyGoalWeights(prev, goalTotalPoints, goalFinalWeightPct));
   }, [goalTotalPoints, goalFinalWeightPct]);
 
@@ -1081,7 +1301,9 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
     const entry = { type: "created", label: "Component Created", at: now, by: null, changes: [{ field: "Heading", to: data.heading }] };
     const empName = (currentEmployeeName && currentEmployeeName !== "undefined") ? currentEmployeeName : "Me";
     const newComp = {
-      id: genId(), ...data, status: "pending", points: 0,
+      id: genId(),
+      status: "pending",
+      ...data,               // data.points / data.percentage preserved for Gold Tasks
       createdByName: empName,
       createdById: currentEmployeeId || "me",
       createdAt: now, history: [{ ...entry, by: empName }],
@@ -1090,7 +1312,8 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
     // Always insert before the final node
     const insertIdx = Math.min(afterIdx + 1, updated.length - 1);
     updated.splice(insertIdx, 0, newComp);
-    const withWeight = redistributeWeights(updated);
+    // Gold Tasks: manual weightage per component — don't auto-redistribute
+    const withWeight = task.isGoldTask ? updated : redistributeWeights(updated);
     setComponents(withWeight); setAddingAfter(null);
     persist(withWeight, submitted);
   };
@@ -1112,7 +1335,8 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
     // Cannot delete the final node
     if (idx === components.length - 1) return;
     const updated = components.filter((_, i) => i !== idx);
-    const withWeight = redistributeWeights(updated);
+    // Gold Tasks: manual weightage — don't auto-redistribute on delete
+    const withWeight = task.isGoldTask ? updated : redistributeWeights(updated);
     setComponents(withWeight);
     if (editingIdx === idx) setEditingIdx(null);
     if (addingAfter === idx) setAddingAfter(null);
@@ -1126,33 +1350,92 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   };
 
   const handleMarkDone = async (idx) => {
-    const now = fmtDatetime(new Date().toISOString());
+    const nowISO = new Date().toISOString();
+    const now = fmtDatetime(nowISO);
     const comp = components[idx];
-    const entry = { type: "done", label: "Approved & Marked Done", at: now, by: null, changes: [] };
-    const u = components.map((c, i) => i === idx ? { ...c, status: "done", doneAt: now, history: [...(c.history || []), entry] } : c);
-    setComponents(u); persist(u, submitted);
 
+    // ── Deadline check (mirrors backend goal-credit logic) ────────────────────
+    // submittedAt = when employee submitted their report; fallback = approval time.
+    const compReport = getCompReport(comp);
+    const submittedAt = compReport?.submittedAt || nowISO;
+    const deadlineISO = comp.deadline || null;
+    const isLate = deadlineISO
+      ? new Date(submittedAt) > new Date(deadlineISO)
+      : false;
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const entry = {
+      type: "done",
+      label: isLate ? "Approved (Deadline Missed — 0 pts)" : "Approved & Marked Done",
+      at: now, by: null, changes: [],
+    };
+
+    // ── Per-user status for multi-user Gold Tasks ─────────────────────────────
+    let updatedComponents;
+    if (isMultiUserGold) {
+      updatedComponents = components.map((c, i) => {
+        if (i !== idx) return c;
+        const perUserStatus = { ...(c.perUserStatus || {}) };
+        perUserStatus[viewingUserId] = {
+          ...(perUserStatus[viewingUserId] || {}),
+          status: "done",
+          doneAt: now,
+          lateSubmission: isLate,
+          pointsAwarded: isLate ? 0 : (comp.points || 0),
+        };
+        const allDone = (task.assigneeIds || []).every(
+          (uid) => perUserStatus[uid]?.status === "done"
+        );
+        return {
+          ...c,
+          perUserStatus,
+          status: allDone ? "done" : c.status,
+          history: [...(c.history || []), entry],
+        };
+      });
+    } else {
+      updatedComponents = components.map((c, i) =>
+        i === idx
+          ? {
+            ...c,
+            status: "done",
+            doneAt: now,
+            lateSubmission: isLate,      // ← stored for badge display
+            pointsAwarded: isLate ? 0 : (comp.points || 0),
+            history: [...(c.history || []), entry],
+          }
+          : c
+      );
+    }
+
+    setComponents(updatedComponents);
+    persist(updatedComponents, submitted);
+
+    // ── Credit points — skip entirely if deadline was missed ──────────────────
     const pts = comp.points || 0;
-    if (pts > 0) {
+    if (pts > 0 && !isLate) {
       try {
         const token = await getToken();
-        const assigneeId = (task.assigneeIds || [])[0];
-        if (assigneeId) {
-          // Pass submittedAt + deadline so backend can verify on-time submission
-          const submittedAt = comp.report?.submittedAt || now;
-          const deadline = comp.deadline || null;
+        const targetEmployee = isMultiUserGold
+          ? viewingUserId
+          : (task.assigneeIds || [])[0];
+
+        if (targetEmployee) {
           await fetch(`${BASE}/cowork/sop/goal-credit`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify({
-              targetEmployeeId: assigneeId,
+              targetEmployeeId: targetEmployee,
               points: pts,
               componentName: comp.heading,
               taskTitle: task.title,
               taskId: task.taskId,
               componentId: comp.id,
-              submittedAt,   // when receiver submitted
-              deadline,      // node deadline
+              submittedAt,
+              deadline: deadlineISO,
+              isC2Band: task.isGoldTask || false,
+              c2WeightagePercent: task.c2Config?.weightagePercent || null,
+              c2TaskMaxPoints: task.c2Config?.taskMaxPoints || null,
             }),
           });
         }
@@ -1210,6 +1493,10 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
           onCancel={() => setAddingAfter(null)}
           existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))}
           readonlyDeadline={false}
+          isGoldTask={task.isGoldTask || false}
+          taskMaxPoints={task.c2Config?.taskMaxPoints || 0}
+          usedPoints={components.reduce((s, comp) => s + (comp.points || 0), 0)}
+          remainingPoints={(task.c2Config?.taskMaxPoints || 0) - components.reduce((s, comp) => s + (comp.points || 0), 0)}
         />
       )}
 
@@ -1223,6 +1510,10 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
           onSave={(d) => handleSaveEdit(editingIdx, d)}
           onCancel={() => setEditingIdx(null)}
           existingDeadlines={components.map(c => ({ heading: c.heading, deadline: c.deadline }))}
+          isGoldTask={task.isGoldTask || false}
+          taskMaxPoints={task.c2Config?.taskMaxPoints || 0}
+          usedPoints={components.filter((_, i) => i !== editingIdx).reduce((s, comp) => s + (comp.points || 0), 0)}
+          remainingPoints={(task.c2Config?.taskMaxPoints || 0) - components.filter((_, i) => i !== editingIdx).reduce((s, comp) => s + (comp.points || 0), 0)}
         />
       )}
 
@@ -1233,6 +1524,11 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
         currentEmployeeId={currentEmployeeId}
         goalTotalPoints={goalTotalPoints} goalFinalWeightPct={goalFinalWeightPct} goalBonusPoints={goalBonusPoints}
         canMarkDoneOnly={canMarkDoneOnly}
+        isGoldTask={task.isGoldTask || false}
+        isMultiUserGold={isMultiUserGold}
+        viewingUserId={viewingUserId}
+        setViewingUserId={setViewingUserId}
+        taskAssigneeIds={task.assigneeIds || []}
         onSeen={handleSeen}
         onEdit={(i) => { setEditingIdx(i); setAddingAfter(null); }}
         onDelete={handleDelete} onMarkDone={handleMarkDone} onMarkUndo={handleMarkUndo}
