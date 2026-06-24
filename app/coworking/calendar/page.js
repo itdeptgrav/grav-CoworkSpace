@@ -69,13 +69,13 @@ function HoursCell({ hours, overdue, dueDate }) {
                         { day: "numeric", month: "short", year: "numeric" })}
                 </span>
             )}
-            {hours > 0 && (
-                <span style={{ fontSize: 11, color: "#80868b" }}>
-                    {hours} hrs allocated
-                </span>
-            )}
+            {/* Always show hours — even 0 */}
+            <span style={{ fontSize: 11, color: "#80868b" }}>
+                {hours > 0 ? `${hours} hrs` : "0 hrs"}
+            </span>
         </div>
     );
+
     if (!hours || hours === 0) return (
         <span style={{ color: "#80868b", fontSize: 13 }}>—</span>
     );

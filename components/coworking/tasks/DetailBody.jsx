@@ -1124,14 +1124,69 @@ export default function DetailBody({
                     Re-submit for Review
                   </ActionBtn>
                 )}
+                {/* ── Extension zone calculation (clock-time proxy for display) ── */}
+                {(() => {
+                  const _etc = (task.etcHours || 0) * 3600000;
+                  const _elapsed = _etc > 0
+                    ? Math.min(((Date.now() - new Date(task.createdAtISO).getTime()) / _etc) * 100, 100)
+                    : 0;
+                  window.__extElapsedPct = _elapsed; // used by button below
+                })()}
+
                 {/* ── EXTENSION REQUEST ── */}
                 {isAssignee && !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
                   <>
-                    {!ef.showExtReqForm ? (
-                      <ActionBtn variant="outline" onClick={() => ef.setShowExtReqForm?.(true)}>
-                        Request Deadline Extension
-                      </ActionBtn>
-                    ) : (
+                    {!ef.showExtReqForm ? (() => {
+                      const _pct = window.__extElapsedPct || 0;
+                      const _zone = _pct < 50 ? 1 : _pct < 70 ? 2 : 3;
+
+                      if (_zone === 1) return (
+                        <div title="Extension available after 50% of task time has elapsed">
+                          <ActionBtn variant="outline" disabled>
+                            Request Extension — Not Available Yet
+                          </ActionBtn>
+                          <div style={{
+                            fontSize: 10, color: "#9CA3AF", marginTop: 4,
+                            textAlign: "center"
+                          }}>
+                            Available after 50% of task time · {_pct.toFixed(0)}% elapsed
+                          </div>
+                        </div>
+                      );
+
+                      if (_zone === 2) return (
+                        <ActionBtn variant="outline"
+                          onClick={() => ef.setShowExtReqForm?.(true)}>
+                          Request Deadline Extension
+                        </ActionBtn>
+                      );
+
+                      // Zone 3 — penalty warning
+                      return (
+                        <div>
+                          <button
+                            onClick={() => ef.setShowExtReqForm?.(true)}
+                            style={{
+                              width: "100%", padding: "9px 14px",
+                              background: "#FFFBEB",
+                              border: "1px solid #F59E0B",
+                              borderRadius: 6, fontSize: 12, fontWeight: 600,
+                              color: "#92400E", cursor: "pointer",
+                              fontFamily: "inherit"
+                            }}>
+                            ⚠ Request Deadline Extension
+                          </button>
+                          <div style={{
+                            fontSize: 10, color: "#D97706",
+                            fontWeight: 600, marginTop: 4,
+                            padding: "4px 8px", background: "#FFFBEB",
+                            borderRadius: 4, border: "1px solid #FDE68A"
+                          }}>
+                            ⚠ Filing now will deduct −0.2 pts from your C1 score
+                          </div>
+                        </div>
+                      );
+                    })() : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 6 }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#374151" }}>Request Extension</div>
                         <div style={{ display: "flex", gap: 6 }}>
