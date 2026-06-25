@@ -743,9 +743,23 @@ export default function DetailBody({
             </InfoRow>
           )}
 
+
           {task.notes && (
             <InfoRow label="Notes">
               <span style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, color: "#374151" }}>{task.notes}</span>
+            </InfoRow>
+          )}
+
+          {task.requirements?.length > 0 && (
+            <InfoRow label="Requirements">
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {task.requirements.map((req, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                    <span style={{ marginTop: 3, width: 5, height: 5, borderRadius: "50%", background: "#475569", flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: "#1F2937", lineHeight: 1.55 }}>{req}</span>
+                  </div>
+                ))}
+              </div>
             </InfoRow>
           )}
 

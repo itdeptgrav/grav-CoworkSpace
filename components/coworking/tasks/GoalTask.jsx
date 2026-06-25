@@ -902,8 +902,7 @@ function InteractiveFlowchart({
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Final node = last component (auto-created from goal task)
-  const finalNodeIdx = components.length - 1;
+  const finalNodeIdx = -1; // no auto-final node
 
   return (
     <div ref={wrapRef}>
@@ -984,9 +983,6 @@ function InteractiveFlowchart({
               {canEdit && <AddBtn onClick={() => onAddBetween(-1)} />}
             </div>
           )}
-          {components.length === 0 && addingAfter === -1 && (
-            <FlowEditBox idx={0} comp={{}} isNew onSave={(d) => onSaveNew(-1, d)} onCancel={onCancelAdd} existingDeadlines={[]} />
-          )}
 
           {components.length > 0 && (
             <div style={{ position: "relative" }}>
@@ -1032,8 +1028,8 @@ function InteractiveFlowchart({
                           </div>
                         </div>
                         {/* Edit slider is handled at ActivitiesSection level */}
-                        {/* Add btn between nodes — always for head */}
-                        {!isFinal && canEdit && (
+                        {/* Add btn between nodes */}
+                        {canEdit && (
                           <div style={{ marginBottom: 8 }}>
                             <AddBtn onClick={() => onAddBetween(i)} />
                           </div>
@@ -1073,8 +1069,8 @@ function InteractiveFlowchart({
                           </div>
                         </div>
                         {/* Edit slider is handled at ActivitiesSection level */}
-                        {/* Add btn between nodes — always for head */}
-                        {!isFinal && canEdit && (
+                        {/* Add btn between nodes */}
+                        {canEdit && (
                           <div style={{ position: "relative", zIndex: 2, margin: "8px 0" }}>
                             <AddBtn onClick={() => onAddBetween(i)} />
                           </div>
@@ -1226,38 +1222,7 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
       const d = await res.json();
       let acts = d.activities || [];
 
-      // ── Auto-create final node from goal task if missing ──
-      // The final node uses the goal task's title, description, and deadline
-      const goalDeadline = task.goalConfig?.deadline || task.fixedDeadline || task.dueDate || null;
-      const goalTitle = task.title || "Goal Target";
-      const goalDesc = task.description || task.goalConfig?.goalDescription || "";
-      const finalNodeId = `final_${task.taskId}`;
 
-      const hasFinalNode = acts.some(a => a.id === finalNodeId || a.isFinalNode === true);
-      if (!hasFinalNode && goalDeadline) {
-        const now = fmtDatetime(new Date().toISOString());
-        const finalNode = {
-          id: finalNodeId,
-          isFinalNode: true,
-          heading: goalTitle,
-          description: goalDesc,
-          deadline: goalDeadline,
-          status: "pending",
-          percentage: 0,  // will be set from SOP settings
-          points: 0,
-          createdByName: "System",
-          createdById: "system",
-          createdAt: now,
-          history: [{ type: "created", label: "Final node auto-created from goal task", at: now, changes: [] }],
-        };
-        acts = [...acts, finalNode];
-        // Persist immediately
-        const token2 = await getToken();
-        await fetch(`${BASE}/cowork/task/${task.taskId}/goal-activities`, {
-          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token2}` },
-          body: JSON.stringify({ activities: acts, submitted: d.submitted || false }),
-        });
-      }
 
       // Apply goal settings to final node
       await loadGoalSettings();

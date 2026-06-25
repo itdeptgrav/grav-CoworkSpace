@@ -11,31 +11,31 @@ import { getPmpEmployees, getPmpDashboard } from "../../../lib/coworkApi";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
-    bgPage: "#1A1A1A", bgCard: "#222222", bgInner: "#1E1E1E", bgElev: "#2A2A2A",
-    border: "#3A3A3A", borderSub: "#2A2A2A", borderStrong: "#555555",
-    textPri: "#EEEEEE", textSec: "#CCCCCC", textMut: "#999999",
-    textHint: "#555555", textLabel: "#666666",
-    blue: "#378ADD", blueHi: "#5BA3F5", blueTint: "#0d1f33", blueBorder: "#185FA5",
-    green: "#1D9E75", greenHi: "#3DCB9A", greenTint: "#0a1f18", greenBorder: "#0F6E56",
-    amber: "#EF9F27", amberTint: "#2a1f00", amberBorder: "#BA7517",
-    red: "#E24B4A", redTint: "#2a0f0f", redBorder: "#A32D2D",
-    purple: "#7F77DD", purpleTint: "#1a1833",
+    bgPage: "#F5F7FA", bgCard: "#FFFFFF", bgInner: "#F8FAFC", bgElev: "#E2E8F0",
+    border: "#E2E8F0", borderSub: "#EDF2F7", borderStrong: "#CBD5E0",
+    textPri: "#1A202C", textSec: "#4A5568", textMut: "#718096",
+    textHint: "#A0ADB8", textLabel: "#718096",
+    blue: "#2B7BE0", blueHi: "#1A5EBB", blueTint: "#EBF4FF", blueBorder: "#93C5FD",
+    green: "#0D8F69", greenHi: "#065F46", greenTint: "#ECFDF5", greenBorder: "#6EE7B7",
+    amber: "#B45309", amberTint: "#FFFBEB", amberBorder: "#FCD34D",
+    red: "#DC2626", redTint: "#FEF2F2", redBorder: "#FCA5A5",
+    purple: "#5B4ECC", purpleTint: "#F5F3FF",
 };
 
 const RATING_MAP = {
-    exceptional: { color: "#7F77DD", bg: "#1a1833" },
-    strong: { color: "#5BA3F5", bg: "#0d1f33" },
-    solid: { color: "#1D9E75", bg: "#0a1f18" },
-    developing: { color: "#EF9F27", bg: "#2a1f00" },
-    critical: { color: "#E24B4A", bg: "#2a0f0f" },
-    none: { color: "#999999", bg: "#1E1E1E" },
+    exceptional: { color: "#5B4ECC", bg: "#F5F3FF" },
+    strong: { color: "#1A5EBB", bg: "#EBF4FF" },
+    solid: { color: "#0D8F69", bg: "#ECFDF5" },
+    developing: { color: "#B45309", bg: "#FFFBEB" },
+    critical: { color: "#DC2626", bg: "#FEF2F2" },
+    none: { color: "#718096", bg: "#F8FAFC" },
 };
 
 const COMP = {
-    c1: { val: "#5BA3F5", bar: "#378ADD" },
-    c2: { val: "#1D9E75", bar: "#1D9E75" },
-    c3: { val: "#E24B4A", bar: "#E24B4A" },
-    c4: { val: "#EF9F27", bar: "#EF9F27" },
+    c1: { val: "#1A5EBB", bar: "#2B7BE0" },
+    c2: { val: "#0D8F69", bar: "#0D8F69" },
+    c3: { val: "#DC2626", bar: "#DC2626" },
+    c4: { val: "#B45309", bar: "#B45309" },
 };
 
 const Q_WEIGHTS = { 1: "10%", 2: "20%", 3: "30%", 4: "40%" };
@@ -98,7 +98,7 @@ function FlagBadge({ flag }) {
 function Skeleton({ w = "100%", h = 16, r = 4 }) {
     return <div style={{
         width: w, height: h, borderRadius: r,
-        background: "#2A2A2A", animation: "pulse 1.5s infinite"
+        background: "#E2E8F0", animation: "pulse 1.5s infinite"
     }} />;
 }
 
@@ -106,8 +106,10 @@ function Skeleton({ w = "100%", h = 16, r = 4 }) {
 function CompCard({ label, value, max, sub, barPct, color, barColor, loading }) {
     return (
         <div style={{
-            background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-            borderRadius: 12, padding: 12, flex: 1
+            background: C.bgCard, border: `0.5px solid ${C.border}`,
+            borderTop: `3px solid ${color || C.border}`,
+            borderRadius: 12, padding: "14px 14px 12px",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
         }}>
             <div style={{
                 fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -125,7 +127,6 @@ function CompCard({ label, value, max, sub, barPct, color, barColor, loading }) 
         </div>
     );
 }
-
 // ── Pace bar — centre-zero ────────────────────────────────────────────────────
 function PaceBar({ pace, ratingColor }) {
     const pos = pace !== null && pace > 0 ? Math.min(pace / 2, 50) : 0;
@@ -223,8 +224,16 @@ export default function PMPDashboard() {
     const paceColor = paceRating ? rs(paceRating.class).color : C.blueHi;
     const c1Net = d?.c1?.net;
     const c1Max = d?.c1?.max || 50;
+    const c1SopPts = d?.c1?.sopPts ?? 0;
     const c2Net = d?.c2?.net;
     const c2Max = d?.c2?.max || 50;
+    const c2SopPts = d?.c2?.sopPts ?? 0;
+    const c3Net = d?.c3?.net ?? 0;
+    const c3BreachCount = d?.c3?.breachCount ?? 0;
+    const c3SopPts = d?.c3?.sopPts ?? 0;
+    const c4Net = d?.c4?.net ?? 0;
+    const c4BreachCount = d?.c4?.breachCount ?? 0;
+    const c4SopPts = d?.c4?.sopPts ?? 0;
     const pace = d?.pace?.score;
     const annualLive = d?.annual?.live;
     const annualProj = d?.annual?.projected;
@@ -246,8 +255,8 @@ export default function PMPDashboard() {
 
     return (
         <div style={{
-            background: C.bgPage, minHeight: "100vh",
-            fontFamily: FONT, padding: "20px 24px 48px", color: C.textPri
+            background: C.bgPage, minHeight: "100vh", overflowX: "hidden",
+            fontFamily: FONT, padding: "20px 16px 48px", color: C.textPri
         }}>
 
             <style>{`
@@ -256,7 +265,7 @@ export default function PMPDashboard() {
         button { cursor:pointer; }
       `}</style>
 
-            <div style={{ maxWidth: 960, margin: "0 auto" }}>
+            <div style={{ maxWidth: "100%", margin: 0 }}>
 
                 {/* ── Control Bar ── */}
                 <div style={{
@@ -355,43 +364,44 @@ export default function PMPDashboard() {
                 }}>
                     <CompCard
                         label="C1 This Quarter"
-                        value={loading ? null : c1Net !== null ? fmt(c1Net) : "—"}
-                        sub={loading || !d ? "..." : c1Net != null
-                            ? `/ ${c1Max} · QR ${d?.c1?.qualityRate != null
-                                ? (d?.c1?.qualityRate * 100).toFixed(0) + "%" : "—"}`
-                            : "no closed tasks yet"}
-                        barPct={c1Net !== null ? (c1Net / c1Max) * 100 : 0}
+                        value={loading ? null : c1SopPts > 0 ? `${fmt(c1SopPts)} pts` : "—"}
+                        sub={loading ? "..." : c1SopPts > 0 ? `/ ${c1Max} pts max` : "no closed tasks yet"}
+                        barPct={c1Max > 0 ? (c1SopPts / c1Max) * 100 : 0}
                         color={COMP.c1.val} barColor={COMP.c1.bar} loading={loading} />
 
                     <CompCard
                         label="C2 This Quarter"
-                        value={loading ? null : c2Net !== null ? fmt(c2Net) : "—"}
-                        sub={loading || !d ? "..." : c2Net != null
-                            ? `/ ${c2Max} · ${d?.c2?.score != null
-                                ? (d?.c2?.score * 100).toFixed(0) + "% hit" : ""}`
-                            : "no goals past deadline"}
-                        barPct={c2Net !== null ? (c2Net / c2Max) * 100 : 0}
+                        value={loading ? null : c2SopPts > 0 ? `${fmt(c2SopPts)} pts` : "—"}
+                        sub={loading ? "..." : c2SopPts > 0 ? `/ ${c2Max} pts max` : "no goals past deadline"}
+                        barPct={c2Max > 0 ? (c2SopPts / c2Max) * 100 : 0}
                         color={COMP.c2.val} barColor={COMP.c2.bar} loading={loading} />
 
                     <CompCard
                         label="C3 This Quarter"
-                        value="0.0"
-                        sub="no breaches"
+                        value={loading ? null : c3SopPts !== 0 ? `${fmt(c3SopPts)} pts` : "0.0 pts"}
+                        sub={loading ? "..." : c3BreachCount > 0
+                            ? `${c3BreachCount} breach${c3BreachCount > 1 ? "es" : ""}`
+                            : "no breaches"}
                         barPct={0}
-                        color={C.textMut} barColor={COMP.c3.bar} loading={false} />
+                        color={c3SopPts < 0 ? COMP.c3.val : C.textMut}
+                        barColor={COMP.c3.bar} loading={loading} />
 
                     <CompCard
                         label="C4 This Quarter"
-                        value="0.0"
-                        sub="no attendance events"
+                        value={loading ? null : c4SopPts !== 0 ? `${fmt(c4SopPts)} pts` : "0.0 pts"}
+                        sub={loading ? "..." : c4BreachCount > 0
+                            ? `${c4BreachCount} event${c4BreachCount > 1 ? "s" : ""}`
+                            : "no attendance events"}
                         barPct={0}
-                        color={C.textMut} barColor={COMP.c4.bar} loading={false} />
+                        color={c4SopPts < 0 ? COMP.c4.val : C.textMut}
+                        barColor={COMP.c4.bar} loading={loading} />
                 </div>
 
                 {/* ── Row 2: Pace Hero Block ── */}
                 <div style={{
                     background: C.bgCard, border: `0.5px solid ${C.border}`,
-                    borderRadius: 14, padding: 20, marginBottom: 14
+                    borderRadius: 16, padding: 24, marginBottom: 14,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.07)"
                 }}>
 
                     {/* Top two-col */}
@@ -479,8 +489,9 @@ export default function PMPDashboard() {
 
                         {/* Live Annual — highlighted */}
                         <div style={{
-                            background: C.blueTint, border: `0.5px solid ${C.blueBorder}`,
-                            borderRadius: 12, padding: 12
+                            background: C.blueTint, border: `1.5px solid ${C.blueBorder}`,
+                            borderRadius: 12, padding: 14,
+                            boxShadow: "0 0 0 4px rgba(43,123,224,0.06)"
                         }}>
                             <div style={{
                                 fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -505,8 +516,10 @@ export default function PMPDashboard() {
 
                         {/* Projected Annual */}
                         <div style={{
-                            background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                            borderRadius: 12, padding: 12
+                            background: C.bgCard, border: `0.5px solid ${C.border}`,
+                            borderTop: `3px solid ${C.border}`,
+                            borderRadius: 12, padding: "14px 14px 12px",
+                            boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                         }}>
                             <div style={{
                                 fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -540,8 +553,10 @@ export default function PMPDashboard() {
 
                         {/* Gap to next rating */}
                         <div style={{
-                            background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                            borderRadius: 12, padding: 12
+                            background: C.bgCard, border: `0.5px solid ${C.border}`,
+                            borderTop: `3px solid ${C.border}`,
+                            borderRadius: 12, padding: "14px 14px 12px",
+                            boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                         }}>
                             <div style={{
                                 fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -601,11 +616,11 @@ export default function PMPDashboard() {
 
                         return (
                             <div key={q} style={{
-                                background: isLive ? liveTint : C.bgInner,
-                                border: isLive
-                                    ? `1px solid ${liveBorder}`
-                                    : `0.5px solid ${C.borderSub}`,
+                                background: isLive ? liveTint : C.bgCard,
+                                border: isLive ? `1.5px solid ${liveBorder}` : `0.5px solid ${C.border}`,
+                                borderLeft: isLive ? `4px solid ${liveColor}` : isClosed ? `4px solid ${C.green}` : `4px solid ${C.border}`,
                                 borderRadius: 12, padding: 12, textAlign: "center",
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
                             }}>
                                 <div style={{
                                     fontSize: 9, color: isLive ? liveColor : C.textHint,
@@ -635,8 +650,10 @@ export default function PMPDashboard() {
 
                     {/* C1 Annual */}
                     <div style={{
-                        background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                        borderRadius: 12, padding: 12
+                        background: C.bgCard, border: `0.5px solid ${C.border}`,
+                        borderTop: `3px solid ${COMP.c1.bar}`,
+                        borderRadius: 12, padding: "14px 14px 12px",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                     }}>
                         <div style={{
                             fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -660,8 +677,10 @@ export default function PMPDashboard() {
 
                     {/* C2 Annual */}
                     <div style={{
-                        background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                        borderRadius: 12, padding: 12
+                        background: C.bgCard, border: `0.5px solid ${C.border}`,
+                        borderTop: `3px solid ${COMP.c2.bar}`,
+                        borderRadius: 12, padding: "14px 14px 12px",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                     }}>
                         <div style={{
                             fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -685,8 +704,10 @@ export default function PMPDashboard() {
 
                     {/* C3 Annual */}
                     <div style={{
-                        background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                        borderRadius: 12, padding: 12
+                        background: C.bgCard, border: `0.5px solid ${C.border}`,
+                        borderTop: `3px solid ${COMP.c3.bar}`,
+                        borderRadius: 12, padding: "14px 14px 12px",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                     }}>
                         <div style={{
                             fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",
@@ -705,8 +726,10 @@ export default function PMPDashboard() {
 
                     {/* C4 Annual */}
                     <div style={{
-                        background: C.bgInner, border: `0.5px solid ${C.borderSub}`,
-                        borderRadius: 12, padding: 12
+                        background: C.bgCard, border: `0.5px solid ${C.border}`,
+                        borderTop: `3px solid ${COMP.c4.bar}`,
+                        borderRadius: 12, padding: "14px 14px 12px",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                     }}>
                         <div style={{
                             fontSize: 9, fontWeight: 600, letterSpacing: "0.06em",

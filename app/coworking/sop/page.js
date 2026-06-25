@@ -153,9 +153,11 @@ function RecheckBadge({ label, color, bg, border }) {
 // bleachType "debit"  = goal reward (subtracts from penalty score) → show GREEN
 // bleachType "credit" = SOP violation (adds to penalty score)      → show RED
 // Backward compat: old entries with isCredit:true were the goal reward entries
+
 function isReward(b) {
+  if (b.isCredit === false) return false;
   if (b.bleachType) return b.bleachType === "debit";
-  return b.isCredit === true; // legacy boolean flag
+  return b.isCredit === true;
 }
 
 // ── SOP Settings Panel ────────────────────────────────────────────────────────
@@ -197,6 +199,16 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
   const [c1ExtensionDeduction, setC1ExtensionDeduction] = useState("0.2");
   const [c1ReworkDeduction, setC1ReworkDeduction] = useState("0.2");
   const [c1RejectScore, setC1RejectScore] = useState("0");
+
+  // ── C1 deduction descriptions ─────────────────────────────────────────────
+  const [c1MaxPointsDesc, setC1MaxPointsDesc] = useState("");
+  const [c1BaseScoreDesc, setC1BaseScoreDesc] = useState("");
+  const [c1DeadlineDesc, setC1DeadlineDesc] = useState("");
+  const [c1ExtensionDesc, setC1ExtensionDesc] = useState("");
+  const [c1ReworkDesc, setC1ReworkDesc] = useState("");
+  const [c1RejectDesc, setC1RejectDesc] = useState("");
+  const [c2GlobalMaxPointsDesc, setC2GlobalMaxPointsDesc] = useState("");
+  const [openDesc, setOpenDesc] = useState(null);
 
   // ── Role Band Configuration state ─────────────────────────────────────────
   const BAND_NAMES = ["execution-led", "balanced", "outcome-led"];
@@ -240,6 +252,14 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
           setC1ExtensionDeduction(d.c1ExtensionDeduction != null ? String(d.c1ExtensionDeduction) : "0.2");
           setC1ReworkDeduction(d.c1ReworkDeduction != null ? String(d.c1ReworkDeduction) : "0.2");
           setC1RejectScore(d.c1RejectScore != null ? String(d.c1RejectScore) : "0");
+
+          setC1MaxPointsDesc(d.c1MaxPointsDesc || "");
+          setC1BaseScoreDesc(d.c1BaseScoreDesc || "");
+          setC1DeadlineDesc(d.c1DeadlineDesc || "");
+          setC1ExtensionDesc(d.c1ExtensionDesc || "");
+          setC1ReworkDesc(d.c1ReworkDesc || "");
+          setC1RejectDesc(d.c1RejectDesc || "");
+          setC2GlobalMaxPointsDesc(d.c2GlobalMaxPointsDesc || "");
         }
       })
       .catch(console.error)
@@ -288,10 +308,42 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
         c1ExtensionDeduction: parseFloat(c1ExtensionDeduction) ?? 0.2,
         c1ReworkDeduction: parseFloat(c1ReworkDeduction) ?? 0.2,
         c1RejectScore: parseFloat(c1RejectScore) ?? 0,
+
+        c1MaxPointsDesc: c1MaxPointsDesc.trim(),
+        c1BaseScoreDesc: c1BaseScoreDesc.trim(),
+        c1DeadlineDesc: c1DeadlineDesc.trim(),
+        c1ExtensionDesc: c1ExtensionDesc.trim(),
+        c1ReworkDesc: c1ReworkDesc.trim(),
+        c1RejectDesc: c1RejectDesc.trim(),
+        c2GlobalMaxPointsDesc: c2GlobalMaxPointsDesc.trim(),
+
         updatedBy: employeeId,
         updatedByName: employeeName,
         updatedAt: new Date().toISOString(),
       });
+      // Sync to MongoDB
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      await fetch(`${BASE}/cowork/sop/settings/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          c1MaxPoints: parseFloat(c1MaxPoints) || 35,
+          c1MaxPointsDesc: c1MaxPointsDesc.trim(),
+          c1BaseScore: parseFloat(c1BaseScore) ?? 1.0,
+          c1BaseScoreDesc: c1BaseScoreDesc.trim(),
+          c1DeadlineDeduction: parseFloat(c1DeadlineDeduction) ?? 0.2,
+          c1DeadlineDesc: c1DeadlineDesc.trim(),
+          c1ExtensionDeduction: parseFloat(c1ExtensionDeduction) ?? 0.1,
+          c1ExtensionDesc: c1ExtensionDesc.trim(),
+          c1ReworkDeduction: parseFloat(c1ReworkDeduction) ?? 0.2,
+          c1ReworkDesc: c1ReworkDesc.trim(),
+          c1RejectScore: parseFloat(c1RejectScore) ?? 0.3,
+          c1RejectDesc: c1RejectDesc.trim(),
+          c2GlobalMaxPoints: parseFloat(c2GlobalMaxPoints) || 30,
+          c2GlobalMaxPointsDesc: c2GlobalMaxPointsDesc.trim(),
+        }),
+      });
+
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) { setErr(e.message); }
@@ -317,9 +369,16 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
     try {
       const payload = {};
       for (const k of ["execution-led", "balanced", "outcome-led"]) {
+        const c1 = parseFloat(bandConfig[k].c1Max) || 0;
+        const c2 = parseFloat(bandConfig[k].c2Max) || 0;
+        if (c1 + c2 > 100) {
+          setBandErr(`${k}: C1 (${c1}) + C2 (${c2}) = ${c1 + c2} pts — cannot exceed 100.`);
+          setBandSaving(false);
+          return;
+        }
         payload[k] = {
-          c1Max: parseFloat(bandConfig[k].c1Max) || 0,
-          c2Max: parseFloat(bandConfig[k].c2Max) || 0,
+          c1Max: c1,
+          c2Max: c2,
           c3Max: parseFloat(bandConfig[k].c3Max) || 0,
           c4Max: parseFloat(bandConfig[k].c4Max) || 0,
           designations: bandConfig[k].designations,
@@ -370,110 +429,6 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
           {loading ? <Spinner /> : (
             <>
-              {/* ── Goal Task Point Settings — 3 inputs ── */}
-              <div style={{ borderRadius: 7, border: "1px solid #BFDBFE" }}>
-
-                {/* Blue header */}
-                <div style={{ padding: "10px 14px", background: "#1B4F8A", borderRadius: "6px 6px 0 0" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Goal Task — Point Settings</div>
-                  <div style={{ fontSize: 11, color: "#BFD9F5", marginTop: 2, lineHeight: 1.5 }}>
-                    These 3 values control how points are assigned when a Goal Task is created and completed.
-                  </div>
-                </div>
-
-                {/* Field 1 — Total Points */}
-                <div style={{ padding: "14px 14px 12px", borderBottom: "1px solid #E5E7EB" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Total Points for Goal Task
-                  </div>
-                  <input
-                    type="number" min="0" step="1"
-                    value={goalTotalPoints}
-                    onChange={e => setGoalTotalPoints(e.target.value)}
-                    placeholder="e.g. 100"
-                    style={{ display: "block", width: "100%", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
-                    onFocus={e => e.target.style.borderColor = "#1B4F8A"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 5, lineHeight: 1.5 }}>
-                    Total point pool for one goal task. Each node auto-gets: <strong style={{ color: "#1B4F8A" }}>(node weight% ÷ 100) × Total Points</strong>
-                  </div>
-                </div>
-
-                {/* Field 2 — Final Node Weight % */}
-                <div style={{ padding: "14px 14px 12px", borderBottom: "1px solid #E5E7EB" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Auto-Created Final Node — Weight (%)
-                  </div>
-                  <input
-                    type="number" min="0" max="100" step="1"
-                    value={goalFinalNodeWeightPct}
-                    onChange={e => setGoalFinalNodeWeightPct(e.target.value)}
-                    placeholder="e.g. 40  (default: 40%)"
-                    style={{ display: "block", width: "100%", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
-                    onFocus={e => e.target.style.borderColor = "#1B4F8A"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 5, lineHeight: 1.5 }}>
-                    The last node is auto-created from the goal itself. This % is reserved for it.
-                    {goalFinalNodeWeightPct
-                      ? ` Remaining ${Math.max(0, 100 - (parseFloat(goalFinalNodeWeightPct) || 0)).toFixed(0)}% is split equally among intermediate nodes.`
-                      : " Remaining % is split equally among intermediate nodes."
-                    }
-                  </div>
-                </div>
-
-                {/* Field 3 — Bonus Points */}
-                <div style={{ padding: "14px 14px 12px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
-                    Grace Points — Successful Completion (On-time / Early)
-                  </div>
-                  <input
-                    type="number" min="0" step="1"
-                    value={goalBonusPoints}
-                    onChange={e => setGoalBonusPoints(e.target.value)}
-                    placeholder="e.g. 10"
-                    style={{ display: "block", width: "100%", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
-                    onFocus={e => e.target.style.borderColor = "#1B4F8A"}
-                    onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                  />
-                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 5, lineHeight: 1.5 }}>
-                    Extra points credited to the employee when the goal is completed on-time or before the deadline.
-                  </div>
-                </div>
-
-                {/* Live calculation preview — only when both values filled */}
-                {goalTotalPoints && goalFinalNodeWeightPct && (
-                  <div style={{ padding: "10px 14px", background: "#EBF2FA", borderTop: "1px solid #BFDBFE", borderRadius: "0 0 6px 6px" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#1B4F8A", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                      Auto-calculation preview
-                    </div>
-                    {(() => {
-                      const total = parseFloat(goalTotalPoints) || 0;
-                      const finalW = Math.min(100, Math.max(0, parseFloat(goalFinalNodeWeightPct) || 0));
-                      const finalPts = Math.round((finalW / 100) * total);
-                      const remW = +(100 - finalW).toFixed(1);
-                      const remPts = Math.round((remW / 100) * total);
-                      const bonus = parseFloat(goalBonusPoints) || 0;
-                      return (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <div style={{ fontSize: 12, color: "#1B4F8A" }}>
-                            <strong>Final node:</strong> {finalW}% → <strong>{finalPts} pts</strong>
-                          </div>
-                          <div style={{ fontSize: 12, color: "#374151" }}>
-                            <strong>Intermediate nodes share:</strong> {remW}% → {remPts} pts total (split equally per node)
-                          </div>
-                          {bonus > 0 && (
-                            <div style={{ fontSize: 12, color: "#15803D", fontWeight: 600 }}>
-                              + {bonus} grace pts for on-time / early completion
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
 
               {/* ── C2 Band Global Configuration ── */}
               <div style={{ borderRadius: 7, border: "2px solid #D97706" }}>
@@ -488,6 +443,11 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                 {/* Input: Global Max Points */}
                 <div style={{ padding: "14px 14px 14px", background: "#FFFBEB", borderRadius: "0 0 5px 5px" }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Global C2 Max Points (%)</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>Global C2 Max Points (%)</div>
+                    <button type="button" onClick={() => setOpenDesc(openDesc === "c2max" ? null : "c2max")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: c2GlobalMaxPointsDesc ? "#D97706" : "#9CA3AF", fontSize: 12 }}>✏️</button>
+                  </div>
                   <input
                     type="number" min="0" max="100" step="1"
                     value={c2GlobalMaxPoints}
@@ -497,6 +457,13 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                     onFocus={e => { e.target.style.borderColor = "#D97706"; }}
                     onBlur={e => { e.target.style.borderColor = "#E5E7EB"; }}
                   />
+                  {openDesc === "c2max" && (
+                    <textarea value={c2GlobalMaxPointsDesc} onChange={e => setC2GlobalMaxPointsDesc(e.target.value)}
+                      placeholder="Description for C2 Global Max Points..."
+                      rows={2} style={{ display: "block", width: "100%", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 11, fontFamily: "inherit", color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box", resize: "vertical", marginTop: 6 }}
+                      onFocus={e => e.target.style.borderColor = "#D97706"}
+                      onBlur={e => e.target.style.borderColor = "#E5E7EB"} />
+                  )}
                   <div style={{ fontSize: 11, color: "#6B7280", marginTop: 5, lineHeight: 1.5 }}>
                     Example: Input <strong>30</strong> → Global pool = <strong>30 pts</strong>.
                     Task A at 60% = <strong>18 pts</strong>. Task B at 40% = <strong>12 pts</strong>.
@@ -530,36 +497,61 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                 <div style={{ padding: "12px 14px", background: "#EBF2FA", display: "flex", flexDirection: "column", gap: 10 }}>
                   {/* Row 1: Max + Base */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <div>
-                      <div style={lbl10}>C1 Max Points</div>
-                      <input type="number" min="0" step="1" value={c1MaxPoints} onChange={e => setC1MaxPoints(e.target.value)} placeholder="e.g. 35" style={F} onFocus={focusBlue} onBlur={blurGray} />
-                      <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>Total C1 pts ceiling</div>
-                    </div>
-                    <div>
-                      <div style={lbl10}>Base Score (on-time)</div>
-                      <input type="number" min="0" step="0.1" value={c1BaseScore} onChange={e => setC1BaseScore(e.target.value)} placeholder="e.g. 1.0" style={F} onFocus={focusBlue} onBlur={blurGray} />
-                      <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>Perfect task starts at this</div>
-                    </div>
+                    {[
+                      { key: "maxPoints", label: "C1 Max Points", val: c1MaxPoints, setVal: setC1MaxPoints, desc: c1MaxPointsDesc, setDesc: setC1MaxPointsDesc, ph: "35", hint: "Total C1 pts ceiling" },
+                      { key: "baseScore", label: "Base Score (on-time)", val: c1BaseScore, setVal: setC1BaseScore, desc: c1BaseScoreDesc, setDesc: setC1BaseScoreDesc, ph: "1.0", hint: "Perfect task starts at this" },
+                    ].map(({ key, label, val, setVal, desc, setDesc, ph, hint }) => (
+                      <div key={key}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                          <div style={lbl10}>{label}</div>
+                          <button type="button" onClick={() => setOpenDesc(openDesc === key ? null : key)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: desc ? "#1B4F8A" : "#9CA3AF", fontSize: 12 }}>✏️</button>
+                        </div>
+                        <input type="number" min="0" step="0.1" value={val} onChange={e => setVal(e.target.value)} placeholder={ph} style={F} onFocus={focusBlue} onBlur={blurGray} />
+                        <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3 }}>{hint}</div>
+                        {openDesc === key && (
+                          <textarea value={desc} onChange={e => setDesc(e.target.value)}
+                            placeholder={`Description for ${label}...`} rows={2}
+                            style={{ ...F, resize: "vertical", fontSize: 11, marginTop: 4 }}
+                            onFocus={focusBlue} onBlur={blurGray} />
+                        )}
+                      </div>
+                    ))}
                   </div>
                   {/* Row 2: Deductions */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-                    <div>
-                      <div style={lbl10}>Deadline Missed</div>
-                      <input type="number" min="0" step="0.1" value={c1DeadlineDeduction} onChange={e => setC1DeadlineDeduction(e.target.value)} placeholder="0.5" style={F} onFocus={focusBlue} onBlur={blurGray} />
+                  {/* ── Deduction fields with pencil icon ── */}
+                  {[
+                    { key: "deadline", label: "Deadline Missed", val: c1DeadlineDeduction, setVal: setC1DeadlineDeduction, desc: c1DeadlineDesc, setDesc: setC1DeadlineDesc, ph: "0.2" },
+                    { key: "extension", label: "Extension Filed", val: c1ExtensionDeduction, setVal: setC1ExtensionDeduction, desc: c1ExtensionDesc, setDesc: setC1ExtensionDesc, ph: "0.1" },
+                    { key: "rework", label: "Rework Received", val: c1ReworkDeduction, setVal: setC1ReworkDeduction, desc: c1ReworkDesc, setDesc: setC1ReworkDesc, ph: "0.2" },
+                    { key: "reject", label: "Reject Override", val: c1RejectScore, setVal: setC1RejectScore, desc: c1RejectDesc, setDesc: setC1RejectDesc, ph: "0.5" },
+                  ].map(({ key, label, val, setVal, desc, setDesc, ph }) => (
+                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={lbl10}>{label}</div>
+                        <button
+                          type="button"
+                          onClick={() => setOpenDesc(openDesc === key ? null : key)}
+                          title="Add description"
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: desc ? "#1B4F8A" : "#9CA3AF", fontSize: 12, lineHeight: 1 }}>
+                          ✏️
+                        </button>
+                      </div>
+                      <input type="number" min="0" step="0.1" value={val}
+                        onChange={e => setVal(e.target.value)}
+                        placeholder={ph} style={F} onFocus={focusBlue} onBlur={blurGray} />
+                      {openDesc === key && (
+                        <textarea
+                          value={desc}
+                          onChange={e => setDesc(e.target.value)}
+                          placeholder={`Why is ${label.toLowerCase()} deducted?`}
+                          rows={2}
+                          style={{ ...F, resize: "vertical", fontSize: 11, lineHeight: 1.5, marginTop: 2 }}
+                          onFocus={focusBlue} onBlur={blurGray}
+                        />
+                      )}
                     </div>
-                    <div>
-                      <div style={lbl10}>Extension Filed</div>
-                      <input type="number" min="0" step="0.1" value={c1ExtensionDeduction} onChange={e => setC1ExtensionDeduction(e.target.value)} placeholder="0.2" style={F} onFocus={focusBlue} onBlur={blurGray} />
-                    </div>
-                    <div>
-                      <div style={lbl10}>Rework Received</div>
-                      <input type="number" min="0" step="0.1" value={c1ReworkDeduction} onChange={e => setC1ReworkDeduction(e.target.value)} placeholder="0.2" style={F} onFocus={focusBlue} onBlur={blurGray} />
-                    </div>
-                    <div>
-                      <div style={lbl10}>Reject Override</div>
-                      <input type="number" step="0.1" value={c1RejectScore} onChange={e => setC1RejectScore(e.target.value)} placeholder="0" style={F} onFocus={focusBlue} onBlur={blurGray} />
-                    </div>
-                  </div>
+                  ))}
                   {/* Live formula preview */}
                   {c1BaseScore && c1MaxPoints && (
                     <div style={{ padding: "8px 12px", background: "#1B4F8A", borderRadius: 6 }}>
@@ -649,88 +641,8 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
               </div>
 
 
-              {/* ── Divider ── */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
-                <span style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
-                  Bleach Trigger Events
-                </span>
-
-                <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
-              </div>
-
               {/* ── Event rows ── */}
-              {Object.entries(EVENT_LABELS).map(([key, meta]) => {
-                const ev = events[key] || {};
-                return (
-                  <div key={key} style={{ border: `1px solid ${ev.enabled ? "#BFDBFE" : "#E5E7EB"}`, borderRadius: 6, background: ev.enabled ? "#F8FBFF" : "#fff" }}>
 
-                    {/* Toggle row — div not label, to avoid input-inside-label conflict */}
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", cursor: "pointer" }}
-                      onClick={() => updateEvent(key, "enabled", !ev.enabled)}>
-                      <input
-                        type="checkbox"
-                        checked={ev.enabled || false}
-                        onChange={e => { e.stopPropagation(); updateEvent(key, "enabled", e.target.checked); }}
-                        onClick={e => e.stopPropagation()}
-                        style={{ width: 15, height: 15, accentColor: "#1B4F8A", cursor: "pointer", flexShrink: 0, marginTop: 1 }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{meta.label}</div>
-                        <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2, lineHeight: 1.4 }}>{meta.desc}</div>
-                      </div>
-                      {ev.enabled && ev.points > 0 && (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#B91C1C", background: "#FEF2F2", border: "1px solid #FECACA", padding: "2px 8px", borderRadius: 4, flexShrink: 0, whiteSpace: "nowrap" }}>
-                          {ev.points} pts
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Expanded fields when enabled */}
-                    {ev.enabled && (
-                      <div style={{ padding: "12px 12px 14px", borderTop: "1px solid #DBEAFE", background: "#fff", display: "flex", flexDirection: "column", gap: 10 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: meta.hasThreshold ? "1fr 1fr" : "1fr", gap: 10 }}>
-                          <div>
-                            <div style={lbl10}>Deduction Points</div>
-                            <input
-                              type="number" min="0" step="0.5"
-                              value={ev.points}
-                              onChange={e => updateEvent(key, "points", Number(e.target.value))}
-                              placeholder="e.g. 1.0"
-                              style={F}
-                              onFocus={focusBlue} onBlur={blurGray}
-                            />
-                          </div>
-                          {meta.hasThreshold && (
-                            <div>
-                              <div style={lbl10}>Days Threshold</div>
-                              <input
-                                type="number" min="1"
-                                value={ev.daysThreshold || ""}
-                                onChange={e => updateEvent(key, "daysThreshold", Number(e.target.value))}
-                                placeholder="e.g. 2"
-                                style={F}
-                                onFocus={focusBlue} onBlur={blurGray}
-                              />
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <div style={lbl10}>Description</div>
-                          <input
-                            type="text"
-                            value={ev.description}
-                            onChange={e => updateEvent(key, "description", e.target.value)}
-                            placeholder="Describe this violation…"
-                            style={F}
-                            onFocus={focusBlue} onBlur={blurGray}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
             </>
           )}
         </div>
@@ -1233,6 +1145,9 @@ function OwnHistory({ employeeId }) {
   const [recheckErr, setRecheckErr] = useState("");
   const [collapsedDates, setCollapsedDates] = useState({});
   const toggleDate = (date) => setCollapsedDates(prev => ({ ...prev, [date]: !prev[date] }));
+  const [bandFilter, setBandFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -1261,12 +1176,26 @@ function OwnHistory({ employeeId }) {
     </div>
   );
 
+  // ── Filtered bleach computation ─────────────────────────────────────────
+  const allBleachesFlat = [];
+  sopPoints.forEach(yp => (yp.bleaches || []).forEach(b => allBleachesFlat.push({ ...b, year: yp.year })));
+  const filteredBleaches = allBleachesFlat.filter(b => {
+    if (bandFilter !== "All" && (b.type || "") !== bandFilter) return false;
+    if (dateFrom && b.date < dateFrom) return false;
+    if (dateTo && b.date > dateTo) return false;
+    return true;
+  });
+  const filtGained = +filteredBleaches.filter(b => isReward(b)).reduce((s, b) => s + Number(b.points), 0).toFixed(2);
+  const filtDeducted = +filteredBleaches.filter(b => !isReward(b) && b.recheck?.status !== "confirmed").reduce((s, b) => s + Number(b.points), 0).toFixed(2);
+  const filtNet = +(filtGained - filtDeducted).toFixed(2);
+  const isFiltered = bandFilter !== "All" || !!dateFrom || !!dateTo;
+
   return (
     <>
       <div>
-
-        {/* ── Summary bar ── */}
+        {/* ── Summary bar — always first ── */}
         {(() => {
+
           // displayTotal: flip sign so positive = good performance, negative = bad
           const displayTotal = -totalAll;
           const isClean = displayTotal === 0;
@@ -1291,8 +1220,8 @@ function OwnHistory({ employeeId }) {
               {sopPoints.map(y => (
                 <div key={y.year} style={{ borderLeft: `1px solid ${bdColor}`, paddingLeft: 16 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: labelColor, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{y.year}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: y.totalDeducted < 0 ? C.red : y.totalDeducted > 0 ? "#15803D" : C.textMuted }}>
-                    {y.totalDeducted < 0 ? `${(-y.totalDeducted).toFixed(1)}` : y.totalDeducted > 0 ? `+${y.totalDeducted.toFixed(1)}` : "0.0"}<span style={{ fontSize: 13, fontWeight: 700 }}> / 100</span>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: y.totalDeducted > 0 ? C.red : y.totalDeducted < 0 ? "#15803D" : C.textMuted }}>
+                    {y.totalDeducted > 0 ? `−${y.totalDeducted.toFixed(1)}` : y.totalDeducted < 0 ? `+${(-y.totalDeducted).toFixed(1)}` : "0.0"}<span style={{ fontSize: 13, fontWeight: 700 }}> / 100</span>
                     pts
                   </div>
                 </div>
@@ -1301,16 +1230,61 @@ function OwnHistory({ employeeId }) {
           );
         })()}
 
+        {/* ── Filters — always shown ── */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {["All", "C1", "C2", "C3", "C4"].map(f => (
+            <button key={f} onClick={() => setBandFilter(f)}
+              style={{ padding: "5px 12px", borderRadius: 5, border: `1px solid ${bandFilter === f ? C.primary : C.border}`, background: bandFilter === f ? C.primary : C.white, color: bandFilter === f ? "#fff" : C.text, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              {f}
+            </button>
+          ))}
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            style={{ padding: "5px 8px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, fontFamily: "inherit", color: C.text, background: C.white, outline: "none" }} />
+          <span style={{ fontSize: 11, color: C.textMuted }}>to</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            style={{ padding: "5px 8px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, fontFamily: "inherit", color: C.text, background: C.white, outline: "none" }} />
+          {isFiltered && (
+            <button onClick={() => { setBandFilter("All"); setDateFrom(""); setDateTo(""); }}
+              style={{ padding: "5px 10px", borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, color: C.textSub, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* ── Filtered stats — only when filter active ── */}
+        {isFiltered && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 90, padding: "10px 14px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#15803D", textTransform: "uppercase", marginBottom: 3 }}>Points Gained</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#15803D" }}>+{filtGained.toFixed(1)}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 90, padding: "10px 14px", background: C.redLight, border: `1px solid ${C.redBorder}`, borderRadius: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: C.red, textTransform: "uppercase", marginBottom: 3 }}>Deducted</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.red }}>-{filtDeducted.toFixed(1)}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 90, padding: "10px 14px", background: filtNet >= 0 ? "#F0FDF4" : C.redLight, border: `1px solid ${filtNet >= 0 ? "#BBF7D0" : C.redBorder}`, borderRadius: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: filtNet >= 0 ? "#15803D" : C.red, textTransform: "uppercase", marginBottom: 3 }}>Net Score</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: filtNet >= 0 ? "#15803D" : C.red }}>{filtNet >= 0 ? "+" : ""}{filtNet.toFixed(1)}</div>
+            </div>
+          </div>
+        )}
+
         {/* ── Per-year history ── */}
         {sopPoints.map(yp => {
-          const allB = [...(yp.bleaches || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+          const allB = [...(yp.bleaches || [])].filter(b => {
+            if (bandFilter !== "All" && (b.type || "") !== bandFilter) return false;
+            if (dateFrom && b.date < dateFrom) return false;
+            if (dateTo && b.date > dateTo) return false;
+            return true;
+          }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
           const grp = allB.reduce((acc, b) => { const d = b.date || "Unknown"; if (!acc[d]) acc[d] = []; acc[d].push(b); return acc; }, {});
           const dates = Object.keys(grp).sort((a, b) => b.localeCompare(a));
+          if (dates.length === 0) return null;
           return (
             <div key={yp.year} style={{ marginBottom: 24 }}>
               {/* Year header */}
               <div style={{ fontSize: 11, fontWeight: 600, color: C.textSub, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
-                {yp.year} &nbsp;·&nbsp; {yp.totalDeducted < 0 ? `−${(-yp.totalDeducted).toFixed(1)} pts penalty` : yp.totalDeducted > 0 ? `+${yp.totalDeducted.toFixed(1)} pts earned` : "0 pts net"}
+                {yp.year} &nbsp;·&nbsp; {yp.totalDeducted > 0 ? `−${yp.totalDeducted.toFixed(1)} pts penalty` : yp.totalDeducted < 0 ? `+${(-yp.totalDeducted).toFixed(1)} pts earned` : "0 pts net"}
               </div>
 
               {dates.map(date => (
@@ -2049,21 +2023,6 @@ export default function SopPage() {
           </div>
         </div>
 
-        {/* ── C1 Execution Score Card ── */}
-        <C1ScoreCard
-          c1Score={c1Score}
-          allC1Scores={allC1Scores}
-          role={role}
-          loading={c1Loading}
-        />
-
-        {/* ── C2 Band Score Card ── */}
-        <C2ScoreCard
-          c2Score={c2Score}
-          allC2Scores={allC2Scores}
-          role={role}
-          loading={c2Loading}
-        />
 
         {/* ── Pending Recheck Banner ── */}
         {(role === "ceo" || role === "tl") && recheckList.length > 0 && (

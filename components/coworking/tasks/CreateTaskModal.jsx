@@ -140,6 +140,7 @@ export default function CreateTaskModal({
   const isMultiMode = !!parentTask && (currentRole === "ceo" || currentRole === "tl");
 
   const [isGoalUrl, setIsGoalUrl] = useState(false);
+  const [reqInput, setReqInput] = useState("");
 
   // ── C2 Band (Gold Task) state ─────────────────────────────────────────────
   const [isGoldTask, setIsGoldTask] = useState(false);
@@ -209,6 +210,7 @@ export default function CreateTaskModal({
     title: editTask?.title || "",
     description: editTask?.description || "",
     notes: editTask?.notes || "",
+    requirements: editTask?.requirements || [],
     hasTimer: editTask ? (editTask.hasTimer ?? true) : true,
     deadline: _fixedDL ? _fixedDL.toISOString().split("T")[0] : "",
     deadlineTime: _fixedDL ? _fixedDL.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "",
@@ -586,6 +588,7 @@ export default function CreateTaskModal({
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
           notes: isFolder ? "" : form.notes,
+          requirements: isFolder ? [] : (form.requirements || []),
           assigneeIds: isFolder ? [] : selectedIds,
           dueDate: null, priority: computedPriority,
           parentTaskId: parentTask?.taskId || null,
@@ -782,7 +785,45 @@ export default function CreateTaskModal({
           </div>
           <div>
             <label style={lbl}>Requirements / Deliverables</label>
-            <textarea className="ctm-inp" style={{ ...inp, height: 60, resize: "vertical" }} value={activeRow.notes} onChange={e => setActiveRowField("notes", e.target.value)} placeholder="List specific requirements or acceptance criteria." />
+            {/* Point list */}
+            {(activeRow.requirements || []).length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                {(activeRow.requirements || []).map((req, ri) => (
+                  <div key={ri} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
+                    <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
+                    <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{req}</span>
+                    <button onClick={() => setActiveRowField("requirements", (activeRow.requirements || []).filter((_, i) => i !== ri))}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Input row */}
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                className="ctm-inp"
+                style={{ ...inp, flex: 1 }}
+                value={reqInput}
+                onChange={e => setReqInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && reqInput.trim()) {
+                    e.preventDefault();
+                    setActiveRowField("requirements", [...(activeRow.requirements || []), reqInput.trim()]);
+                    setReqInput("");
+                  }
+                }}
+                placeholder="Type a requirement and press Enter"
+              />
+              <button
+                onClick={() => {
+                  if (!reqInput.trim()) return;
+                  setActiveRowField("requirements", [...(activeRow.requirements || []), reqInput.trim()]);
+                  setReqInput("");
+                }}
+                style={{ padding: "0 12px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#EBF2FA", color: "#1B4F8A", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                + Add
+              </button>
+            </div>
           </div>
           <TimeTrackingSection hasTimer={activeRow.hasTimer} deadline={activeRow.deadline} deadlineTime={activeRow.deadlineTime} onSet={(k, v) => setActiveRowField(k, v)} />
         </>
@@ -909,7 +950,43 @@ export default function CreateTaskModal({
                   {!isFolder && copy.notesLabel && (
                     <div>
                       <label style={lbl}>{copy.notesLabel}</label>
-                      <textarea className="ctm-inp" style={{ ...inp, height: 60, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} placeholder={copy.notesPlaceholder} />
+                      {(form.requirements || []).length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                          {(form.requirements || []).map((req, ri) => (
+                            <div key={ri} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
+                              <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
+                              <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{req}</span>
+                              <button onClick={() => set("requirements", (form.requirements || []).filter((_, i) => i !== ri))}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          className="ctm-inp"
+                          style={{ ...inp, flex: 1 }}
+                          value={reqInput}
+                          onChange={e => setReqInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && reqInput.trim()) {
+                              e.preventDefault();
+                              set("requirements", [...(form.requirements || []), reqInput.trim()]);
+                              setReqInput("");
+                            }
+                          }}
+                          placeholder="Type a requirement and press Enter"
+                        />
+                        <button
+                          onClick={() => {
+                            if (!reqInput.trim()) return;
+                            set("requirements", [...(form.requirements || []), reqInput.trim()]);
+                            setReqInput("");
+                          }}
+                          style={{ padding: "0 12px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#EBF2FA", color: "#1B4F8A", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                          + Add
+                        </button>
+                      </div>
                     </div>
                   )}
 

@@ -77,7 +77,7 @@ function C1ConfirmPopup({ title, color, lines, onConfirm, onCancel, confirmLabel
             <>
               <button onClick={() => { onWaiveRework(false); onConfirm(); }} disabled={busy}
                 style={{ flex: 2, padding: "8px", border: "none", borderRadius: 6, background: busy ? "#E5E7EB" : "#D97706", color: "#fff", fontSize: 12, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer", ...F }}>
-                {busy ? "Processing…" : "🔄 Rework −0.2 pts"}
+                {busy ? "Processing…" : "🔄 Points Deducted"}
               </button>
               <button onClick={() => { onWaiveRework(true); onConfirm(); }} disabled={busy}
                 style={{ flex: 2, padding: "8px", border: "1px solid #BBF7D0", borderRadius: 6, background: busy ? "#E5E7EB" : "#F0FDF4", color: busy ? "#9CA3AF" : "#15803D", fontSize: 12, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer", ...F }}>
@@ -98,6 +98,7 @@ function C1ConfirmPopup({ title, color, lines, onConfirm, onCancel, confirmLabel
 export default function ReviewCompletionModal({ task, currentEmployeeId, role, reviewType, onClose, onSuccess }) {
   const [rejectionReason, setRejectionReason] = useState("");
   const [reworkReason, setReworkReason] = useState("");
+  const [failedReqs, setFailedReqs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [pointNotif, setPointNotif] = useState(null);
@@ -164,11 +165,24 @@ export default function ReviewCompletionModal({ task, currentEmployeeId, role, r
   };
 
   // ── Rework ────────────────────────────────────────────────────────────────
-  const handleRework = async () => {
-    if (!reworkReason.trim()) { setError("Reason required."); return; }
+  const handleRework = async (waiveDeduction = false) => {
+    const hasReqs = (task?.requirements || []).length > 0;
+    const hasNote = reworkReason.trim();
+    if (!hasReqs && !hasNote) { setError("Reason required."); return; }
+
+    // Build reason from failed reqs + note
+    const failedLines = (failedReqs || []).map(i => `• ${task.requirements[i]}`).join("\n");
+    const combinedReason = [
+      failedLines ? `Not completed:\n${failedLines}` : "",
+      hasNote ? reworkReason.trim() : "",
+    ].filter(Boolean).join("\n\n");
+    const finalReason = combinedReason || reworkReason.trim();
+    if (!finalReason) { setError("Select at least one requirement or add a note."); return; }
+    // Replace reworkReason with combined so backend receives full context
+    setReworkReason(finalReason);
     setSubmitting(true); setError("");
     try {
-      await callRework(task.taskId, reworkReason.trim());
+      await callRework(task.taskId, finalReason, waiveDeduction);
       const dedAmt = c1Preview?.cfg?.c1ReworkDeduction || 0.2;
       setPointNotif({ type: "deduct", pts: dedAmt, reason: `Rework recorded · −${dedAmt} pts from final task score` });
       setTimeout(() => setPointNotif(null), 5000);
@@ -303,13 +317,43 @@ export default function ReviewCompletionModal({ task, currentEmployeeId, role, r
 
           {/* Rework reason form */}
           {showReworkForm && (
-            <div>
-              <label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
-                Reason for Rework <span style={{ color: "#EF4444" }}>*</span>
-              </label>
-              <textarea autoFocus value={reworkReason} onChange={e => setReworkReason(e.target.value)}
-                placeholder="Explain what needs to be improved…"
-                style={{ width: "100%", minHeight: 80, padding: "9px 11px", border: "1px solid #FCD34D", borderRadius: 6, fontSize: 12, ...F, outline: "none", resize: "vertical", boxSizing: "border-box", color: "#111827", background: "#FFFBEB" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {/* Requirements checklist — tick what's NOT done */}
+              {(task?.requirements || []).length > 0 && (
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#92400E", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
+                    Which requirements were NOT completed?
+                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {(task.requirements || []).map((req, ri) => {
+                      const checked = (failedReqs || []).includes(ri);
+                      return (
+                        <div key={ri} onClick={() => {
+                          const curr = failedReqs || [];
+                          setFailedReqs(checked ? curr.filter(i => i !== ri) : [...curr, ri]);
+                        }}
+                          style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "8px 10px", border: `1px solid ${checked ? "#FECACA" : "#E5E7EB"}`, borderRadius: 6, background: checked ? "#FEF2F2" : "#FAFAFA", cursor: "pointer" }}>
+                          <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? "#DC2626" : "#D1D5DB"}`, background: checked ? "#DC2626" : "#fff", flexShrink: 0, marginTop: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {checked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                          </div>
+                          <span style={{ fontSize: 12, color: checked ? "#DC2626" : "#374151", lineHeight: 1.5 }}>{req}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* Optional note */}
+              <div>
+                <label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
+                  Additional Note {(task?.requirements || []).length === 0 && <span style={{ color: "#EF4444" }}>*</span>}
+                </label>
+                <textarea autoFocus value={reworkReason} onChange={e => setReworkReason(e.target.value)}
+                  placeholder={failedReqs.length > 0
+                    ? `Additional note (optional) — ${failedReqs.length} requirement(s) already marked above`
+                    : "Explain what needs to be improved…"}
+                  style={{ width: "100%", minHeight: 70, padding: "9px 11px", border: "1px solid #FCD34D", borderRadius: 6, fontSize: 12, ...F, outline: "none", resize: "vertical", boxSizing: "border-box", color: "#111827", background: "#FFFBEB" }} />
+              </div>
             </div>
           )}
 
@@ -349,7 +393,7 @@ export default function ReviewCompletionModal({ task, currentEmployeeId, role, r
               <button onClick={() => { setShowReworkForm(false); setReworkReason(""); setError(""); }} disabled={submitting} style={{ flex: 1, padding: "9px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", color: "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer", ...F }}>
                 ← Back
               </button>
-              <button onClick={() => { if (!reworkReason.trim()) { setError("Reason required."); return; } prepareConfirm("rework"); }} disabled={submitting || !reworkReason.trim()} style={{ flex: 2, padding: "9px", border: "none", borderRadius: 6, background: submitting || !reworkReason.trim() ? "#E5E7EB" : "#D97706", color: submitting || !reworkReason.trim() ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 600, cursor: submitting || !reworkReason.trim() ? "not-allowed" : "pointer", ...F }}>
+              <button onClick={() => { if (!reworkReason.trim() && failedReqs.length === 0) { setError("Select a requirement or add a note."); return; } prepareConfirm("rework"); }} disabled={submitting || (!reworkReason.trim() && failedReqs.length === 0)} style={{ flex: 2, padding: "9px", border: "none", borderRadius: 6, background: submitting || !reworkReason.trim() ? "#E5E7EB" : "#D97706", color: submitting || !reworkReason.trim() ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 600, cursor: submitting || !reworkReason.trim() ? "not-allowed" : "pointer", ...F }}>
                 Review Impact →
               </button>
             </div>
@@ -376,7 +420,7 @@ export default function ReviewCompletionModal({ task, currentEmployeeId, role, r
           }
           color={modeColors[confirmMode]}
           lines={c1Loading ? [{ text: "Calculating C1 impact…", color: "#6B7280" }] : buildC1Lines(confirmMode)}
-          onConfirm={modeActions[confirmMode]}
+          onConfirm={() => modeActions[confirmMode](waiveReworkDeduction)}
           onCancel={() => setConfirmMode(null)}
           confirmLabel={modeLabels[confirmMode]}
           busy={submitting}
