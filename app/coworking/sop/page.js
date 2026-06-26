@@ -2151,7 +2151,7 @@ export default function SopPage() {
                                           <div style={{ fontSize: 11, color: C.textSub, marginBottom: 4 }}>{sop.department}</div>
                                           {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 6, lineHeight: 1.45 }}>{sop.description}</div>}
                                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                                            {sop.status === "pending" && (
+                                            {sop.status === "pending" && role === "ceo" && (
                                               <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
                                             )}
                                             <SmBtn blue onClick={() => { setEditingSop(sop); setShowCreate(true); }}>Edit</SmBtn>
@@ -2215,7 +2215,7 @@ export default function SopPage() {
                               </div>
                               {sop.description && <div style={{ fontSize: 11, color: C.textSub, marginBottom: 7, lineHeight: 1.45 }}>{sop.description}</div>}
                               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                                {sop.status === "pending" && (
+                                {sop.status === "pending" && role === "ceo" && (
                                   <><SmBtn green onClick={() => handleApprove(sop)}>Approve</SmBtn><SmBtn red onClick={() => handleReject(sop)}>Reject</SmBtn></>
                                 )}
                                 {sop.createdBy === employeeId && (
