@@ -1823,7 +1823,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     };
     load();
     // Refresh every 60 seconds
-    const interval = setInterval(load, 60000);
+    const interval = setInterval(load, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [employeeId, role]);
 
@@ -1984,7 +1984,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     // Also re-check every 60 seconds — reminders can enter the 30-min window over time
     const tick = setInterval(() => {
       getDocs(notesQ).then(checkReminders).catch(() => { });
-    }, 60 * 1000);
+    }, 5 * 60 * 1000);
     return () => { unsub(); clearInterval(tick); };
   }, [employeeId]);
 

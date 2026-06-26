@@ -407,7 +407,7 @@ export function useNotifications(employeeId) {
             const data = await getNotifications();
             return data.notifications || [];
         },
-        staleTime: 10 * 1000,
+        staleTime: 5 * 60 * 1000,
     });
 
     useCoworkSocket(employeeId, {
