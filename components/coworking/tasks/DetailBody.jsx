@@ -771,15 +771,48 @@ export default function DetailBody({
               {/* Fixed deadline (non-timer tasks) */}
               {!task.hasTimer && task.fixedDeadline && (
                 <InfoRow label="Deadline">
-                  {fmtDateTime(task.fixedDeadline)}
-                  {(() => {
-                    const dl = Math.ceil((new Date(task.fixedDeadline) - Date.now()) / 86400000);
-                    const color = dl < 0 ? "#DC2626" : dl <= 1 ? "#D97706" : "#16A34A";
-                    const txt = dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? "Due today" : `${dl}d remaining`;
-                    return <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, color }}>{txt}</span>;
-                  })()}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+
+                    {/* If extended — show original with strikethrough */}
+                    {(task.deadlineAutoExtendedHistory || []).length > 0 && (() => {
+                      const first = task.deadlineAutoExtendedHistory[0];
+                      return (
+                        <span style={{ fontSize: 12, color: "#9CA3AF", textDecoration: "line-through" }}>
+                          {fmtDateTime(first.oldDeadline)}
+                        </span>
+                      );
+                    })()}
+
+                    {/* Current (new) deadline */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{fmtDateTime(task.fixedDeadline)}</span>
+                      {(() => {
+                        const dl = Math.ceil((new Date(task.fixedDeadline) - Date.now()) / 86400000);
+                        const color = dl < 0 ? "#DC2626" : dl <= 1 ? "#D97706" : "#16A34A";
+                        const txt = dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? "Due today" : `${dl}d remaining`;
+                        return <span style={{ fontSize: 10, fontWeight: 600, color }}>{txt}</span>;
+                      })()}
+                    </div>
+
+                    {/* Extension reasons */}
+                    {(task.deadlineAutoExtendedHistory || []).map((h, i) => (
+                      <div key={i} style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "4px 8px", borderRadius: 5,
+                        background: "#FFF7ED", border: "1px solid #FED7AA",
+                      }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#C2410C", flexShrink: 0 }}>+{h.extendedByHrs >= 1 ? `${Math.round(h.extendedByHrs * 10) / 10}h` : `${Math.round(h.extendedByHrs * 60)}m`}</span>
+                        <span style={{ fontSize: 11, color: "#92400E" }}>
+                          P1 task <strong>"{h.shiftedByTaskTitle}"</strong> assigned
+                          {h.at && <> · {new Date(h.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })}</>}
+                        </span>
+                      </div>
+                    ))}
+
+                  </div>
                 </InfoRow>
               )}
+
 
               {/* Timer-based deadline */}
               {task.hasTimer && windowSecs > 0 && (
@@ -1140,9 +1173,16 @@ export default function DetailBody({
                 )}
                 {/* ── Extension zone calculation (clock-time proxy for display) ── */}
                 {(() => {
-                  const _etc = (task.etcHours || 0) * 3600000;
-                  const _elapsed = _etc > 0
-                    ? Math.min(((Date.now() - new Date(task.createdAtISO).getTime()) / _etc) * 100, 100)
+                  const _createdMs = task.createdAtISO
+                    ? new Date(task.createdAtISO).getTime()
+                    : task.createdAt?.seconds
+                      ? task.createdAt.seconds * 1000
+                      : null;
+                  const _window = (task.hasTimer === false && task.fixedDeadline && _createdMs)
+                    ? (new Date(task.fixedDeadline).getTime() - _createdMs)
+                    : (task.etcHours || 0) * 3600000;
+                  const _elapsed = (_window > 0 && _createdMs)
+                    ? Math.min(((Date.now() - _createdMs) / _window) * 100, 100)
                     : 0;
                   window.__extElapsedPct = _elapsed; // used by button below
                 })()}

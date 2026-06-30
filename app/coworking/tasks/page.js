@@ -970,6 +970,10 @@ export default function TasksPage() {
   const [dragWarnModal, setDragWarnModal] = useState(null);
   // { dragId, dropOnTaskId, dragTitle, dropTitle, newParentId, isRootMove }
 
+  // Drag same-level priority confirmation modal
+  const [dragPriorityModal, setDragPriorityModal] = useState(null);
+  // { dragId, dropOnTaskId, parentId, dragTitle, preview: [{taskId, title, oldP, newP, changed}] }
+
   // ── Task Timer (start/pause per task, one active at a time) ─────────────────
   // ── Deadline auto-pause wiring ──────────────────────────────────────────
   // The hook ticks every second while a task is running. Each tick it peeks
@@ -1018,12 +1022,46 @@ export default function TasksPage() {
   });
 
   const handleTimerStart = useCallback(async (newTaskId, newTaskTitle) => {
-    if (timerActiveTaskId && timerActiveTaskId !== newTaskId) {
-      // Another task is running — show commit modal, then start new task after
-      setCommitModal({ taskId: timerActiveTaskId, taskTitle: allTaskMapRef.current?.get(timerActiveTaskId)?.title || timerActiveTaskId, nextTaskId: newTaskId, nextTaskTitle: newTaskTitle });
-      setCommitMessage("");
-      return;
+    // ── Capture running task BEFORE pausing (needed for P1 conflict check) ──
+    let _conflictTaskId = (timerActiveTaskId && timerActiveTaskId !== newTaskId)
+      ? timerActiveTaskId
+      : (() => {
+        // Also check for paused tasks with worked time
+        if (!timerActiveTaskId) {
+          const paused = [...(timerSessionMap?.entries() || [])].find(
+            ([id, s]) => id !== newTaskId && (s.totalSeconds || 0) > 0 && !s.isActive
+              && ["in_progress", "confirmed"].includes(allTaskMapRef.current?.get(id)?.status)
+          );
+          return paused ? paused[0] : null;
+        }
+        return null;
+      })();
+
+    if (_conflictTaskId) {
+      const _runningTitle = allTaskMapRef.current?.get(_conflictTaskId)?.title || _conflictTaskId;
+      await timerPause(_conflictTaskId, _runningTitle, { autoReason: "switched_task" });
     }
+
+    // ── P1 CONFLICT CHECK — backend decides priority, reads fresh Firestore ──
+    if (_conflictTaskId) {
+      try {
+        const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+        const _token = await firebaseAuth.currentUser?.getIdToken();
+        const _BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        fetch(`${_BASE}/cowork/task/p1-conflict-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token}` },
+          body: JSON.stringify({
+            newP1TaskId: newTaskId,
+            employeeId,
+            conflictTaskId: _conflictTaskId,
+          }),
+        }).catch(e => console.error("[p1-conflict-check]", e.message));
+      } catch (e) {
+        console.error("[p1-conflict-check]", e.message);
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     // ── Extension-start detection ──────────────────────────────────────
     // If the task has awaitingExtensionStart=true, this is the FIRST start
@@ -1130,8 +1168,9 @@ export default function TasksPage() {
       }
     }
 
+
     timerStart(newTaskId, newTaskTitle);
-  }, [timerActiveTaskId, timerStart]);
+  }, [timerActiveTaskId, timerStart, timerSessionMap]);
 
   const handleTimerPause = useCallback((taskId, taskTitle) => {
     setCommitModal({ taskId, taskTitle });
@@ -1251,8 +1290,46 @@ export default function TasksPage() {
       return; // wait for user confirmation
     }
 
-    // Same level — proceed directly
-    await executeDrop(dragId, dropOnTaskId, dropParent);
+    // Same level — build preview then show confirmation popup
+    const _dragAssignees = new Set(dragTask.assigneeIds || []);
+    const _sharedAssignee = (dropTask.assigneeIds || []).find(a => _dragAssignees.has(a)) || null;
+
+    // Compute cascade result WITHOUT writing anything — just for preview
+    const _siblings = [...allTaskMapRef.current.values()]
+      .filter(t => {
+        if ((t.parentTaskId || null) !== (dropParent || null)) return false;
+        if (["done", "cancelled"].includes(t.status)) return false;
+        return (t.assigneeIds || []).some(a => _dragAssignees.has(a));
+      })
+      .sort((a, b) => {
+        const ap = (_sharedAssignee && a.assigneePriorities?.[_sharedAssignee] !== undefined)
+          ? a.assigneePriorities[_sharedAssignee]
+          : (a.order !== undefined ? a.order : (Number(a.priority ?? 999)) * 1000);
+        const bp = (_sharedAssignee && b.assigneePriorities?.[_sharedAssignee] !== undefined)
+          ? b.assigneePriorities[_sharedAssignee]
+          : (b.order !== undefined ? b.order : (Number(b.priority ?? 999)) * 1000);
+        return ap - bp;
+      });
+
+    const _withoutDrag = _siblings.filter(t => t.taskId !== dragId);
+    const _dropIdx = _withoutDrag.findIndex(t => t.taskId === dropOnTaskId);
+    _withoutDrag.splice(_dropIdx === -1 ? 0 : _dropIdx, 0, dragTask);
+
+    const preview = _withoutDrag.map((t, idx) => {
+      const oldP = _sharedAssignee
+        ? (t.assigneePriorities?.[_sharedAssignee] ?? t.priority ?? 999)
+        : (t.priority ?? 999);
+      const newP = idx + 1;
+      return { taskId: t.taskId, title: t.title || t.taskId, oldP, newP, changed: Number(oldP) !== newP };
+    }).filter(t => t.changed || t.taskId === dragId);
+
+    setDragPriorityModal({
+      dragId,
+      dropOnTaskId,
+      parentId: dropParent,
+      dragTitle: dragTask.title || dragId,
+      preview,
+    });
   }, []);
 
   const executeDrop = useCallback(async (dragId, dropOnTaskId, parentId) => {
@@ -1260,19 +1337,48 @@ export default function TasksPage() {
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
 
-    // ── SWAP ONLY THE TWO DRAGGED TASKS ──────────────────────────────────────
-    // Previous approach collected ALL siblings and renumbered them all 1,2,3...
-    // That corrupted other assignees' priorities (Person A drag → Person B gets P3, P4).
-    // Fix: just exchange the two tasks' priority/order values — nothing else changes.
-    const dragPriority = Number(dragTask.priority ?? 5);
-    const dropPriority = Number(dropTask.priority ?? 5);
-    const dragOrder = dragTask.order !== undefined ? dragTask.order : dragPriority * 1000;
-    const dropOrder = dropTask.order !== undefined ? dropTask.order : dropPriority * 1000;
+    const dragAssignees = new Set(dragTask.assigneeIds || []);
+    // Which assignee's per-person priority list is being reordered
+    const sharedAssignee = (dropTask.assigneeIds || []).find(a => dragAssignees.has(a)) || null;
 
-    const updates = [
-      { taskId: dragId, order: dropOrder, priority: dropPriority, parentTaskId: parentId },
-      { taskId: dropOnTaskId, order: dragOrder, priority: dragPriority, parentTaskId: parentId },
-    ];
+    // ── CASCADE RENUMBER ──────────────────────────────────────────────────────
+    // Step 1: All siblings at same level sharing any assignee (skip done/cancelled)
+    const siblingList = [...allTaskMapRef.current.values()]
+      .filter(t => {
+        if ((t.parentTaskId || null) !== (parentId || null)) return false;
+        if (["done", "cancelled"].includes(t.status)) return false;
+        return (t.assigneeIds || []).some(a => dragAssignees.has(a));
+      });
+
+    // Step 2: Sort by current per-person priority (fallback to shared priority/order)
+    siblingList.sort((a, b) => {
+      const ap = (sharedAssignee && a.assigneePriorities?.[sharedAssignee] !== undefined)
+        ? a.assigneePriorities[sharedAssignee]
+        : (a.order !== undefined ? a.order : (Number(a.priority ?? 999)) * 1000);
+      const bp = (sharedAssignee && b.assigneePriorities?.[sharedAssignee] !== undefined)
+        ? b.assigneePriorities[sharedAssignee]
+        : (b.order !== undefined ? b.order : (Number(b.priority ?? 999)) * 1000);
+      return ap - bp;
+    });
+
+    // Step 3: Remove drag, re-insert at drop position
+    const withoutDrag = siblingList.filter(t => t.taskId !== dragId);
+    const dropIndex = withoutDrag.findIndex(t => t.taskId === dropOnTaskId);
+    withoutDrag.splice(dropIndex === -1 ? 0 : dropIndex, 0, dragTask);
+
+    // Step 4: Renumber P1, P2, P3... — only tasks whose value actually changed
+    const updates = withoutDrag
+      .map((t, idx) => ({
+        taskId: t.taskId,
+        priority: idx + 1,
+        order: (idx + 1) * 1000,
+        parentTaskId: parentId,
+      }))
+      .filter(u => {
+        const cur = allTaskMapRef.current.get(u.taskId);
+        const curAP = sharedAssignee ? cur?.assigneePriorities?.[sharedAssignee] : cur?.priority;
+        return !cur || curAP !== u.priority || cur.order !== u.order;
+      });
 
     // Block live listener for 8s so optimistic update isn't overwritten
     const now8 = Date.now() + 8000;
@@ -1283,7 +1389,16 @@ export default function TasksPage() {
       const map = new Map(prev.map(t => [t.taskId, t]));
       updates.forEach(u => {
         const t = map.get(u.taskId);
-        if (t) map.set(u.taskId, { ...t, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId });
+        if (t) map.set(u.taskId, {
+          ...t,
+          order: u.order,
+          priority: u.priority,
+          parentTaskId: u.parentTaskId,
+          assigneePriorities: {
+            ...(t.assigneePriorities || {}),
+            ...(sharedAssignee ? { [sharedAssignee]: u.priority } : {}),
+          },
+        });
       });
       return [...map.values()];
     });
@@ -1292,18 +1407,32 @@ export default function TasksPage() {
     updates.forEach(u => {
       const existing = allTaskMapRef.current.get(u.taskId);
       if (existing) allTaskMapRef.current.set(u.taskId, {
-        ...existing, order: u.order, priority: u.priority, parentTaskId: u.parentTaskId,
+        ...existing,
+        order: u.order,
+        priority: u.priority,
+        parentTaskId: u.parentTaskId,
+        assigneePriorities: {
+          ...(existing.assigneePriorities || {}),
+          ...(sharedAssignee ? { [sharedAssignee]: u.priority } : {}),
+        },
       });
     });
 
-    // Persist to Firestore
+    // Persist to Firestore — shared priority/order + per-person assigneePriorities
     try {
       const { writeBatch: _wb, doc: _doc } = await import("firebase/firestore");
       const batch = _wb(firebaseDb);
-      updates.forEach(u => batch.update(
-        _doc(firebaseDb, "cowork_tasks", u.taskId),
-        { order: u.order, priority: u.priority, parentTaskId: u.parentTaskId || null, updatedAt: new Date() }
-      ));
+      updates.forEach(u => {
+        const fields = {
+          order: u.order,
+          priority: u.priority,
+          parentTaskId: u.parentTaskId || null,
+          updatedAt: new Date(),
+        };
+        // Dot-notation: updates only this key, leaves other employees' priorities untouched
+        if (sharedAssignee) fields[`assigneePriorities.${sharedAssignee}`] = u.priority;
+        batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), fields);
+      });
       await batch.commit();
     } catch (e) { console.error("[drag] batch update:", e.message); }
   }, []);
@@ -1317,17 +1446,29 @@ export default function TasksPage() {
 
     // Optimistic update — change local state immediately, no reload needed
     // Also clear `order` so the priority-based sort takes effect instantly
-    setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: p, order: undefined } : t));
-    setSelectedTask(prev => prev?.taskId === taskId ? { ...prev, priority: p, order: undefined } : prev);
+    const curTask = allTaskMapRef.current?.get(taskId);
+    const taskAssignees = curTask?.assigneeIds || [];
+    const newAP = { ...(curTask?.assigneePriorities || {}) };
+    taskAssignees.forEach(aid => { newAP[aid] = p; });
+
+    setAllTasks(prev => prev.map(t => t.taskId === taskId
+      ? { ...t, priority: p, order: undefined, assigneePriorities: newAP }
+      : t));
+    setSelectedTask(prev => prev?.taskId === taskId
+      ? { ...prev, priority: p, order: undefined, assigneePriorities: newAP }
+      : prev);
     // Also update allTaskMap so TblRow subtask sort sees the new priority instantly
     setAllTaskMap(prev => {
       const next = new Map(prev);
       const existing = next.get(taskId);
-      if (existing) next.set(taskId, { ...existing, priority: p, order: undefined });
+      if (existing) next.set(taskId, { ...existing, priority: p, order: undefined, assigneePriorities: newAP });
       return next;
     });
     if (allTaskMapRef.current?.has(taskId)) {
-      allTaskMapRef.current.set(taskId, { ...allTaskMapRef.current.get(taskId), priority: p, order: undefined });
+      allTaskMapRef.current.set(taskId, {
+        ...allTaskMapRef.current.get(taskId),
+        priority: p, order: undefined, assigneePriorities: newAP,
+      });
     }
 
     // Show top-right toast
@@ -1335,10 +1476,10 @@ export default function TasksPage() {
     setTimeout(() => setPriorityToast(null), 2500);
 
     try {
-      await updateDoc(doc(firebaseDb, "cowork_tasks", taskId), {
-        priority: p,
-        updatedAt: new Date(),
-      });
+      // Build update: shared priority + per-person assigneePriorities for every assignee
+      const fsFields = { priority: p, updatedAt: new Date() };
+      taskAssignees.forEach(aid => { fsFields[`assigneePriorities.${aid}`] = p; });
+      await updateDoc(doc(firebaseDb, "cowork_tasks", taskId), fsFields);
     } catch (e) {
       console.error("[priority] update error:", e.message);
       // Revert on failure
@@ -1385,7 +1526,7 @@ export default function TasksPage() {
       console.error("[commit] write error:", e.message);
     } finally {
       // Always pause regardless of commit write success
-      timerPause(taskId, taskTitle);
+      timerPause(taskId, taskTitle, { userReason: commitMessage.trim() || null });
       // If switching to another task, start it now
       const next = commitModal?.nextTaskId;
       const nextTitle = commitModal?.nextTaskTitle;
@@ -2684,11 +2825,19 @@ export default function TasksPage() {
       }
     });
 
-    // Sort each employee's tasks by latest activity (most recent first — WhatsApp style)
-    groups.forEach(g => {
+    // Sort each employee's tasks by their personal assigneePriorities[aid]
+    // Falls back to shared priority/order, then latest activity
+    groups.forEach((g, aid) => {
       g.tasks.sort((a, b) => {
-        const aMs = Math.max(getMs(a.lastChatAt), getMs(a.updatedAt));
-        const bMs = Math.max(getMs(b.lastChatAt), getMs(b.updatedAt));
+        const ap = (a.assigneePriorities?.[aid] !== undefined)
+          ? a.assigneePriorities[aid]
+          : (a.order !== undefined ? a.order / 1000 : Number(a.priority ?? 999));
+        const bp = (b.assigneePriorities?.[aid] !== undefined)
+          ? b.assigneePriorities[aid]
+          : (b.order !== undefined ? b.order / 1000 : Number(b.priority ?? 999));
+        if (ap !== bp) return ap - bp;
+        const aMs = Math.max(getMs(a.lastChatAt || 0), getMs(a.updatedAt || 0));
+        const bMs = Math.max(getMs(b.lastChatAt || 0), getMs(b.updatedAt || 0));
         return bMs - aMs;
       });
     });
@@ -4206,7 +4355,7 @@ em-emoji-picker,
 .gv-tbl-row .col-timer { flex: 0 0 140px !important; width: 140px !important; padding: 0 14px !important; border-right: none !important; display: flex !important; justify-content: center !important; }
 .gv-tbl-row .col-pri   { flex: 0 0 80px !important; width: 80px !important; padding: 0 12px !important; border-right: none !important; display: flex !important; justify-content: center !important; }
 .gv-tbl-row .col-date  { flex: 0 0 130px !important; width: 130px !important; padding: 0 12px !important; border-right: none !important; display: flex !important; justify-content: center !important; }
-.gv-tbl-row .col-status { flex: 0 0 120px !important; width: 120px !important; padding: 0 12px !important; border-right: none !important; display: flex !important; justify-content: center !important; }
+.gv-tbl-row .col-status { flex: 0 0 170px !important; width: 170px !important; padding: 0 12px !important; border-right: none !important; display: flex !important; justify-content: flex-end !important; align-items: center !important; gap: 8px !important; }
 .gv-tbl-row .col-act   { flex: 0 0 34px !important; width: 34px !important; padding: 0 !important; border-right: none !important; }
 
 /* Column header row — visible, styled as a clean label bar */
@@ -4628,6 +4777,115 @@ em-emoji-picker,
       <style>{STYLES}</style>
 
       {/* ── Priority changed toast — top-right ── */}
+
+      {/* ── Drag same-level priority confirmation modal ── */}
+      {dragPriorityModal && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
+          zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center",
+          backdropFilter: "blur(4px)", padding: 16, fontFamily: "var(--font)",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 16, width: "min(460px,96vw)",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.25)", overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid #EDE9FE", background: "#F5F3FF" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 9, background: "#EDE9FE", border: "1px solid #C4B5FD", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>⚑</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#4C1D95" }}>Confirm Priority Change</div>
+                  <div style={{ fontSize: 12, color: "#7C3AED", marginTop: 2 }}>
+                    Moving <strong>"{dragPriorityModal.dragTitle}"</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* Body */}
+            <div style={{ padding: "14px 20px", maxHeight: 300, overflowY: "auto" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                Priority changes
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {dragPriorityModal.preview.map(item => (
+                  <div key={item.taskId} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "7px 10px", borderRadius: 8,
+                    background: item.taskId === dragPriorityModal.dragId ? "#F5F3FF" : "#F8FAFC",
+                    border: item.taskId === dragPriorityModal.dragId ? "1.5px solid #C4B5FD" : "1px solid #E5E7EB",
+                  }}>
+                    <div style={{
+                      fontSize: 12, fontWeight: item.taskId === dragPriorityModal.dragId ? 700 : 500,
+                      color: "#0F172A", flex: 1, minWidth: 0,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {item.taskId === dragPriorityModal.dragId ? "⚡ " : ""}{item.title}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", background: "#F1F5F9", padding: "2px 7px", borderRadius: 99 }}>
+                        P{item.oldP}
+                      </span>
+                      <span style={{ fontSize: 10, color: "#9CA3AF" }}>→</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 99,
+                        color: item.newP < item.oldP ? "#DC2626" : item.newP > item.oldP ? "#16A34A" : "#6B7280",
+                        background: item.newP < item.oldP ? "#FEF2F2" : item.newP > item.oldP ? "#F0FDF4" : "#F1F5F9",
+                      }}>
+                        P{item.newP}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Footer */}
+            <div style={{ padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end", borderTop: "1px solid #F1F5F9" }}>
+              <button
+                onClick={() => setDragPriorityModal(null)}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#F9FAFB", color: "#64748B", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const { dragId, dropOnTaskId, parentId } = dragPriorityModal;
+                  setDragPriorityModal(null);
+                  executeDrop(dragId, dropOnTaskId, parentId);
+                  // ── Priority-shift conflict check — backend reads fresh Firestore ──
+                  // Drag fires in TL browser — no employee timer state here.
+                  // Fire for all assignees with 500ms delay to let executeDrop commit.
+                  setTimeout(async () => {
+                    try {
+                      const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+                      const _token = await firebaseAuth.currentUser?.getIdToken();
+                      const _BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+                      const _assignees = allTaskMapRef.current?.get(dragId)?.assigneeIds || [];
+                      for (const _empId of _assignees) {
+                        fetch(`${_BASE}/cowork/task/p1-conflict-check`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token}` },
+                          body: JSON.stringify({
+                            newP1TaskId: dragId,
+                            employeeId: _empId,
+                            conflictTaskId: null,
+                            assignedBy: employeeId,
+                          }),
+                        }).catch(e => console.error("[drag-priority-conflict]", e.message));
+                      }
+                    } catch (e) {
+                      console.error("[drag-priority-conflict]", e.message);
+                    }
+                  }, 500);
+
+                  // ────────────────────────────────────────────────────────
+                }}
+                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#7C3AED", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Drag cross-level warning modal ── */}
       {dragWarnModal && (
         <div style={{
@@ -4741,7 +4999,6 @@ em-emoji-picker,
             { key: "in_progress", label: "In Progress", color: "#8B5CF6", bg: "#F3E8FF", dot: "#8B5CF6" },
             { key: "done", label: "Done", color: "#16A34A", bg: "#DCFCE7", dot: "#16A34A" },
           ];
-
 
 
           // For employees: show ALL tasks assigned to them (including forwarded subtasks)
@@ -4862,12 +5119,25 @@ em-emoji-picker,
             return 0;
           };
 
+          // Resolve which employee's per-person priority to sort by
+          const _sortEmpId = role === "employee" ? employeeId : (() => {
+            if (!filterEmployee) return null;
+            const lower = filterEmployee.toLowerCase();
+            for (const [eid, ename] of (employeeMap || new Map()).entries()) {
+              if (ename.toLowerCase().includes(lower)) return eid;
+            }
+            return null;
+          })();
+
           filteredRoots.sort((a, b) => {
-            // Prefer explicit `order` (set by drag-drop), else use priority
-            const ao = a.order !== undefined ? a.order : (Number(a.priority ?? 5)) * 1000;
-            const bo = b.order !== undefined ? b.order : (Number(b.priority ?? 5)) * 1000;
-            if (ao !== bo) return ao - bo;
-            // Same priority bucket → newest first
+            // Use per-person assigneePriorities when available, else fall back to shared priority/order
+            const ap = (_sortEmpId && a.assigneePriorities?.[_sortEmpId] !== undefined)
+              ? a.assigneePriorities[_sortEmpId]
+              : (a.order !== undefined ? a.order / 1000 : Number(a.priority ?? 999));
+            const bp = (_sortEmpId && b.assigneePriorities?.[_sortEmpId] !== undefined)
+              ? b.assigneePriorities[_sortEmpId]
+              : (b.order !== undefined ? b.order / 1000 : Number(b.priority ?? 999));
+            if (ap !== bp) return ap - bp;
             return getCreatedMs(b) - getCreatedMs(a);
           });
 
@@ -5089,7 +5359,7 @@ em-emoji-picker,
                   <div className="col-timer" onClick={e => e.stopPropagation()}>
                     {(() => {
                       const isAssigneeOfThis = (t.assigneeIds || []).includes(employeeId);
-                      const canControl = isAssigneeOfThis;
+                      const canControl = isAssigneeOfThis || isCEO || isTL;
                       const canView = isAssigneeOfThis || isCEO || isTL;
                       if (!canView) return null;
                       // Repeat task without timer — show a small repeat badge instead
@@ -5111,13 +5381,52 @@ em-emoji-picker,
                           <span style={{ fontSize: 9, color: "#94A3B8" }}>goal</span>
                         </div>
                       );
-                      // Normal task without timer — show fixed deadline date instead
-                      if (!t.hasTimer && t.fixedDeadline) return (
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#F0FDF4", color: "#166534" }}>📅</span>
-                          <span style={{ fontSize: 9, color: "#94A3B8" }}>{new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
-                        </div>
-                      );
+                      // Fixed-deadline task — date badge + simple play/pause for time tracking
+                      if (!t.hasTimer && t.fixedDeadline) {
+                        const isRunningFD = timerActiveTaskId === t.taskId;
+                        const sessFD = getTimerSession(t.taskId);
+                        const secsFD = getDisplaySeconds(t.taskId);
+                        const fdBlocked = !["confirmed", "in_progress", "done"].includes(t.status) && !isRunningFD;
+                        const fmtFD = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+                        return (
+                          <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#F0FDF4", color: "#166534", whiteSpace: "nowrap" }}>
+                              📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                            </span>
+                            {canControl && (
+                              <button
+                                disabled={fdBlocked}
+                                title={isRunningFD ? "Pause" : fdBlocked ? "Confirm task first" : "Play — track time"}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  if (fdBlocked) return;
+                                  if (isRunningFD) handleTimerPause(t.taskId, t.title);
+                                  else handleTimerStart(t.taskId, t.title);
+                                }}
+                                style={{
+                                  width: 28, height: 28, borderRadius: 99, border: "1.5px solid",
+                                  borderColor: isRunningFD ? "#BBF7D0" : fdBlocked ? "#E5E7EB" : "#BFDBFE",
+                                  background: isRunningFD ? "#DCFCE7" : fdBlocked ? "#F9FAFB" : "#EFF6FF",
+                                  color: isRunningFD ? "#16A34A" : fdBlocked ? "#D1D5DB" : "#3B82F6",
+                                  cursor: fdBlocked ? "not-allowed" : "pointer",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  flexShrink: 0, opacity: fdBlocked ? 0.4 : 1,
+                                }}>
+                                {isRunningFD
+                                  ? <svg width="9" height="11" viewBox="0 0 10 12" fill="currentColor"><rect x="0" y="0" width="3.5" height="12" rx="1" /><rect x="6.5" y="0" width="3.5" height="12" rx="1" /></svg>
+                                  : <svg width="10" height="12" viewBox="0 0 11 13" fill="currentColor"><path d="M0 0L11 6.5L0 13Z" /></svg>
+                                }
+                              </button>
+                            )}
+                            {isRunningFD && (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: "#16A34A", whiteSpace: "nowrap" }}>{fmtFD(secsFD)}</span>
+                            )}
+                            {!isRunningFD && (sessFD?.totalSeconds || 0) > 0 && (
+                              <span style={{ fontSize: 9, color: "#94A3B8", whiteSpace: "nowrap" }}>{fmtFD(secsFD)}</span>
+                            )}
+                          </div>
+                        );
+                      }
                       const isRunning = timerActiveTaskId === t.taskId;
                       const secs = getDisplaySeconds(t.taskId);
                       const sess = getTimerSession(t.taskId);
@@ -5264,7 +5573,37 @@ em-emoji-picker,
                       </span>
                     ) : <span style={{ fontSize: 11, color: "var(--border2)" }}>—</span>}
                   </div>
-                  <div className="col-status"><span style={{ fontSize: 10.5, fontWeight: 600, padding: "5px 12px", borderRadius: 99, color: st.color, background: st.bg, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center" }}>{st.label}</span></div>
+                  {(() => {
+                    const _run = timerActiveTaskId === t.taskId;
+                    const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
+                    const _sec = getDisplaySeconds(t.taskId);
+                    const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+                    return (
+                      <div style={{ width: 40, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }} onClick={e => e.stopPropagation()}>
+                        <button disabled={_blk} title={_run ? "Pause" : _blk ? "Confirm first" : "Play"} onClick={e => { e.stopPropagation(); if (_blk) return; if (_run) handleTimerPause(t.taskId, t.title); else handleTimerStart(t.taskId, t.title); }} style={{ width: 28, height: 28, borderRadius: 99, border: "1.5px solid", borderColor: _run ? "#BBF7D0" : _blk ? "#E5E7EB" : "#BFDBFE", background: _run ? "#DCFCE7" : _blk ? "#F9FAFB" : "#EFF6FF", color: _run ? "#16A34A" : _blk ? "#D1D5DB" : "#3B82F6", cursor: _blk ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: _blk ? 0.4 : 1 }}>
+                          {_run ? <svg width="9" height="11" viewBox="0 0 10 12" fill="currentColor"><rect x="0" y="0" width="3.5" height="12" rx="1" /><rect x="6.5" y="0" width="3.5" height="12" rx="1" /></svg> : <svg width="10" height="12" viewBox="0 0 11 13" fill="currentColor"><path d="M0 0L11 6.5L0 13Z" /></svg>}
+                        </button>
+                        {_sec > 0 && <span style={{ fontSize: 8, color: _run ? "#16A34A" : "#94A3B8", fontWeight: 600 }}>{_fmt(_sec)}</span>}
+                      </div>
+                    );
+                  })()}
+                  <div className="col-status" style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                    {(t.assigneeIds || []).includes(employeeId) && (() => {
+                      const _run = timerActiveTaskId === t.taskId;
+                      const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
+                      const _sec = getDisplaySeconds(t.taskId);
+                      const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }} onClick={e => e.stopPropagation()}>
+                          <button disabled={_blk} title={_run ? "Pause" : _blk ? "Confirm first" : "Play"} onClick={e => { e.stopPropagation(); if (_blk) return; if (_run) handleTimerPause(t.taskId, t.title); else handleTimerStart(t.taskId, t.title); }} style={{ width: 28, height: 28, borderRadius: 99, border: "1.5px solid", borderColor: _run ? "#BBF7D0" : _blk ? "#E5E7EB" : "#BFDBFE", background: _run ? "#DCFCE7" : _blk ? "#F9FAFB" : "#EFF6FF", color: _run ? "#16A34A" : _blk ? "#D1D5DB" : "#3B82F6", cursor: _blk ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: _blk ? 0.4 : 1 }}>
+                            {_run ? <svg width="9" height="11" viewBox="0 0 10 12" fill="currentColor"><rect x="0" y="0" width="3.5" height="12" rx="1" /><rect x="6.5" y="0" width="3.5" height="12" rx="1" /></svg> : <svg width="10" height="12" viewBox="0 0 11 13" fill="currentColor"><path d="M0 0L11 6.5L0 13Z" /></svg>}
+                          </button>
+                          {_sec > 0 && <span style={{ fontSize: 8, color: _run ? "#16A34A" : "#94A3B8", fontWeight: 600 }}>{_fmt(_sec)}</span>}
+                        </div>
+                      );
+                    })()}
+                    <span style={{ fontSize: 10.5, fontWeight: 600, padding: "5px 12px", borderRadius: 99, color: st.color, background: st.bg, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center" }}>{st.label}</span>
+                  </div>
                   <div className="col-act" onClick={e => e.stopPropagation()}>
                     <button style={{ width: 26, height: 26, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-4)" }}
                       onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
@@ -6165,6 +6504,20 @@ em-emoji-picker,
                                   </button>
                                 </>
                               )}
+                              {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && (() => {
+                                const _run = timerActiveTaskId === t.taskId;
+                                const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
+                                const _sec = getDisplaySeconds(t.taskId);
+                                const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+                                return (
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }} onClick={e => e.stopPropagation()}>
+                                    <button disabled={_blk} title={_run ? "Pause" : _blk ? "Confirm first" : "Play — track time"} onClick={e => { e.stopPropagation(); if (_blk) return; if (_run) handleTimerPause(t.taskId, t.title); else handleTimerStart(t.taskId, t.title); }} style={{ width: 28, height: 28, borderRadius: 99, border: "1.5px solid", borderColor: _run ? "#BBF7D0" : _blk ? "#E5E7EB" : "#BFDBFE", background: _run ? "#DCFCE7" : _blk ? "#F9FAFB" : "#EFF6FF", color: _run ? "#16A34A" : _blk ? "#D1D5DB" : "#3B82F6", cursor: _blk ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: _blk ? 0.4 : 1 }}>
+                                      {_run ? <svg width="9" height="11" viewBox="0 0 10 12" fill="currentColor"><rect x="0" y="0" width="3.5" height="12" rx="1" /><rect x="6.5" y="0" width="3.5" height="12" rx="1" /></svg> : <svg width="10" height="12" viewBox="0 0 11 13" fill="currentColor"><path d="M0 0L11 6.5L0 13Z" /></svg>}
+                                    </button>
+                                    {_sec > 0 && <span style={{ fontSize: 8, color: _run ? "#16A34A" : "#94A3B8", fontWeight: 600, whiteSpace: "nowrap" }}>{_fmt(_sec)}</span>}
+                                  </div>
+                                );
+                              })()}
                               <span style={{
                                 fontSize: 11, fontWeight: 500,
                                 color: st.color, background: st.bg,
@@ -8771,7 +9124,6 @@ function FixedDeadlineNegotiateModal({ task, onApprove, onPropose, onAcceptCount
     </>
   );
 }
-
 
 
 

@@ -178,7 +178,7 @@ export default function WorkCommitModal({
           {/* Message input */}
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
-              {isDeadlineReached ? "What did you accomplish?" : "What did you work on?"}{" "}
+              {isDeadlineReached ? "What did you accomplish?" : "Pause Reason — why are you stopping?"}{" "}
               <span style={{ color: "#EF4444" }}>*</span>
             </label>
             <textarea
@@ -276,20 +276,7 @@ export default function WorkCommitModal({
           background: "#FAFAFA",
           display: "flex", gap: 8, flexShrink: 0,
         }}>
-          <button
-            type="button"
-            onClick={() => handleCommitSubmit(true)}
-            disabled={savingCommit || commitUploading}
-            style={{
-              flex: 1, padding: "9px",
-              border: "1px solid #E5E7EB", borderRadius: 6,
-              background: "#fff", color: "#6B7280",
-              fontSize: 12, fontWeight: 500, cursor: savingCommit || commitUploading ? "not-allowed" : "pointer",
-              ...F, opacity: savingCommit || commitUploading ? 0.5 : 1,
-            }}
-          >
-            Skip & Pause
-          </button>
+
           <button
             type="button"
             onClick={() => handleCommitSubmit(false)}

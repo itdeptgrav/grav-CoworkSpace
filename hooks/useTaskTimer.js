@@ -239,11 +239,14 @@ export function useTaskTimer(employeeId, opts = {}) {
         // from the automatic deadline-reached pause. We store it both locally
         // (for the optimistic map) and in Firestore so CEO/TL see the same
         // state and can react (e.g. badge on their task card).
+
         const autoReason = pauseOpts.autoReason || null;
+        const userReason = pauseOpts.userReason || null;
+        const lastPauseReason = userReason || autoReason || null;
 
         // ── Optimistic update: update local map immediately so time stays visible
         // before Firestore onSnapshot fires (avoids flash-to-zero on pause)
-        const updatedSess = { ...(sess || {}), totalSeconds: newTotal, isActive: false, lastStartTime: null, taskTitle, lastPauseReason: autoReason };
+        const updatedSess = { ...(sess || {}), totalSeconds: newTotal, isActive: false, lastStartTime: null, taskTitle, lastPauseReason };
         const nextMap = new Map(sessionMapRef.current);
         nextMap.set(taskId, updatedSess);
         sessionMapRef.current = nextMap;
@@ -254,8 +257,9 @@ export function useTaskTimer(employeeId, opts = {}) {
             isActive: false,
             lastStartTime: null,
             taskTitle,
-            lastPauseReason: autoReason,
+            lastPauseReason,
         });
+
 
         setActiveTaskId(null);
         stopTick();

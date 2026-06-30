@@ -526,7 +526,7 @@ export default function MeetingsPage() {
   const [meets, setMeets] = useState([]);
   const [fetching, setFetching] = useState(true);
   const [search, setSearch] = useState("");
-  const [, setTick] = useState(0);
+  // tick removed — onSnapshot handles real-time without polling
   const [empMap, setEmpMap] = useState({});
   const [summaryModal, setSummaryModal] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
@@ -591,11 +591,6 @@ export default function MeetingsPage() {
 
   const isCEO = role === "ceo";
   const isHost = role === "ceo" || role === "tl";
-
-  useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 30000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     if (!loading && !user) router.push("/");

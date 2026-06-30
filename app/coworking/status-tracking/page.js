@@ -866,6 +866,7 @@ export default function StatusTrackingPage() {
     const [filter, setFilter] = useState("working"); // "working" is default — only show live tasks
     const [selectedEmp, setSelectedEmp] = useState(null); // for modal
     const [lastUpdated, setLastUpdated] = useState(Date.now());
+    const [goalStatuses, setGoalStatuses] = useState([]); // live goal working status
 
     // Only CEO and TL can see this page
     const isCEO = role === "ceo";
@@ -917,6 +918,7 @@ export default function StatusTrackingPage() {
                                 ));
                             }
                         }
+
                         const entry = {
                             title: t.title || tid, dueDate: t.dueDate || null,
                             status: t.status, taskId: tid,
@@ -926,7 +928,10 @@ export default function StatusTrackingPage() {
                             extensions: t.extensions || [],
                             extensionCount: (t.extensions || []).length,
                             lastExtensionSecs: t.lastExtensionSecs || null,
+                            hasTimer: t.hasTimer !== false,
+                            fixedDeadline: t.fixedDeadline || null,
                         };
+
                         tDataMap.set(tid, entry);
                         if (t.title) tDataMap.set(t.title, entry);
                     }
@@ -972,6 +977,43 @@ export default function StatusTrackingPage() {
         });
         return () => unsub();
     }, [employeeId]);
+
+    // ── Live goal status listener ─────────────────────────────────────────────
+    useEffect(() => {
+        if (!employeeId || (!isCEO && !isTL)) return;
+        const colRef = collection(firebaseDb, "cowork_goal_status");
+        const unsub = onSnapshot(colRef, snap => {
+            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const filtered = docs.filter(d => {
+                if (d.employeeId === employeeId) return false; // never show self
+                if (isCEO) return true; // CEO sees all
+                // TL sees only their assigned employees (not other TLs)
+                return assignedEmpIds.includes(d.employeeId);
+            });
+            setGoalStatuses(filtered);
+        }, () => { });
+        return () => unsub();
+    }, [employeeId, isCEO, isTL, assignedEmpIds.join(",")]);
+
+    // ── Fetch missing employee names for goal statuses ────────────────────────
+    useEffect(() => {
+        if (!goalStatuses.length) return;
+        const missing = goalStatuses.filter(gs => !empInfoMap.has(gs.employeeId));
+        if (!missing.length) return;
+        missing.forEach(async (gs) => {
+            try {
+                const snap = await getDoc(doc(firebaseDb, "cowork_employees", gs.employeeId));
+                if (snap.exists()) {
+                    const d = snap.data();
+                    setEmpInfoMap(prev => {
+                        const next = new Map(prev);
+                        next.set(gs.employeeId, { name: d.name || gs.employeeId, department: d.department || "" });
+                        return next;
+                    });
+                }
+            } catch { }
+        });
+    }, [goalStatuses]);
 
     // ── Watch raw sessions for detail modal ─────────────────────────────────────
     useEffect(() => {
@@ -1047,6 +1089,15 @@ export default function StatusTrackingPage() {
 
         const deadlineInfo = getDeadlineInfo(activeTaskDueDate, activeTaskWorkedSecs, activeTaskDeadlineWindow);
 
+        const activeTaskHasTimer = activeTaskData?.hasTimer !== false;
+        const activeTaskFixedDeadline = activeTaskData?.fixedDeadline || null;
+        const activeTaskLastPauseReason = activeTaskId
+            ? (rawSessionsMap.get(empId)?.get(activeTaskId)?.lastPauseReason || null)
+            : null;
+        const activeTaskSessionCount = activeTaskId
+            ? [...(rawSessionsMap.get(empId)?.values() || [])].filter(s => s.taskId === activeTaskId || true).length
+            : 0;
+
         return {
             employeeId: empId, name: info.name, department: info.department,
             profilePicUrl: info.profilePicUrl || "",
@@ -1054,6 +1105,7 @@ export default function StatusTrackingPage() {
             activeSessionBase, activeSessionStart,
             lastTaskTitle, lastActiveAt, totalSecondsAll,
             activeTaskDueDate, activeTaskWorkedSecs, deadlineInfo,
+            activeTaskHasTimer, activeTaskFixedDeadline, activeTaskLastPauseReason,
         };
     });
 
@@ -1236,6 +1288,180 @@ export default function StatusTrackingPage() {
                             </div>
                         ) : (
                             <>
+                                {/* ── GOAL LIVE STATUS section ── */}
+                                {(() => {
+                                    const fdWorking = filtered.filter(e => e.isWorking && !e.activeTaskHasTimer && e.activeTaskFixedDeadline);
+                                    if (!fdWorking.length) return null;
+                                    return (
+                                        <div style={{ marginBottom: 20 }}>
+                                            <div className="st-section">
+                                                <div className="st-section-header" style={{ background: "#F0FDF4", borderBottom: "1px solid #BBF7D0" }}>
+                                                    <span style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0, background: "#16A34A", display: "inline-block", animation: "pulse 2s infinite" }} />
+                                                    <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.07em", color: "#14532D" }}>
+                                                        Task Working Status
+                                                    </span>
+                                                    <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#16A34A", background: "#DCFCE7", border: "1px solid #BBF7D0", padding: "2px 8px", borderRadius: 99 }}>
+                                                        {fdWorking.length} live
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    {fdWorking.map((emp, idx) => {
+                                                        const initls = (emp.name || "?").trim().split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+                                                        const fmtSecs = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+                                                        const workedSecs = emp.activeSessionBase + (emp.activeSessionStart ? Math.floor((Date.now() - emp.activeSessionStart) / 1000) : 0);
+                                                        return (
+                                                            <div key={emp.employeeId} style={{
+                                                                display: "flex", alignItems: "flex-start", gap: 14,
+                                                                padding: "14px 20px",
+                                                                borderBottom: idx < fdWorking.length - 1 ? "1px solid #F1F5F9" : "none",
+                                                                background: "#FAFFFE",
+                                                            }}>
+                                                                {/* Avatar */}
+                                                                <div style={{
+                                                                    width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+                                                                    background: "#DCFCE7", display: "flex", alignItems: "center", justifyContent: "center",
+                                                                    fontSize: 14, fontWeight: 700, color: "#15803D",
+                                                                    border: "2px solid #86EFAC",
+                                                                }}>
+                                                                    {initls}
+                                                                </div>
+                                                                {/* Info */}
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                                                                        <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{emp.name}</span>
+                                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#15803D" }}>
+                                                                            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#15803D", animation: "pulse 1.2s ease-in-out infinite" }} />
+                                                                            Working
+                                                                        </span>
+                                                                    </div>
+                                                                    <div style={{ fontSize: 12, color: "#334155", marginBottom: 2 }}>
+                                                                        <span style={{ fontWeight: 600 }}>Task:</span> {emp.activeTaskTitle}
+                                                                    </div>
+                                                                    {emp.activeTaskFixedDeadline && (
+                                                                        <div style={{ fontSize: 11, color: "#64748B", marginBottom: 4 }}>
+                                                                            <span style={{ fontWeight: 600 }}>Deadline:</span> {new Date(emp.activeTaskFixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                                                        </div>
+                                                                    )}
+                                                                    {emp.activeTaskLastPauseReason && (
+                                                                        <div style={{ marginTop: 4, marginBottom: 4 }}>
+                                                                            <span style={{ fontSize: 11, color: "#92400E", background: "#FEF9C3", border: "1px solid #FDE68A", borderRadius: 5, padding: "3px 9px", display: "inline-block" }}>
+                                                                                Reason: {emp.activeTaskLastPauseReason}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                                                        <span>Working now ·</span>
+                                                                        <LiveTimer totalSeconds={emp.activeSessionBase} lastStartTime={emp.activeSessionStart} isActive={true} />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {goalStatuses.length > 0 && (
+                                    <div style={{ marginBottom: 20 }}>
+                                        <div className="st-section">
+                                            <div className="st-section-header" style={{ background: "#EFF6FF", borderBottom: "1px solid #BFDBFE" }}>
+                                                <span style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0, background: "#2563EB", display: "inline-block", animation: "pulse 2s infinite" }} />
+                                                <span style={{ fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.07em", color: "#1E3A8A" }}>
+                                                    Goal Working Status
+                                                </span>
+                                                <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#2563EB", background: "#DBEAFE", border: "1px solid #BFDBFE", padding: "2px 8px", borderRadius: 99 }}>
+                                                    {goalStatuses.length} live
+                                                </span>
+                                            </div>
+                                            <div>
+                                                {goalStatuses.map((gs, idx) => {
+                                                    const isWorking = gs.status === "working";
+                                                    const isPaused = gs.status === "paused";
+                                                    return (
+                                                        <div key={gs.employeeId} style={{
+                                                            display: "flex", alignItems: "flex-start", gap: 14,
+                                                            padding: "14px 20px",
+                                                            borderBottom: idx < goalStatuses.length - 1 ? "1px solid #F1F5F9" : "none",
+                                                            background: isWorking ? "#FAFFFE" : isPaused ? "#FFFBF0" : "#fff",
+                                                        }}>
+                                                            {/* Avatar */}
+                                                            <div style={{
+                                                                width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+                                                                background: isWorking ? "#DBEAFE" : "#FEF3C7",
+                                                                display: "flex", alignItems: "center", justifyContent: "center",
+                                                                fontSize: 14, fontWeight: 700,
+                                                                color: isWorking ? "#1E40AF" : "#92400E",
+                                                                border: `2px solid ${isWorking ? "#93C5FD" : "#FCD34D"}`,
+                                                            }}>
+                                                                {((empInfoMap.get(gs.employeeId)?.name || gs.employeeName || "?")).trim().split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase()}
+                                                            </div>
+
+                                                            {/* Info */}
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                                                                    <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                                                                        {empInfoMap.get(gs.employeeId)?.name || gs.employeeName || gs.employeeId}
+                                                                    </span>
+                                                                    {/* Status badge */}
+                                                                    {isWorking ? (
+                                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#15803D" }}>
+                                                                            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#15803D", animation: "pulse 1.2s ease-in-out infinite" }} />
+                                                                            Working
+                                                                        </span>
+                                                                    ) : isPaused ? (
+                                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 9px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#B45309" }}>
+                                                                            ⏸ Paused
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                                {/* Goal + component info */}
+                                                                <div style={{ fontSize: 12, color: "#334155", marginBottom: 2 }}>
+                                                                    <span style={{ fontWeight: 600 }}>Goal:</span> {gs.taskTitle}
+                                                                </div>
+                                                                <div style={{ fontSize: 12, color: "#334155", marginBottom: isPaused && gs.pauseReason ? 4 : 0 }}>
+                                                                    <span style={{ fontWeight: 600 }}>Component:</span> {gs.componentName}
+                                                                </div>
+                                                                {/* Pause reason + files */}
+                                                                {isPaused && gs.pauseReason && (
+                                                                    <div style={{ marginTop: 4 }}>
+                                                                        <div style={{ fontSize: 11, color: "#92400E", background: "#FEF9C3", border: "1px solid #FDE68A", borderRadius: 5, padding: "3px 9px", display: "inline-block" }}>
+                                                                            Reason: {gs.pauseReason}
+                                                                        </div>
+                                                                        {gs.pauseFiles?.length > 0 && (
+                                                                            <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                                                                {gs.pauseFiles.map((f, fi) => (
+                                                                                    <a key={fi} href={f.driveUrl} target="_blank" rel="noreferrer"
+                                                                                        style={{ fontSize: 10, color: "#2563EB", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 4, padding: "2px 7px", textDecoration: "none" }}>
+                                                                                        📎 {f.name}
+                                                                                    </a>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {/* Time + session count */}
+                                                                {gs.startedAt && (
+                                                                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                                                        <span>{isWorking ? "Started" : "Paused"} · {new Date(gs.pausedAt || gs.startedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+                                                                        {(gs.totalSeconds > 0 || gs.sessionCount > 0) && (
+                                                                            <span style={{ color: "#64748B", fontWeight: 500 }}>
+                                                                                {gs.sessionCount > 0 ? `${gs.sessionCount} session${gs.sessionCount !== 1 ? "s" : ""}` : ""}
+                                                                                {gs.totalSeconds > 0 && ` · ${Math.floor(gs.totalSeconds / 3600) > 0 ? Math.floor(gs.totalSeconds / 3600) + "h " : ""}${Math.floor((gs.totalSeconds % 3600) / 60)}m total`}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* ── WORKING NOW section ── */}
                                 {(filter === "all" || filter === "working") && (
                                     <div style={{ marginBottom: 20 }}>

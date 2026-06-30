@@ -2,6 +2,34 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 
+// ── Goal Status Firestore helpers ─────────────────────────────────────────────
+async function writeGoalStatus(employeeId, data) {
+  try {
+    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+    const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
+    await setDoc(doc(firebaseDb, "cowork_goal_status", employeeId), {
+      ...data, employeeId, updatedAt: serverTimestamp(),
+    });
+  } catch (e) { console.error("[writeGoalStatus]", e.message); }
+}
+async function clearGoalStatus(employeeId) {
+  try {
+    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+    const { doc, deleteDoc } = await import("firebase/firestore");
+    await deleteDoc(doc(firebaseDb, "cowork_goal_status", employeeId));
+  } catch (e) { console.error("[clearGoalStatus]", e.message); }
+}
+
+
+async function getEmployeeName(employeeId) {
+  try {
+    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+    const { doc, getDoc } = await import("firebase/firestore");
+    const snap = await getDoc(doc(firebaseDb, "cowork_employees", employeeId));
+    return snap.exists() ? (snap.data().name || employeeId) : employeeId;
+  } catch { return employeeId; }
+}
+
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 function Modal({ children }) {
@@ -634,6 +662,140 @@ function FlowEditBox({ idx, comp, onSave, onCancel, isNew, existingDeadlines = [
   );
 }
 
+// ── Pause Reason Modal ────────────────────────────────────────────────────────
+function PauseModal({ comp, goalStatus, onConfirm, onCancel }) {
+  const [reason, setReason] = useState("");
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef(null);
+
+  const sessionStart = goalStatus?.startedAt ? new Date(goalStatus.startedAt) : null;
+  const [elapsed, setElapsed] = useState(sessionStart ? Math.floor((Date.now() - sessionStart.getTime()) / 1000) : 0);
+  useEffect(() => {
+    if (!sessionStart) return;
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - sessionStart.getTime()) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const prevTotal = goalStatus?.totalSeconds || 0;
+  const fmtTime = (s) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${sec}s`;
+    return `${sec}s`;
+  };
+
+  const handleFiles = async (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!picked.length) return;
+    setUploading(true); setErr("");
+    try { const u = await Promise.all(picked.map(f => uploadFileToDrive(f))); setFiles(p => [...p, ...u]); }
+    catch (ex) { setErr(ex.message); }
+    finally { setUploading(false); }
+  };
+
+  const history = comp?.history || [];
+
+  return (
+    <Modal>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 99998 }} onClick={onCancel} />
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0,
+        width: "min(420px,100vw)", background: T.white,
+        borderLeft: `1px solid ${T.border}`,
+        boxShadow: "-4px 0 20px rgba(0,0,0,0.1)",
+        zIndex: 99999, display: "flex", flexDirection: "column", fontFamily: "inherit",
+      }}>
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>⏸ Pause Work</div>
+            <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Pausing: <strong>{comp?.heading}</strong></div>
+          </div>
+          <button onClick={onCancel} style={{ width: 26, height: 26, borderRadius: 5, border: `1px solid ${T.border}`, background: T.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: T.textSub, flexShrink: 0 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        {sessionStart && (
+          <div style={{ padding: "8px 16px", background: "#FFFBEB", borderBottom: "1px solid #FDE68A", flexShrink: 0 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#92400E" }}>
+              This session: {fmtTime(elapsed)}
+              {prevTotal > 0 && ` · Total so far: ${fmtTime(prevTotal + elapsed)}`}
+              {goalStatus?.sessionCount > 0 && ` · Session #${goalStatus.sessionCount + 1}`}
+            </span>
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={lbl}>Pause Reason (required)</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)}
+              placeholder="Why are you pausing work on this component?"
+              rows={3} autoFocus style={{ ...inp, resize: "vertical", lineHeight: 1.6 }}
+              onFocus={e => e.target.style.borderColor = T.primary}
+              onBlur={e => e.target.style.borderColor = T.border} />
+          </div>
+
+          <div>
+            <label style={lbl}>Attachments (optional — any file type)</label>
+            <input ref={fileRef} type="file" multiple accept="*/*" onChange={handleFiles} style={{ display: "none" }} />
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              style={{ ...inp, textAlign: "center", cursor: "pointer", color: uploading ? T.primary : T.textSub, background: T.bg }}>
+              {uploading ? "Uploading…" : "+ Attach files"}
+            </button>
+            {files.length > 0 && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                {files.map((f, fi) => (
+                  <div key={fi} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: T.radius }}>
+                    <a href={f.driveUrl} target="_blank" rel="noreferrer"
+                      style={{ flex: 1, fontSize: 11, color: T.primary, textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</a>
+                    <button onClick={() => setFiles(p => p.filter((_, i) => i !== fi))}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: T.textMuted, fontSize: 14 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {history.length > 0 && (
+            <div>
+              <label style={lbl}>Component History ({history.length} events)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {[...history].reverse().map((h, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, paddingBottom: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: "50%", background: T.primary, marginTop: 4 }} />
+                      {i < history.length - 1 && <div style={{ width: 1, flex: 1, background: T.border, margin: "4px 0" }} />}
+                    </div>
+                    <div style={{ flex: 1, paddingTop: 1 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: T.text }}>{h.label}</div>
+                      <div style={{ fontSize: 10, color: T.textMuted }}>{fmtReadable(h.at)}</div>
+                      {h.by && <div style={{ fontSize: 10, color: T.textSub }}>by {h.by}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {err && <div style={{ padding: "7px 10px", background: T.dangerBg, border: `1px solid ${T.dangerBorder}`, borderRadius: T.radius, fontSize: 11, color: T.danger }}>{err}</div>}
+        </div>
+
+        <div style={{ padding: "13px 16px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 10, flexShrink: 0, background: T.bg }}>
+          <Btn onClick={onCancel} variant="ghost" style={{ flex: 1, padding: "9px" }}>Cancel</Btn>
+          <Btn onClick={() => { if (!reason.trim()) { setErr("Reason is required."); return; } onConfirm(reason.trim(), files, elapsed); }}
+            disabled={uploading}
+            variant={reason.trim() && !uploading ? "amber" : "ghost"}
+            style={{ flex: 2, padding: "9px" }}>
+            ⏸ Pause Work
+          </Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Add Button ────────────────────────────────────────────────────────────────
 function AddBtn({ onClick }) {
   return (
@@ -655,6 +817,7 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
   isGoldTask = false,
   isMultiUserGold = false,
   viewingUserId = "",
+  goalStatus = null, onStart = null, onPause = null,
   onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject, onReportSubmitted }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
@@ -745,6 +908,42 @@ function NodeCard({ comp, idx, isDone, canEdit, isHead, taskId, allComps, isFina
             )}
           </div>
         )}
+
+        {/* ── Goal Live Status: Start / Pause buttons (assignee only) ── */}
+        {canMarkDone && !isDoneDisplay && !isPendingApproval && onStart && onPause && (() => {
+          const isWorkingHere = goalStatus?.status === "working" && goalStatus?.componentId === comp.id;
+          const isPausedHere = goalStatus?.status === "paused" && goalStatus?.componentId === comp.id;
+          const isWorkingElsewhere = goalStatus?.status === "working" && goalStatus?.componentId !== comp.id;
+          const isPausedElsewhere = goalStatus?.status === "paused" && goalStatus?.componentId !== comp.id;
+          return (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              {isWorkingHere ? (
+                <>
+                  <style>{`@keyframes gs_pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#15803D" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#15803D", animation: "gs_pulse 1.2s ease-in-out infinite" }} />
+                    Working
+                  </span>
+                  <Btn onClick={() => onPause(comp)} variant="amber" style={{ padding: "3px 10px", fontSize: 11 }}>⏸ Pause</Btn>
+                </>
+              ) : isPausedHere ? (
+                <>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 99, fontSize: 10, fontWeight: 700, color: "#B45309" }}>
+                    ⏸ Paused
+                  </span>
+                  {goalStatus?.pauseReason && <span style={{ fontSize: 10, color: T.textMuted, fontStyle: "italic" }}>"{goalStatus.pauseReason}"</span>}
+                  <Btn onClick={() => onStart(comp)} variant="success" style={{ padding: "3px 10px", fontSize: 11 }}>▶ Resume</Btn>
+                </>
+              ) : (isWorkingElsewhere || isPausedElsewhere) ? (
+                <span style={{ fontSize: 10, color: T.textMuted, padding: "3px 9px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 99 }}>
+                  ⚠ Finish active component first
+                </span>
+              ) : (
+                <Btn onClick={() => onStart(comp)} variant="primary" style={{ padding: "3px 10px", fontSize: 11 }}>▶ Start</Btn>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Title + description */}
         <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 3, lineHeight: 1.35, paddingRight: 30 }}>{comp.heading}</div>
@@ -883,6 +1082,7 @@ function InteractiveFlowchart({
   canMarkDoneOnly,
   isGoldTask = false, isMultiUserGold = false, viewingUserId = "", setViewingUserId = null,
   taskAssigneeIds = [],
+  goalStatus = null, onStart = null, onPause = null,
   onSeen, onEdit, onDelete, onMarkDone, onMarkUndo, onPendingApproval, onReject,
   onAddBetween, onSaveNew, onSaveEdit, onCancelEdit, onCancelAdd,
   onDeleteAll, onToggleEditMode, onRefresh,
@@ -1023,6 +1223,7 @@ function InteractiveFlowchart({
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
+                                goalStatus={goalStatus} onStart={onStart} onPause={onPause}
                                 onReportSubmitted={onRefresh} />
                             )}
                           </div>
@@ -1047,6 +1248,7 @@ function InteractiveFlowchart({
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
+                                goalStatus={goalStatus} onStart={onStart} onPause={onPause}
                                 onReportSubmitted={onRefresh} />
                             )}
                           </div>
@@ -1064,6 +1266,7 @@ function InteractiveFlowchart({
                                 onEdit={() => onEdit(i)} onDelete={() => onDelete(i)}
                                 onMarkDone={() => onMarkDone(i)} onMarkUndo={() => onMarkUndo(i)}
                                 onPendingApproval={() => onPendingApproval(i)} onReject={() => onReject(i)}
+                                goalStatus={goalStatus} onStart={onStart} onPause={onPause}
                                 onReportSubmitted={onRefresh} />
                             )}
                           </div>
@@ -1135,6 +1338,11 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   const [loading, setLoading] = useState(true);
   const [saveErr, setSaveErr] = useState("");
   const [editingMode, setEditingMode] = useState(false);
+  const approvingRef = useRef(false); // prevents double-click on Approve
+
+  // ── Goal live status ───────────────────────────────────────────────────────
+  const [goalStatus, setGoalStatus] = useState(null);
+  const [pauseModal, setPauseModal] = useState(null); // { comp } | null
   // Goal SOP settings: weight % and points for the final node
   const [goalTotalPoints, setGoalTotalPoints] = useState(0);     // total points pool for the whole goal task
   const [goalFinalWeightPct, setGoalFinalWeightPct] = useState(0); // weight % of the final/last node
@@ -1236,6 +1444,22 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Subscribe to this employee's goal status in Firestore ─────────────────
+  useEffect(() => {
+    if (!currentEmployeeId || !canMarkDoneOnly) return;
+    let unsub;
+    (async () => {
+      const { firebaseDb } = await import("../../../lib/coworkFirebase");
+      const { doc, onSnapshot } = await import("firebase/firestore");
+      unsub = onSnapshot(
+        doc(firebaseDb, "cowork_goal_status", currentEmployeeId),
+        snap => setGoalStatus(snap.exists() ? snap.data() : null),
+        () => { }
+      );
+    })();
+    return () => { if (unsub) unsub(); };
+  }, [currentEmployeeId, canMarkDoneOnly]);
+
   // Re-distribute points/weight whenever SOP settings or components change
   useEffect(() => {
     if (!goalTotalPoints && !goalFinalWeightPct) return;
@@ -1274,8 +1498,8 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
       createdAt: now, history: [{ ...entry, by: empName }],
     };
     const updated = [...components];
-    // Always insert before the final node
-    const insertIdx = Math.min(afterIdx + 1, updated.length - 1);
+    // Insert after the clicked position
+    const insertIdx = afterIdx + 1;
     updated.splice(insertIdx, 0, newComp);
     // Gold Tasks: manual weightage per component — don't auto-redistribute
     const withWeight = task.isGoldTask ? updated : redistributeWeights(updated);
@@ -1315,6 +1539,8 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
   };
 
   const handleMarkDone = async (idx) => {
+    if (approvingRef.current) return; // block double execution
+    approvingRef.current = true;
     const nowISO = new Date().toISOString();
     const now = fmtDatetime(nowISO);
     const comp = components[idx];
@@ -1376,6 +1602,15 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
     setComponents(updatedComponents);
     persist(updatedComponents, submitted);
 
+    // ── Auto-clear goal status for the assignee when component is marked done ─
+    // Use assignee ID (not current user) — TL approves but employee's status must clear
+    const assigneeToClean = isMultiUserGold
+      ? viewingUserId
+      : (task.assigneeIds?.[0] || null);
+    if (assigneeToClean) {
+      await clearGoalStatus(assigneeToClean);
+    }
+
     // ── Credit points — skip entirely if deadline was missed ──────────────────
     const pts = comp.points || 0;
     if (pts > 0 && !isLate) {
@@ -1404,8 +1639,10 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
             }),
           });
         }
+
       } catch (e) { console.error("[goal-credit]", e.message); }
     }
+    approvingRef.current = false;
   };
 
   const handlePendingApproval = async () => { await load(); };
@@ -1422,6 +1659,41 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
     const entry = { type: "undone", label: "Done Undone", at: now, by: null, changes: [] };
     const u = components.map((c, i) => i === idx ? { ...c, status: "pending", doneAt: null, history: [...(c.history || []), entry] } : c);
     setComponents(u); persist(u, submitted);
+  };
+
+  // ── Goal status handlers ──────────────────────────────────────────────────
+  const handleStart = async (comp) => {
+    if (!currentEmployeeId) return;
+    const isSameComp = goalStatus?.componentId === comp.id;
+    await writeGoalStatus(currentEmployeeId, {
+      taskId: task.taskId, taskTitle: task.title || "",
+      componentId: comp.id, componentName: comp.heading || "",
+      employeeName: currentEmployeeName || await getEmployeeName(currentEmployeeId) || currentEmployeeId || "",
+      tlId: task.assignedBy || "",
+      status: "working", pauseReason: "", pauseFiles: [],
+      startedAt: new Date().toISOString(), pausedAt: null,
+      totalSeconds: isSameComp ? (goalStatus?.totalSeconds || 0) : 0,
+      sessionCount: isSameComp ? (goalStatus?.sessionCount || 0) : 0,
+    });
+  };
+
+  const handlePauseConfirm = async (comp, reason, files, sessionDuration) => {
+    if (!currentEmployeeId) return;
+    setPauseModal(null);
+    const newTotal = (goalStatus?.totalSeconds || 0) + (sessionDuration || 0);
+    const newCount = (goalStatus?.sessionCount || 0) + 1;
+    await writeGoalStatus(currentEmployeeId, {
+      taskId: task.taskId, taskTitle: task.title || "",
+      componentId: comp.id, componentName: comp.heading || "",
+      employeeName: currentEmployeeName || await getEmployeeName(currentEmployeeId) || currentEmployeeId || "",
+      tlId: task.assignedBy || "",
+      status: "paused", pauseReason: reason,
+      pauseFiles: files || [],
+      startedAt: goalStatus?.startedAt || new Date().toISOString(),
+      pausedAt: new Date().toISOString(),
+      totalSeconds: newTotal,
+      sessionCount: newCount,
+    });
   };
 
   const handleFinalSubmit = async () => {
@@ -1447,6 +1719,16 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
 
   return (
     <div style={{ padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", flex: 1 }}>
+
+      {/* ── Pause reason panel ── */}
+      {pauseModal && (
+        <PauseModal
+          comp={pauseModal.comp}
+          goalStatus={goalStatus}
+          onConfirm={(reason, files, sessionDuration) => handlePauseConfirm(pauseModal.comp, reason, files, sessionDuration)}
+          onCancel={() => setPauseModal(null)}
+        />
+      )}
 
       {/* ── Add Component slider ── */}
       {addingAfter !== null && (
@@ -1494,6 +1776,9 @@ function ActivitiesSection({ task, isAssignee, isCEO, isTL, currentEmployeeId, c
         viewingUserId={viewingUserId}
         setViewingUserId={setViewingUserId}
         taskAssigneeIds={task.assigneeIds || []}
+        goalStatus={goalStatus}
+        onStart={handleStart}
+        onPause={(comp) => setPauseModal({ comp })}
         onSeen={handleSeen}
         onEdit={(i) => { setEditingIdx(i); setAddingAfter(null); }}
         onDelete={handleDelete} onMarkDone={handleMarkDone} onMarkUndo={handleMarkUndo}

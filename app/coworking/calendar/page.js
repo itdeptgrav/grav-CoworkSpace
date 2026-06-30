@@ -271,11 +271,19 @@ export default function WorkloadPage() {
                             <Avatar name={emp.name} />
 
                             <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{
-                                    fontSize: 14, fontWeight: 500, color: "#202124",
-                                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-                                }}>
-                                    {emp.name}
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <div style={{
+                                        fontSize: 14, fontWeight: 500, color: "#202124",
+                                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                                    }}>
+                                        {emp.name}
+                                    </div>
+                                    <button
+                                        onClick={e => { e.stopPropagation(); router.push(`/coworking/calendar/${emp.employeeId}`); }}
+                                        title="View task calendar"
+                                        style={{ background: "#E8F0FE", border: "none", borderRadius: 6, padding: "2px 8px", fontSize: 11, color: "#1a73e8", cursor: "pointer", fontWeight: 500, flexShrink: 0 }}>
+                                        📅 Calendar
+                                    </button>
                                 </div>
                                 <div style={{ fontSize: 12, color: "#5f6368", marginTop: 1 }}>
                                     {emp.department}
