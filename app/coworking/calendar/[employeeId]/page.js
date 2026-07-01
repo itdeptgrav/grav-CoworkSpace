@@ -201,8 +201,8 @@ function getBarStyle(task, date) {
     const end = isTaskEnd(task, date);
     const isSingleDay = start && end;
 
-    let marginLeft = start ? 0 : -1;
-    let marginRight = end ? 0 : -1;
+    let marginLeft = start ? 0 : -3;
+    let marginRight = end ? 0 : -3;
     let width = "100%";
 
     if (!isSingleDay) {

@@ -15,6 +15,7 @@ import CreateTaskModal from "../../../components/coworking/tasks/CreateTaskModal
 import SelfAssignTaskModal from "../../../components/coworking/tasks/SelfAssignTaskModal";
 import ForwardTaskModal from "../../../components/coworking/tasks/ForwardTaskModal";
 import DailyReportModal from "../../../components/coworking/tasks/DailyReportModal";
+import PriorityChangeAckModal from "../../../components/coworking/tasks/PriorityChangeAckModal";
 import EditDeadlineModal from "../../../components/coworking/tasks/EditDeadlineModal";
 import SubmitCompletionModal from "../../../components/coworking/tasks/SubmitCompletionModal";
 import ReviewCompletionModal from "../../../components/coworking/tasks/ReviewCompletionModal";
@@ -972,6 +973,7 @@ export default function TasksPage() {
 
   // Drag same-level priority confirmation modal
   const [dragPriorityModal, setDragPriorityModal] = useState(null);
+  const [priorityChangeReason, setPriorityChangeReason] = useState("");
   // { dragId, dropOnTaskId, parentId, dragTitle, preview: [{taskId, title, oldP, newP, changed}] }
 
   // ── Task Timer (start/pause per task, one active at a time) ─────────────────
@@ -1042,26 +1044,6 @@ export default function TasksPage() {
       await timerPause(_conflictTaskId, _runningTitle, { autoReason: "switched_task" });
     }
 
-    // ── P1 CONFLICT CHECK — backend decides priority, reads fresh Firestore ──
-    if (_conflictTaskId) {
-      try {
-        const { firebaseAuth } = await import("../../../lib/coworkFirebase");
-        const _token = await firebaseAuth.currentUser?.getIdToken();
-        const _BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-        fetch(`${_BASE}/cowork/task/p1-conflict-check`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token}` },
-          body: JSON.stringify({
-            newP1TaskId: newTaskId,
-            employeeId,
-            conflictTaskId: _conflictTaskId,
-          }),
-        }).catch(e => console.error("[p1-conflict-check]", e.message));
-      } catch (e) {
-        console.error("[p1-conflict-check]", e.message);
-      }
-    }
-    // ──────────────────────────────────────────────────────────────────────
 
     // ── Extension-start detection ──────────────────────────────────────
     // If the task has awaitingExtensionStart=true, this is the FIRST start
@@ -4779,6 +4761,14 @@ em-emoji-picker,
       {/* ── Priority changed toast — top-right ── */}
 
       {/* ── Drag same-level priority confirmation modal ── */}
+      <PriorityChangeAckModal
+        employeeId={employeeId}
+        tasks={allTasks}
+        timerActiveTaskId={timerActiveTaskId}
+        timerSessionMap={timerSessionMap}
+        timerPause={timerPause}
+      />
+
       {dragPriorityModal && (
         <div style={{
           position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)",
@@ -4837,22 +4827,47 @@ em-emoji-picker,
                   </div>
                 ))}
               </div>
+              <div style={{ marginTop: 14 }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 6 }}>
+                  Reason for this change <span style={{ color: "#DC2626" }}>*</span>
+                </label>
+                <textarea
+                  value={priorityChangeReason}
+                  onChange={e => setPriorityChangeReason(e.target.value)}
+                  placeholder="e.g. Client escalation, needs to ship today"
+                  rows={2}
+                  style={{
+                    width: "100%", padding: "8px 10px", borderRadius: 8,
+                    border: "1.5px solid #E5E7EB", fontSize: 13, fontFamily: "inherit",
+                    resize: "vertical", boxSizing: "border-box",
+                  }}
+                />
+              </div>
             </div>
             {/* Footer */}
             <div style={{ padding: "12px 20px 16px", display: "flex", gap: 8, justifyContent: "flex-end", borderTop: "1px solid #F1F5F9" }}>
               <button
-                onClick={() => setDragPriorityModal(null)}
+                onClick={() => { setDragPriorityModal(null); setPriorityChangeReason(""); }}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1.5px solid #E5E7EB", background: "#F9FAFB", color: "#64748B", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
                 Cancel
               </button>
               <button
+                disabled={!priorityChangeReason.trim()}
                 onClick={async () => {
                   const { dragId, dropOnTaskId, parentId } = dragPriorityModal;
+                  const _reasonText = priorityChangeReason.trim();
+
+                  // OLD priorities (pre-drop) — for history entry display only
+                  const _oldPriorities = {};
+                  allTaskMapRef.current?.forEach((t, tid) => { _oldPriorities[tid] = Number(t.priority) || 99; });
+                  // NEW priorities (post-drop) — from preview, always correct, no Firestore race
+                  const _newPriorities = {};
+                  dragPriorityModal.preview.forEach(p => { _newPriorities[p.taskId] = p.newP; });
+                  const _newP1Priority = dragPriorityModal.preview.find(p => p.taskId === dragId)?.newP ?? 1;
+
                   setDragPriorityModal(null);
+                  setPriorityChangeReason("");
                   executeDrop(dragId, dropOnTaskId, parentId);
-                  // ── Priority-shift conflict check — backend reads fresh Firestore ──
-                  // Drag fires in TL browser — no employee timer state here.
-                  // Fire for all assignees with 500ms delay to let executeDrop commit.
                   setTimeout(async () => {
                     try {
                       const { firebaseAuth } = await import("../../../lib/coworkFirebase");
@@ -4868,6 +4883,11 @@ em-emoji-picker,
                             employeeId: _empId,
                             conflictTaskId: null,
                             assignedBy: employeeId,
+                            assignedByName: employeeName,
+                            reason: _reasonText,
+                            oldPriorities: _oldPriorities,
+                            newPriorities: _newPriorities,
+                            newP1Priority: _newP1Priority,
                           }),
                         }).catch(e => console.error("[drag-priority-conflict]", e.message));
                       }
@@ -4875,10 +4895,14 @@ em-emoji-picker,
                       console.error("[drag-priority-conflict]", e.message);
                     }
                   }, 500);
-
-                  // ────────────────────────────────────────────────────────
                 }}
-                style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#7C3AED", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                style={{
+                  padding: "8px 20px", borderRadius: 8, border: "none",
+                  background: priorityChangeReason.trim() ? "#7C3AED" : "#D1D5DB",
+                  color: "#fff", fontSize: 13, fontWeight: 700,
+                  cursor: priorityChangeReason.trim() ? "pointer" : "not-allowed",
+                  fontFamily: "inherit",
+                }}>
                 Confirm
               </button>
             </div>
@@ -4929,7 +4953,35 @@ em-emoji-picker,
               <button onClick={() => {
                 const { dragId, dropOnTaskId, newParentId } = dragWarnModal;
                 setDragWarnModal(null);
-                executeDrop(dragId, dropOnTaskId, newParentId);
+                // Route through priority modal so reason is collected and conflict check fires
+                const _dragTask = allTaskMapRef.current?.get(dragId);
+                const _dropTask = allTaskMapRef.current?.get(dropOnTaskId);
+                if (_dragTask && _dropTask) {
+                  const _dragAssignees = new Set(_dragTask.assigneeIds || []);
+                  const _sharedAssignee = (_dropTask.assigneeIds || []).find(a => _dragAssignees.has(a)) || null;
+                  const _siblings = [...allTaskMapRef.current.values()]
+                    .filter(t => {
+                      if ((t.parentTaskId || null) !== (newParentId || null)) return false;
+                      if (["done", "cancelled"].includes(t.status)) return false;
+                      return (t.assigneeIds || []).some(a => _dragAssignees.has(a));
+                    })
+                    .sort((a, b) => {
+                      const ap = (_sharedAssignee && a.assigneePriorities?.[_sharedAssignee] !== undefined) ? a.assigneePriorities[_sharedAssignee] : (a.order !== undefined ? a.order : (Number(a.priority ?? 999)) * 1000);
+                      const bp = (_sharedAssignee && b.assigneePriorities?.[_sharedAssignee] !== undefined) ? b.assigneePriorities[_sharedAssignee] : (b.order !== undefined ? b.order : (Number(b.priority ?? 999)) * 1000);
+                      return ap - bp;
+                    });
+                  const _withoutDrag = _siblings.filter(t => t.taskId !== dragId);
+                  const _dropIdx = _withoutDrag.findIndex(t => t.taskId === dropOnTaskId);
+                  _withoutDrag.splice(_dropIdx === -1 ? 0 : _dropIdx, 0, _dragTask);
+                  const _preview = _withoutDrag.map((t, idx) => {
+                    const oldP = _sharedAssignee ? (t.assigneePriorities?.[_sharedAssignee] ?? t.priority ?? 999) : (t.priority ?? 999);
+                    const newP = idx + 1;
+                    return { taskId: t.taskId, title: t.title || t.taskId, oldP, newP, changed: Number(oldP) !== newP };
+                  }).filter(t => t.changed || t.taskId === dragId);
+                  setDragPriorityModal({ dragId, dropOnTaskId, parentId: newParentId, dragTitle: _dragTask.title || dragId, preview: _preview });
+                } else {
+                  executeDrop(dragId, dropOnTaskId, newParentId);
+                }
               }}
                 style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#D97706", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                 Yes, move it

@@ -54,14 +54,14 @@ async function callRework(taskId, reworkReason, waiveDeduction = false) {
 // ── Confirmation popup for score impact ─────────────────────────────────────
 function C1ConfirmPopup({ title, color, lines, onConfirm, onCancel, confirmLabel, busy, confirmMode, onWaiveRework }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: "min(380px,90vw)", background: "#fff", borderRadius: 10, boxShadow: "0 8px 40px rgba(0,0,0,0.18)", overflow: "hidden", ...F }}>
+    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(420px,100vw)", zIndex: 9200, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, background: "#fff", borderLeft: "1px solid #E5E7EB", boxShadow: "-6px 0 32px rgba(15,23,42,0.18)", overflow: "hidden", display: "flex", flexDirection: "column", ...F }}>
         {/* Header */}
         <div style={{ padding: "13px 16px", background: color, display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{title}</div>
         </div>
         {/* Body */}
-        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, flex: 1, overflowY: "auto" }}>
           {lines.map((line, i) => (
             <div key={i} style={{ fontSize: 12, color: line.color || "#374151", fontWeight: line.bold ? 700 : 400, padding: line.box ? "8px 12px" : 0, background: line.box || "transparent", borderRadius: line.box ? 6 : 0 }}>
               {line.text}
