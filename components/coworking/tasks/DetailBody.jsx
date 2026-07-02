@@ -1178,12 +1178,21 @@ export default function DetailBody({
                     : task.createdAt?.seconds
                       ? task.createdAt.seconds * 1000
                       : null;
+                  const _timerWindowSecs = Number(task.deadlineWindowSecs)
+                    || Number(task.senderTimerWindowSecs)
+                    || (Number(task.etcHours) * 3600)
+                    || 0;
                   const _window = (task.hasTimer === false && task.fixedDeadline && _createdMs)
                     ? (new Date(task.fixedDeadline).getTime() - _createdMs)
-                    : (task.etcHours || 0) * 3600000;
-                  const _elapsed = (_window > 0 && _createdMs)
-                    ? Math.min(((Date.now() - _createdMs) / _window) * 100, 100)
-                    : 0;
+                    : _timerWindowSecs > 0
+                      ? _timerWindowSecs * 1000
+                      : (task.etcHours || 0) * 3600000;
+                  const _workedMs = (workedSecs || 0) * 1000;
+                  const _elapsed = _timerWindowSecs > 0
+                    ? Math.min((_workedMs / (_timerWindowSecs * 1000)) * 100, 100)
+                    : (_window > 0 && _createdMs)
+                      ? Math.min(((Date.now() - _createdMs) / _window) * 100, 100)
+                      : 0;
                   window.__extElapsedPct = _elapsed; // used by button below
                 })()}
 

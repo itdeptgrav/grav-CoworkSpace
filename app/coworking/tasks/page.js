@@ -3224,10 +3224,25 @@ export default function TasksPage() {
     if (mobDetailPanel === "reports" && selectedTask?.taskId) loadReports(selectedTask.taskId);
   }, [mobDetailPanel, selectedTask?.taskId, loadReports]);
 
+  // Live selected task — direct Firestore subscription (must be before early return)
+  const [liveSelectedTask, setLiveSelectedTask] = useState(null);
+  useEffect(() => {
+    if (!selectedTask?.taskId) { setLiveSelectedTask(null); return; }
+    setLiveSelectedTask(allTaskMap.get(selectedTask.taskId) || selectedTask);
+    let unsub;
+    import("firebase/firestore").then(({ onSnapshot, doc: fsDoc }) => {
+      unsub = onSnapshot(
+        fsDoc(firebaseDb, "cowork_tasks", selectedTask.taskId),
+        snap => { if (snap.exists()) setLiveSelectedTask({ ...snap.data(), taskId: snap.id, id: snap.id }); }
+      );
+    });
+    return () => unsub?.();
+  }, [selectedTask?.taskId]);
+
   if (loading || !user) return null;
 
   // Computed Values
-  const task = selectedTask;
+  const task = liveSelectedTask || selectedTask;
   const isAssignee = task?.assigneeIds?.includes(employeeId);
   const isConfirmed = task?.confirmedBy?.includes(employeeId)
     || ["confirmed", "in_progress", "done", "submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(task?.status);

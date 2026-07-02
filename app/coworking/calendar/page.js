@@ -315,6 +315,22 @@ export default function WorkloadPage() {
                                     <div style={{ fontSize: 10, color: "#80868b" }}>C1 tasks</div>
                                 </div>
 
+                                {(emp.overdueCount > 0 || emp.pendingHours > 0) && <>
+                                    <div style={{ width: 1, height: 28, background: "#E8EAED" }} />
+                                    <div style={{ textAlign: "right" }}>
+                                        <div style={{ fontSize: 15, fontWeight: 600, color: emp.overdueCount > 0 ? "#D93025" : "#F9AB00" }}>
+                                            {emp.overdueCount > 0
+                                                ? `${emp.overdueCount} overdue`
+                                                : `${emp.pendingHours}h`}
+                                        </div>
+                                        <div style={{ fontSize: 10, color: "#80868b" }}>
+                                            {emp.overdueCount > 0
+                                                ? `${emp.overdueHours}h past due`
+                                                : "hrs pending"}
+                                        </div>
+                                    </div>
+                                </>}
+
                                 {hasC2 && <>
                                     <div style={{ width: 1, height: 28, background: "#E8EAED" }} />
                                     <div style={{ textAlign: "right" }}>
