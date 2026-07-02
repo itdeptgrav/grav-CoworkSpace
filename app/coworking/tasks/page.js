@@ -686,6 +686,7 @@ export default function TasksPage() {
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [activeModal, setActiveModal] = useState(null);
   const [editingDraftTask, setEditingDraftTask] = useState(null);
+  const [draftSectionOpen, setDraftSectionOpen] = useState(false);
   const [fixedDeadlineNegotiateModal, setFixedDeadlineNegotiateModal] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [showDeleteConf, setShowDeleteConf] = useState(false);
@@ -1230,7 +1231,15 @@ export default function TasksPage() {
     dragTaskIdRef.current = null;
     dragOverIdRef.current = null;
     if (!dragId || dragId === dropOnTaskId) return;
-
+    const _draggedTask = allTaskMapRef.current.get(dragId);
+    const _isDraft = _draggedTask
+      && Number(_draggedTask.senderTimerWindowSecs) > 0
+      && !Number(_draggedTask.deadlineWindowSecs)
+      && ["open", "not_started"].includes(_draggedTask.status);
+    if (_isDraft) {
+      alert("This task has no approved deadline yet. Set a duration before changing priority.");
+      return;
+    }
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
@@ -1281,6 +1290,10 @@ export default function TasksPage() {
       .filter(t => {
         if ((t.parentTaskId || null) !== (dropParent || null)) return false;
         if (["done", "cancelled"].includes(t.status)) return false;
+        const _isDraftSibling = Number(t.senderTimerWindowSecs) > 0
+          && !Number(t.deadlineWindowSecs)
+          && ["open", "not_started"].includes(t.status);
+        if (_isDraftSibling) return false;
         return (t.assigneeIds || []).some(a => _dragAssignees.has(a));
       })
       .sort((a, b) => {
@@ -1329,6 +1342,10 @@ export default function TasksPage() {
       .filter(t => {
         if ((t.parentTaskId || null) !== (parentId || null)) return false;
         if (["done", "cancelled"].includes(t.status)) return false;
+        const _isDraftSibling = Number(t.senderTimerWindowSecs) > 0
+          && !Number(t.deadlineWindowSecs)
+          && ["open", "not_started"].includes(t.status);
+        if (_isDraftSibling) return false;
         return (t.assigneeIds || []).some(a => dragAssignees.has(a));
       });
 
@@ -4978,6 +4995,10 @@ em-emoji-picker,
                     .filter(t => {
                       if ((t.parentTaskId || null) !== (newParentId || null)) return false;
                       if (["done", "cancelled"].includes(t.status)) return false;
+                      const _isDraftSibling = Number(t.senderTimerWindowSecs) > 0
+                        && !Number(t.deadlineWindowSecs)
+                        && ["open", "not_started"].includes(t.status);
+                      if (_isDraftSibling) return false;
                       return (t.assigneeIds || []).some(a => _dragAssignees.has(a));
                     })
                     .sort((a, b) => {
@@ -6136,6 +6157,8 @@ em-emoji-picker,
                       return false;
                     });
 
+                    // Draft tasks — timer tasks with senderTimerWindowSecs set but no approved window yet
+
                     // Section C: Other tasks (visible to user but neither assigned nor created by them)
                     const otherTasks = filteredRoots.filter(t => {
                       if (assignedToMe.find(x => x.taskId === t.taskId)) return false;
@@ -6787,70 +6810,113 @@ em-emoji-picker,
                           <>
                             {/* Assigned to Me */}
                             {taskSection === "assigned" && (
-                              assignedToMe.length === 0 ? (
-                                <div className="gv-empty">
-                                  <div className="gv-empty-icon">📥</div>
-                                  <p className="gv-empty-t">No assigned tasks</p>
-                                  <p className="gv-empty-s">Tasks assigned to you will appear here</p>
-                                </div>
-                              ) : (
-                                <>
-                                  {renderTaskGroup(assignedToMe, "assigned")}
-                                  {(isCEO || isTL) && taskSection === "created" && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
-                                      style={{
-                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                                        width: "calc(100% - 24px)", margin: "8px 12px 16px",
-                                        padding: "12px 14px",
-                                        background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
-                                        color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
-                                        cursor: "pointer", transition: "all 0.15s",
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
-                                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
-                                    >
-                                      + New Task
-                                    </button>
-                                  )}
-                                </>
-                              )
+                              (() => {
+                                const isDraftTask = (t) => Number(t.senderTimerWindowSecs) > 0
+                                  && !Number(t.deadlineWindowSecs)
+                                  && ["open", "not_started"].includes(t.status);
+                                const assignedActive = assignedToMe.filter(t => !isDraftTask(t));
+                                const assignedDraft = assignedToMe.filter(t => isDraftTask(t));
+                                return assignedActive.length === 0 && assignedDraft.length === 0 ? (
+                                  <div className="gv-empty">
+                                    <div className="gv-empty-icon">📥</div>
+                                    <p className="gv-empty-t">No assigned tasks</p>
+                                    <p className="gv-empty-s">Tasks assigned to you will appear here</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {renderTaskGroup(assignedActive, "assigned")}
+                                    {assignedDraft.length > 0 && (
+                                      <div style={{ margin: "6px 12px 0" }}>
+                                        <div
+                                          onClick={() => setDraftSectionOpen(p => !p)}
+                                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", cursor: "pointer", userSelect: "none", background: "#F8FAFC", borderRadius: 6, border: "1px dashed #CBD5E1", marginBottom: draftSectionOpen ? 6 : 0 }}
+                                        >
+                                          <span style={{ fontSize: 12 }}>{draftSectionOpen ? "▾" : "▸"}</span>
+                                          <span style={{ fontSize: 12, fontWeight: 600, color: "#64748B" }}>Draft</span>
+                                          <span style={{ fontSize: 11, background: "#E2E8F0", color: "#475569", borderRadius: 99, padding: "1px 7px", fontWeight: 600 }}>{assignedDraft.length}</span>
+                                          <span style={{ fontSize: 11, color: "#94A3B8", marginLeft: "auto" }}>No deadline — priority changes blocked</span>
+                                        </div>
+                                        {draftSectionOpen && renderTaskGroup(assignedDraft, "assigned")}
+                                      </div>
+                                    )}
+                                    {(isCEO || isTL) && taskSection === "created" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
+                                        style={{
+                                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                          width: "calc(100% - 24px)", margin: "8px 12px 16px",
+                                          padding: "12px 14px",
+                                          background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
+                                          color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
+                                          cursor: "pointer", transition: "all 0.15s",
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
+                                        onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
+                                      >
+                                        + New Task
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()
                             )}
 
                             {/* Created by Me */}
                             {taskSection === "created" && (
-                              createdByMe.length === 0 ? (
-                                <div className="gv-empty">
-                                  <div className="gv-empty-icon">✏️</div>
-                                  <p className="gv-empty-t">No tasks created yet</p>
-                                  <p className="gv-empty-s">Tasks you create will appear here</p>
-                                </div>
-                              ) : (
-                                <>
-                                  {renderTaskGroup(createdByMe, "created")}
-                                  {(isCEO || isTL) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
-                                      style={{
-                                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                                        width: "calc(100% - 24px)", margin: "8px 12px 16px",
-                                        padding: "12px 14px",
-                                        background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
-                                        color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
-                                        cursor: "pointer", transition: "all 0.15s",
-                                      }}
-                                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
-                                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
-                                    >
-                                      + New Task
-                                    </button>
-                                  )}
-                                </>
-                              )
+                              (() => {
+                                const isDraftTask = (t) => Number(t.senderTimerWindowSecs) > 0
+                                  && !Number(t.deadlineWindowSecs)
+                                  && ["open", "not_started"].includes(t.status);
+                                const createdActive = createdByMe.filter(t => !isDraftTask(t));
+                                const createdDraft = createdByMe.filter(t => isDraftTask(t));
+                                return createdActive.length === 0 && createdDraft.length === 0 ? (
+                                  <div className="gv-empty">
+                                    <div className="gv-empty-icon">✏️</div>
+                                    <p className="gv-empty-t">No tasks created yet</p>
+                                    <p className="gv-empty-s">Tasks you create will appear here</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    {renderTaskGroup(createdActive, "created")}
+                                    {createdDraft.length > 0 && (
+                                      <div style={{ margin: "6px 12px 0" }}>
+                                        <div
+                                          onClick={() => setDraftSectionOpen(p => !p)}
+                                          style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", cursor: "pointer", userSelect: "none", background: "#F8FAFC", borderRadius: 6, border: "1px dashed #CBD5E1", marginBottom: draftSectionOpen ? 6 : 0 }}
+                                        >
+                                          <span style={{ fontSize: 12 }}>{draftSectionOpen ? "▾" : "▸"}</span>
+                                          <span style={{ fontSize: 12, fontWeight: 600, color: "#64748B" }}>Draft</span>
+                                          <span style={{ fontSize: 11, background: "#E2E8F0", color: "#475569", borderRadius: 99, padding: "1px 7px", fontWeight: 600 }}>{createdDraft.length}</span>
+                                          <span style={{ fontSize: 11, color: "#94A3B8", marginLeft: "auto" }}>No deadline — priority changes blocked</span>
+                                        </div>
+                                        {draftSectionOpen && renderTaskGroup(createdDraft, "created")}
+                                      </div>
+                                    )}
+                                    {(isCEO || isTL) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
+                                        style={{
+                                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                                          width: "calc(100% - 24px)", margin: "8px 12px 16px",
+                                          padding: "12px 14px",
+                                          background: "transparent", border: "1px dashed #CBD5E1", borderRadius: 6,
+                                          color: "#64748B", fontFamily: "var(--font)", fontSize: 12,
+                                          cursor: "pointer", transition: "all 0.15s",
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#1B4F8A"; e.currentTarget.style.color = "#1B4F8A"; }}
+                                        onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.color = "#64748B"; }}
+                                      >
+                                        + New Task
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()
                             )}
 
+                            {/* Created by Me */}
                             {/* Self Tasks */}
                             {taskSection === "self" && (() => {
                               const needsMyApproval = allTasks.filter(t =>
