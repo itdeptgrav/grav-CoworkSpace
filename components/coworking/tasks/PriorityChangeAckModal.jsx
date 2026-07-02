@@ -54,6 +54,15 @@ function playAckChime() {
 
 function fmtDateTime(iso) {
     if (!iso) return "—";
+    if (typeof iso === "string" && iso.includes("budget")) {
+        const hrs = parseFloat(iso);
+        if (!isNaN(hrs)) {
+            const h = Math.floor(hrs);
+            const m = Math.round((hrs - h) * 60);
+            return h > 0 ? `${h}h ${m > 0 ? `${m}m` : ""}`.trim() : `${m}m`;
+        }
+        return iso;
+    }
     try {
         return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     } catch { return iso; }

@@ -1131,8 +1131,82 @@ export default function TasksPage() {
 
         await _ud(_d(firebaseDb, "cowork_tasks", newTaskId), {
           dueDate,
+          cascadeEstimatedDueDate: null,   // clear — correction fires below, not again
           updatedAt: _st(),
         });
+
+        // ── DELTA CORRECTION: shift lower-priority cascade-affected tasks ──────
+        // The cascade estimated P1 would finish at cascadeEstimatedDueDate.
+        // P1 actually started now → actual finish = now + deadlineWindowSecs.
+        // Delta = actual finish - estimated finish. If positive (late start),
+        // push every lower-priority task's deadline forward by that delta.
+        try {
+          const _cascadeEstMs = Number(_task.cascadeEstimatedAtMs) || 0;
+          const _actualFinishMs = new Date(dueDate).getTime();
+          const _deltaMs = _actualFinishMs - _cascadeEstMs;
+
+          if (_deltaMs > 5000) {  // only correct if >5s gap (ignore rounding noise)
+            console.log(`[delta-correction] P1 late by ${Math.round(_deltaMs / 1000)}s — shifting lower tasks`);
+            const _allCurrent = allTaskMapRef.current;
+            const _p1Priority = Number(_task.priority) || 1;
+
+            // Collect tasks to shift: lower priority + touched by cascade + not terminal
+            const _TERMINAL = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+            const _toShift = [...(_allCurrent?.values() || [])]
+              .filter(t =>
+                t.taskId !== newTaskId &&
+                Number(t.priority) > _p1Priority &&
+                t.cascadeAssumedP1FinishMs > 0 &&
+                !_TERMINAL.includes(t.status) &&
+                (t.assigneeIds || []).includes(employeeId)
+              );
+
+            for (const _st_task of _toShift) {
+              const _hasDeadline = _st_task.fixedDeadline || _st_task.dueDate;
+              if (_hasDeadline) {
+                // Deadline task: shift the wall-clock deadline by delta
+                const _deadlineField = _st_task.fixedDeadline ? "fixedDeadline" : "dueDate";
+                const _oldDeadlineMs = new Date(_st_task[_deadlineField]).getTime();
+                const _newDeadlineISO = new Date(_oldDeadlineMs + _deltaMs).toISOString();
+                await _ud(_d(firebaseDb, "cowork_tasks", _st_task.taskId), {
+                  [_deadlineField]: _newDeadlineISO,
+                  cascadeAssumedP1FinishMs: null,   // clear — correction applied
+                  updatedAt: _st(),
+                });
+                // Optimistic local update
+                setAllTasks(prev => prev.map(t =>
+                  t.taskId === _st_task.taskId ? { ...t, [_deadlineField]: _newDeadlineISO } : t
+                ));
+                if (_allCurrent?.has(_st_task.taskId)) {
+                  _allCurrent.set(_st_task.taskId, { ..._allCurrent.get(_st_task.taskId), [_deadlineField]: _newDeadlineISO });
+                }
+                console.log(`[delta-correction] shifted ${_st_task.taskId} (${_st_task.title}) +${Math.round(_deltaMs / 60000)}min`);
+              } else if (_st_task.deadlineWindowSecs > 0) {
+                // Timer task: extend the budget by delta seconds
+                const _extraSecs = Math.round(_deltaMs / 1000);
+                const _newWindowSecs = Number(_st_task.deadlineWindowSecs) + _extraSecs;
+                await _ud(_d(firebaseDb, "cowork_tasks", _st_task.taskId), {
+                  deadlineWindowSecs: _newWindowSecs,
+                  cascadeAssumedP1FinishMs: null,
+                  updatedAt: _st(),
+                });
+                setAllTasks(prev => prev.map(t =>
+                  t.taskId === _st_task.taskId ? { ...t, deadlineWindowSecs: _newWindowSecs } : t
+                ));
+                if (_allCurrent?.has(_st_task.taskId)) {
+                  _allCurrent.set(_st_task.taskId, { ..._allCurrent.get(_st_task.taskId), deadlineWindowSecs: _newWindowSecs });
+                }
+                console.log(`[delta-correction] extended timer ${_st_task.taskId} (${_st_task.title}) +${_extraSecs}s`);
+              }
+            }
+          } else {
+            console.log(`[delta-correction] delta=${Math.round((_deltaMs || 0) / 1000)}s — within tolerance, no correction needed`);
+          }
+        } catch (_de) {
+          console.error("[delta-correction] failed:", _de.message);
+          // Non-fatal — timer already started, dueDate already written
+        }
+        // ── END DELTA CORRECTION ─────────────────────────────────────────────
 
         // Optimistic local update so the banner / DetailBody reflect immediately
         const _now8 = Date.now() + 8000;
@@ -1153,7 +1227,7 @@ export default function TasksPage() {
 
 
     timerStart(newTaskId, newTaskTitle);
-  }, [timerActiveTaskId, timerStart, timerSessionMap]);
+  }, [timerActiveTaskId, timerStart, timerSessionMap, employeeId]);
 
   const handleTimerPause = useCallback((taskId, taskTitle) => {
     setCommitModal({ taskId, taskTitle });

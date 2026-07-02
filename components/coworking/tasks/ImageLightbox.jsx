@@ -12,7 +12,7 @@ import { useEffect } from "react";
 export default function ImageLightbox({ url, onClose, onDownload }) {
     useEffect(() => {
         const handleEscape = (e) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape" && typeof onClose === "function") onClose();
         };
         window.addEventListener("keydown", handleEscape);
         return () => window.removeEventListener("keydown", handleEscape);

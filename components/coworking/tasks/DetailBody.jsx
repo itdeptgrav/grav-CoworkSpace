@@ -606,9 +606,13 @@ export default function DetailBody({
   const timerBlocked = timerActiveTaskId && timerActiveTaskId !== task.taskId;
 
   // Wall-clock based remaining/over — reflects approved extensions immediately
-  const remainingSecs = task.dueDate
-    ? Math.max(0, (new Date(task.dueDate).getTime() - Date.now()) / 1000)
-    : (windowSecs > 0 ? Math.max(0, windowSecs - workedSecs) : null);
+  // When timer hasn't started yet (workedSecs=0, not running), show full budget
+  // not wall-clock dueDate which may differ from window due to cascade timing gaps.
+  const remainingSecs = (task.hasTimer && windowSecs > 0 && workedSecs === 0 && !isRunningThis)
+    ? windowSecs
+    : task.dueDate
+      ? Math.max(0, (new Date(task.dueDate).getTime() - Date.now()) / 1000)
+      : (windowSecs > 0 ? Math.max(0, windowSecs - workedSecs) : null);
   const overSecs = task.dueDate
     ? Math.max(0, (Date.now() - new Date(task.dueDate).getTime()) / 1000)
     : (windowSecs > 0 && workedSecs > windowSecs ? workedSecs - windowSecs : 0);

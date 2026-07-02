@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useCoworkAuth } from "../../../../hooks/useCoworkAuth";
 import { getEmployeeCalendar } from "../../../../lib/coworkApi";
+import WorkTimelineBar from "../../../../components/coworking/calendar/WorkTimelineBar";
 
 // ── Unique task color palette ─────────────────────────────────────────────────
 const TASK_COLORS = [
@@ -294,6 +295,7 @@ export default function EmployeeCalendarPage() {
     const [fetching, setFetching] = useState(true);
     const [error, setError] = useState(null);
     const [tooltip, setTooltip] = useState({ task: null, pos: { x: 0, y: 0 }, visible: false });
+    const [selectedDate, setSelectedDate] = useState(null); // ISO date string for panel
 
     useEffect(() => {
         if (!loading && !user) { router.push("/"); return; }
@@ -332,6 +334,17 @@ export default function EmployeeCalendarPage() {
 
     const handleLeave = useCallback(() => {
         setTooltip(p => ({ ...p, visible: false }));
+    }, []);
+
+    const handleDateClick = useCallback((cell) => {
+        if (cell.otherMonth) return;
+        // toISOString() converts to UTC — wrong for IST and any UTC+ timezone.
+        // Use local date parts directly instead.
+        const y = cell.date.getFullYear();
+        const m = String(cell.date.getMonth() + 1).padStart(2, "0");
+        const d = String(cell.date.getDate()).padStart(2, "0");
+        const iso = `${y}-${m}-${d}`;
+        setSelectedDate(prev => prev === iso ? null : iso);
     }, []);
 
     if (loading || !user) return null;
@@ -448,21 +461,32 @@ export default function EmployeeCalendarPage() {
                                 cell.date.getMonth() === today.getMonth() &&
                                 cell.date.getDate() === today.getDate();
 
+                            const _cy = cell.date.getFullYear();
+                            const _cm = String(cell.date.getMonth() + 1).padStart(2, "0");
+                            const _cd = String(cell.date.getDate()).padStart(2, "0");
+                            const cellIso = `${_cy}-${_cm}-${_cd}`;
+                            const isSelected = !cell.otherMonth && selectedDate === cellIso;
                             const dayTasks = getTasksForDate(tasks, cell.date);
                             const hasOverlap = dayTasks.some(t => t.overlap);
 
                             return (
-                                <div key={idx} style={{
-                                    minHeight: 80,
-                                    padding: "4px 3px",
-                                    borderRight: "1px solid #F1F3F4",
-                                    borderBottom: "1px solid #F1F3F4",
-                                    background: isToday ? "#F0F7FF"
-                                        : cell.otherMonth ? "#FAFAFA"
-                                            : "#fff",
-                                    position: "relative",
-                                    overflow: "hidden",
-                                }}>
+                                <div key={idx}
+                                    onClick={() => handleDateClick(cell)}
+                                    style={{
+                                        minHeight: 80,
+                                        padding: "4px 3px",
+                                        borderRight: "1px solid #F1F3F4",
+                                        borderBottom: "1px solid #F1F3F4",
+                                        background: isSelected ? "#EEF2FF"
+                                            : isToday ? "#F0F7FF"
+                                                : cell.otherMonth ? "#FAFAFA"
+                                                    : "#fff",
+                                        position: "relative",
+                                        overflow: "hidden",
+                                        cursor: cell.otherMonth ? "default" : "pointer",
+                                        outline: isSelected ? "2px solid #6366F1" : "none",
+                                        outlineOffset: -2,
+                                    }}>
                                     {/* Date number */}
                                     <div style={{
                                         display: "flex",
@@ -504,12 +528,69 @@ export default function EmployeeCalendarPage() {
                     display: "flex", gap: 16, marginTop: 12,
                     flexWrap: "wrap", padding: "0 4px",
                 }}>
-
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5f6368" }}>
                         ⭐ = Gold task (C2)
                     </div>
                     <div style={{ fontSize: 12, color: "#80868b", marginLeft: "auto" }}>
-                        Hover over a task bar to see details
+                        Click a date to see work timeline · Hover task bar for details
+                    </div>
+                </div>
+            )}
+
+            {/* ── Work Timeline Panel ── */}
+            {selectedDate && !fetching && !error && (
+                <div style={{
+                    marginTop: 16,
+                    background: "#fff",
+                    border: "1px solid #E8EAED",
+                    borderRadius: 12,
+                    overflow: "hidden",
+                }}>
+                    {/* Panel header */}
+                    <div style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "12px 16px",
+                        borderBottom: "1px solid #F1F3F4",
+                        background: "#FAFAFA",
+                    }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="#6366F1" strokeWidth="2" strokeLinecap="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#1F2937" }}>
+                                Work Timeline
+                            </span>
+                            <span style={{
+                                fontSize: 11, color: "#6366F1", background: "#EEF2FF",
+                                padding: "1px 8px", borderRadius: 20, fontWeight: 600,
+                            }}>
+                                {(() => { const [y, m, d] = selectedDate.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); })()}
+                            </span>
+                        </div>
+                        <button
+                            onClick={() => setSelectedDate(null)}
+                            style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                color: "#9CA3AF", fontSize: 18, lineHeight: 1,
+                                padding: "2px 6px", borderRadius: 4,
+                            }}
+                        >
+                            ×
+                        </button>
+                    </div>
+
+                    {/* Timeline body */}
+                    <div style={{ padding: "16px 20px 20px" }}>
+                        <WorkTimelineBar
+                            employeeId={employeeId}
+                            selectedDate={selectedDate}
+                            tasksForDay={getTasksForDate(tasks, (() => {
+                                const [y, m, d] = selectedDate.split("-").map(Number);
+                                return new Date(y, m - 1, d);
+                            })())}
+                        />
                     </div>
                 </div>
             )}
