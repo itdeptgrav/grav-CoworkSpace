@@ -1111,7 +1111,7 @@ export default function TasksPage() {
         const settings = snap.exists() ? snap.data() : {};
 
         // Import pure utility (no React, safe to dynamic-import)
-        const { calcDueDate } = await import("../../../lib/officeDueDate");
+        const { calcDueDate, snapToOfficeHours } = await import("../../../lib/officeDueDate");
 
         const taskCreatedAtMs = _task.createdAt?.seconds
           ? _task.createdAt.seconds * 1000
@@ -1167,7 +1167,8 @@ export default function TasksPage() {
                 // Deadline task: shift the wall-clock deadline by delta
                 const _deadlineField = _st_task.fixedDeadline ? "fixedDeadline" : "dueDate";
                 const _oldDeadlineMs = new Date(_st_task[_deadlineField]).getTime();
-                const _newDeadlineISO = new Date(_oldDeadlineMs + _deltaMs).toISOString();
+                // Snap to office hours: raw shift may land at night/weekend
+                const _newDeadlineISO = snapToOfficeHours(_oldDeadlineMs + _deltaMs, settings.schedule || null);
                 await _ud(_d(firebaseDb, "cowork_tasks", _st_task.taskId), {
                   [_deadlineField]: _newDeadlineISO,
                   cascadeAssumedP1FinishMs: null,   // clear — correction applied

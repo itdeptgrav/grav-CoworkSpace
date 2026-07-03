@@ -1197,14 +1197,20 @@ export default function DetailBody({
                     : (_window > 0 && _createdMs)
                       ? Math.min(((Date.now() - _createdMs) / _window) * 100, 100)
                       : 0;
-                  window.__extElapsedPct = _elapsed; // used by button below
+                  window.__extElapsedPct = _elapsed;
+                  // Also write to a data attribute on the DOM for reliability
+                  if (typeof document !== "undefined") {
+                    document.documentElement.setAttribute("data-ext-elapsed", String(_elapsed));
+                  }
                 })()}
 
                 {/* ── EXTENSION REQUEST ── */}
                 {isAssignee && !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
                   <>
                     {!ef.showExtReqForm ? (() => {
-                      const _pct = window.__extElapsedPct || 0;
+                      const _pct = window.__extElapsedPct
+                        || parseFloat(document.documentElement.getAttribute("data-ext-elapsed") || "0")
+                        || 0;
                       const _zone = _pct < 50 ? 1 : _pct < 70 ? 2 : 3;
 
                       if (_zone === 1) return (
