@@ -1211,7 +1211,9 @@ export default function DetailBody({
                       const _pct = window.__extElapsedPct
                         || parseFloat(document.documentElement.getAttribute("data-ext-elapsed") || "0")
                         || 0;
-                      const _zone = _pct < 50 ? 1 : _pct < 70 ? 2 : 3;
+                      // If deadline already passed → always zone 3 regardless of elapsed %
+                      const _deadlinePassed = task.dueDate && new Date(task.dueDate) < new Date();
+                      const _zone = _deadlinePassed ? 3 : _pct < 50 ? 1 : _pct < 70 ? 2 : 3;
 
                       if (_zone === 1) return (
                         <div title="Extension available after 50% of task time has elapsed">

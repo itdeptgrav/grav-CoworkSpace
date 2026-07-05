@@ -2535,7 +2535,8 @@ export default function TasksPage() {
             const _predecessor = _chainAnchor ? { dueDate: new Date(_chainAnchor).toISOString() } : null;
 
             if (_predecessor) {
-              const _anchorMs = new Date(_predecessor.dueDate).getTime();
+              const _predMs = new Date(_predecessor.dueDate).getTime();
+              const _anchorMs = Math.max(_predMs, Date.now());
               const _newDue = _aws(_anchorMs, _ctWindow, _sched);
 
               await _fu(_fd(firebaseDb, "cowork_tasks", tid), {
