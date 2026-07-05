@@ -1076,13 +1076,60 @@ export default function TasksPage() {
       //    from lib/coworkFirebase, so we just use it directly — no dynamic
       //    import needed.
       try {
-        const { doc, updateDoc, serverTimestamp } = await import("firebase/firestore");
-        await updateDoc(doc(firebaseDb, "cowork_tasks", newTaskId), {
+        const { doc: _exD, updateDoc: _exU, serverTimestamp: _exSt, getDocs: _exGD, collection: _exCol, query: _exQ, where: _exW } = await import("firebase/firestore");
+
+        // Write new dueDate to this task
+        await _exU(_exD(firebaseDb, "cowork_tasks", newTaskId), {
           awaitingExtensionStart: false,
           extensionTimerStartedAt: new Date(now).toISOString(),
           dueDate: newDueDateISO,
-          updatedAt: serverTimestamp(),
+          updatedAt: _exSt(),
         });
+
+        // ── CASCADE DELTA to lower-priority tasks ─────────────────────
+        const _oldDueMs = new Date(task.dueDate || now).getTime();
+        const _newDueMs = new Date(newDueDateISO).getTime();
+        const _delta = _newDueMs - _oldDueMs;
+
+        if (_delta !== 0) {
+          const _exAssignee = (task.assigneeIds || [])[0] || employeeId;
+          const _exPriority = Number(task.priority) || 1;
+          const _EXTERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+
+          // Fresh read from Firestore — not stale state
+          const _exFreshSnap = await _exGD(
+            _exQ(
+              _exCol(firebaseDb, "cowork_tasks"),
+              _exW("assigneeIds", "array-contains", _exAssignee)
+            )
+          );
+          const _exLower = _exFreshSnap.docs
+            .map(d => ({ taskId: d.id, ...d.data() }))
+            .filter(t =>
+              t.taskId !== newTaskId &&
+              Number(t.priority) > _exPriority &&
+              t.dueDate &&
+              !_EXTERM.includes(t.status)
+            )
+            .sort((a, b) => Number(a.priority) - Number(b.priority));
+
+          for (const _lt of _exLower) {
+            const _ltNewDue = new Date(new Date(_lt.dueDate).getTime() + _delta).toISOString();
+            await _exU(_exD(firebaseDb, "cowork_tasks", _lt.taskId), {
+              dueDate: _ltNewDue,
+              updatedAt: _exSt(),
+            });
+            setAllTasks(prev => prev.map(t =>
+              t.taskId === _lt.taskId ? { ...t, dueDate: _ltNewDue } : t
+            ));
+            if (allTaskMapRef.current?.has(_lt.taskId)) {
+              allTaskMapRef.current.set(_lt.taskId, {
+                ...allTaskMapRef.current.get(_lt.taskId), dueDate: _ltNewDue,
+              });
+            }
+            console.log(`[extension-cascade] ${_lt.taskId} (P${_lt.priority}) shifted +${Math.round(_delta / 60000)}min → ${_ltNewDue}`);
+          }
+        }
       } catch (e) {
         console.error("[extension-start] failed to update task:", e.message);
       }
@@ -1739,21 +1786,68 @@ export default function TasksPage() {
       if (action !== "reject" && newDate) {
         // Block listener on BOTH sides so optimistic update isn't overwritten
         ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 8000;
+        const _extNewWindowSecs = Math.round((new Date(newDate).getTime() - Date.now()) / 1000);
+        if (_extNewWindowSecs > 0) deadlineWindowsRef.current[selectedTask.taskId] = _extNewWindowSecs;
         setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? {
           ...t,
           fixedDeadline: newDate,
-          dueDate: newDate,   // ← this is what the employee's timer reads
+          dueDate: newDate,
+          deadlineWindowSecs: _extNewWindowSecs > 0 ? _extNewWindowSecs : t.deadlineWindowSecs,
           deadlineExtRequest: { ...(t.deadlineExtRequest || {}), status: action === "approve" ? "approved" : "countered" },
         } : t));
         // Write directly to Firestore so the employee's live listener picks it up instantly
         try {
+          // Calculate new deadlineWindowSecs = seconds from now to new deadline
+          const _extNewWindowSecs = Math.round((new Date(newDate).getTime() - Date.now()) / 1000);
           await updateDoc(doc(firebaseDb, "cowork_tasks", selectedTask.taskId), {
             dueDate: newDate,
             fixedDeadline: newDate,
+            deadlineWindowSecs: _extNewWindowSecs > 0 ? _extNewWindowSecs : selectedTask.deadlineWindowSecs,
             "deadlineExtRequest.status": action === "approve" ? "approved" : "countered",
             "deadlineExtRequest.reviewedByName": employeeName,
             updatedAt: serverTimestamp(),
           });
+
+          // ── CASCADE DELTA to lower-priority tasks ──────────────────
+          const _oldDueMs = new Date(selectedTask.dueDate || selectedTask.fixedDeadline).getTime();
+          const _newDueMs = new Date(newDate).getTime();
+          const _delta = _newDueMs - _oldDueMs;
+
+          if (_delta !== 0) {
+            const _assignee = (selectedTask.assigneeIds || [])[0] || employeeId;
+            const _priority = Number(selectedTask.priority) || 1;
+            const _TERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+            const { getDocs: _gd, collection: _col, query: _q, where: _w, doc: _d, updateDoc: _u, serverTimestamp: _st } = await import("firebase/firestore");
+
+            // Fresh Firestore read — no stale state
+            const _snap = await _gd(_q(_col(firebaseDb, "cowork_tasks"), _w("assigneeIds", "array-contains", _assignee)));
+            const _lower = _snap.docs
+              .map(d => ({ taskId: d.id, ...d.data() }))
+              .filter(t =>
+                t.taskId !== selectedTask.taskId &&
+                Number(t.priority) > _priority &&
+                t.dueDate &&
+                !_TERM.includes(t.status)
+              )
+              .sort((a, b) => Number(a.priority) - Number(b.priority));
+
+            for (const _lt of _lower) {
+              const _ltNewDue = new Date(new Date(_lt.dueDate).getTime() + _delta).toISOString();
+              await _u(_d(firebaseDb, "cowork_tasks", _lt.taskId), {
+                dueDate: _ltNewDue,
+                updatedAt: _st(),
+              });
+              setAllTasks(prev => prev.map(t =>
+                t.taskId === _lt.taskId ? { ...t, dueDate: _ltNewDue } : t
+              ));
+              if (allTaskMapRef.current?.has(_lt.taskId)) {
+                allTaskMapRef.current.set(_lt.taskId, {
+                  ...allTaskMapRef.current.get(_lt.taskId), dueDate: _ltNewDue,
+                });
+              }
+              console.log(`[ext-cascade] ${_lt.taskId} (P${_lt.priority}) +${Math.round(_delta / 60000)}min → ${_ltNewDue}`);
+            }
+          }
         } catch (e) { console.error("[ext approve] direct write:", e.message); }
       }
     } catch (e) { alert(e.message); }

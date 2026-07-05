@@ -160,9 +160,18 @@ export function useTaskTimer(employeeId, opts = {}) {
                         const elapsed = sess.lastStartTime
                             ? Math.floor((Date.now() - sess.lastStartTime) / 1000)
                             : 0;
+                        const baseSecs = (sess.totalSeconds || 0) + elapsed;
+                        const currentWin = deadlineWindowsRef?.current?.[activeId] || 0;
+                        // If already at/past deadline window, don't restart tick — avoids
+                        // snapshot reconnect resetting autoPausedRef and firing spurious auto-pause
+                        if (currentWin > 0 && baseSecs >= currentWin) {
+                            setActiveTaskId(activeId);
+                            return;
+                        }
                         setActiveTaskId(activeId);
-                        startTick(activeId, (sess.totalSeconds || 0) + elapsed);
+                        startTick(activeId, baseSecs);
                     }
+
                 });
             } catch (e) {
                 console.error("[TaskTimer] Load error:", e.message);

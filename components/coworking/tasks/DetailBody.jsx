@@ -302,7 +302,16 @@ function WorkLogsSection({ task }) {
   const [loading, setLoading] = useState(false);
   const [logError, setLogError] = useState("");
 
-  const windowSecs = Number(task.deadlineWindowSecs) || 0;
+  const _origWindowTop = Number(task.deadlineWindowSecs) || 0;
+  const _hasExtTop = task.deadlineExtRequest?.status === "approved" && task.dueDate;
+  const _wallTotalTop = _hasExtTop
+    ? Math.round((new Date(task.dueDate).getTime() - (task.startedAt?.seconds
+      ? task.startedAt.seconds * 1000
+      : new Date(task.startedAt || Date.now()).getTime())) / 1000)
+    : 0;
+  const windowSecs = (_hasExtTop && _wallTotalTop > _origWindowTop)
+    ? _wallTotalTop
+    : _origWindowTop;
 
   useEffect(() => {
     if (!expanded || !task.taskId) return;
@@ -592,14 +601,27 @@ export default function DetailBody({
   // ── derived ──────────────────────────────────────────────────────────────
   const status = task.status;
   const workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
-  const windowSecs = Number(task.deadlineWindowSecs) || 0;
+  // Total window = original + extension (if extension was approved and timer resumed)
+  // Use wall-clock remaining from dueDate as total window when extension exists
+  const _origWindow = Number(task.deadlineWindowSecs) || 0;
+  const _hasExtension = task.deadlineExtRequest?.status === "approved" && task.dueDate;
+  const _wallClockTotal = _hasExtension
+    ? Math.round((new Date(task.dueDate).getTime() - (task.startedAt?.seconds
+      ? task.startedAt.seconds * 1000
+      : new Date(task.startedAt || Date.now()).getTime())) / 1000)
+    : 0;
+  const windowSecs = (_hasExtension && _wallClockTotal > _origWindow)
+    ? _wallClockTotal
+    : _origWindow;
   const isRunningThis = timerActiveTaskId === task.taskId;
   const timerSession = getTimerSession ? getTimerSession(task.taskId) : null;
 
   // Use wall-clock dueDate when available — handles approved extensions correctly.
   // Without this, isTimerExceeded stays true even after extension is approved
   // because workedSecs(2m) >= windowSecs(2m) never resets.
-  const isTimerExceeded = task.dueDate
+  const _isTerminal = ["done", "cancelled", "tl_final_approved", "ceo_approved"].includes(task.status)
+    || ["tl_final_approved", "ceo_approved", "tl_approved"].includes(task.completionStatus);
+  const isTimerExceeded = _isTerminal ? false : task.dueDate
     ? new Date(task.dueDate) < new Date()
     : (windowSecs > 0 && workedSecs >= windowSecs);
   const isFixedDeadlinePassed = !task.hasTimer && task.fixedDeadline && new Date(task.fixedDeadline) < new Date() && ["in_progress", "confirmed"].includes(task.status);
@@ -894,7 +916,7 @@ export default function DetailBody({
                       {ext.requestedByName && <div style={{ color: "#374151" }}>By: <strong>{ext.requestedByName}</strong></div>}
                       {ext.proposedDate && <div style={{ color: "#374151" }}>Proposed: <strong>{fmtDateTime(ext.proposedDate)}</strong></div>}
                       {ext.reason && <div style={{ color: "#6B7280", marginTop: 2 }}>Reason: {ext.reason}</div>}
-                      {ext.status === "approved" && task.dueDate && <div style={{ color: "#16A34A", marginTop: 2, fontWeight: 600 }}>New deadline: {fmtDateTime(task.dueDate)}</div>}
+                      {ext.status === "approved" && (task.fixedDeadline || task.dueDate) && <div style={{ color: "#16A34A", marginTop: 2, fontWeight: 600 }}>New deadline: {fmtDateTime(task.fixedDeadline || task.dueDate)}</div>}
                       {ext.status === "rejected" && ext.rejectionReason && <div style={{ color: "#991B1B", marginTop: 2 }}>Rejected: {ext.rejectionReason}</div>}
                     </div>
                   </InfoRow>
@@ -988,7 +1010,7 @@ export default function DetailBody({
                       </>
                     )}
                     {task.deadlineExtRequest?.status === "approved" && (
-                      <div style={{ marginTop: 4, color: "#16A34A", fontWeight: 600 }}>Extension approved — new deadline: <strong>{fmtDateTime(task.fixedDeadline)}</strong></div>
+                      <div style={{ marginTop: 4, color: "#16A34A", fontWeight: 600 }}>Extension approved — new deadline: <strong>{fmtDateTime(task.fixedDeadline || task.dueDate)}</strong></div>
                     )}
                   </div>
                 )}
@@ -1213,7 +1235,9 @@ export default function DetailBody({
                         || 0;
                       // If deadline already passed → always zone 3 regardless of elapsed %
                       const _deadlinePassed = task.dueDate && new Date(task.dueDate) < new Date();
-                      const _zone = _deadlinePassed ? 3 : _pct < 50 ? 1 : _pct < 70 ? 2 : 3;
+                      // If extension was approved and deadline is in future — never show penalty zone
+                      const _extApproved = task.deadlineExtRequest?.status === "approved" && !_deadlinePassed;
+                      const _zone = _deadlinePassed ? 3 : _extApproved ? 2 : _pct < 70 ? 2 : 3;
 
                       if (_zone === 1) return (
                         <div title="Extension available after 50% of task time has elapsed">
