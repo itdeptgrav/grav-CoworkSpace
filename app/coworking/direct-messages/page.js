@@ -116,8 +116,9 @@ function Lightbox({ url, onClose, onDl }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
       <div onClick={e => e.stopPropagation()} style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }}>
         <img src={url} alt="" style={{ maxWidth: "100%", maxHeight: "88vh", objectFit: "contain", borderRadius: 10, display: "block" }} />
-        <button onClick={onDl} style={{ position: "absolute", bottom: 14, right: 14, width: 40, height: 40, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+        <button onClick={onDl} title="Download image" style={{ position: "absolute", bottom: 14, right: 14, display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 999, background: "#1a73e8", border: "none", cursor: "pointer", color: "#fff", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", boxShadow: "0 2px 10px rgba(0,0,0,0.35)", whiteSpace: "nowrap" }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+          Download image
         </button>
         <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, width: 34, height: 34, borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none", cursor: "pointer", color: "#fff", fontSize: 17, display: "flex", alignItems: "center", justifyContent: "center" }}>&#x2715;</button>
       </div>
@@ -155,6 +156,22 @@ function DocCard({ att, isMe, onDl }) {
 // ─── Context menu ─────────────────────────────────────────────────────────────
 function CtxMenu({ items, isMe, onClose }) {
   const ref = useRef(null);
+  const [flip, setFlip] = useState(false);
+  // FIX: menu always opened UPWARD; for messages near the top of the scroll
+  // container it extended past the container's top edge and got clipped
+  // (z-index cannot escape an ancestor's overflow clipping). Measure before
+  // paint and flip downward when there is no room above.
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    let anc = el.parentElement;
+    while (anc && anc !== document.body) {
+      const oy = getComputedStyle(anc).overflowY;
+      if (oy === "auto" || oy === "scroll") break;
+      anc = anc.parentElement;
+    }
+    const boundTop = anc && anc !== document.body ? anc.getBoundingClientRect().top : 0;
+    if (el.getBoundingClientRect().top < boundTop + 4) setFlip(true);
+  }, []);
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     const t = setTimeout(() => document.addEventListener("mousedown", handler), 10);
@@ -182,8 +199,10 @@ const REQ_PRI_COLOR = { urgent: "#DC2626", high: "#D97706", medium: "#6366F1", l
 const REQ_PRI_BG = { urgent: "#FEF2F2", high: "#FEF3C7", medium: "#EEF2FF", low: "#F9FAFB" };
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
-function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied, onReply = null, onDeleteMsg = null, onEditMsg = null, currentUserId = null }) {
+function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied, onReply = null, onDeleteMsg = null, onEditMsg = null, currentUserId = null, onJumpToReply = null, highlight = false }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
+  const rowId = `dm-msg-${msg.messageId || msg.id || ""}`;
+  const rowCls = highlight ? "dm-jump-hl" : undefined;
   const [copyFlash, setCopyFlash] = useState(false);
   const [ctxMenu, setCtxMenu] = useState(false);
   const lastTapRef = useRef(0);
@@ -208,7 +227,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
   // ── Deleted placeholder ──────────────────────────────────────────────────
   if (msg.isDeleted) {
     return (
-      <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
+      <div id={rowId} className={rowCls} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
         <div style={{ width: 28, flexShrink: 0 }} />
         <div style={{ padding: "8px 13px", borderRadius: 10, border: "1.5px dashed #D1D5DB", background: "#F9FAFB", fontSize: 13, color: "#9CA3AF", fontStyle: "italic", display: "flex", alignItems: "center", gap: 7 }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
@@ -223,7 +242,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
     const md = msg.meetingData || {};
     const isLiveNow = md.dateTime ? (Date.now() >= new Date(md.dateTime).getTime() && Date.now() <= new Date(md.dateTime).getTime() + 2 * 3600000) : false;
     return (
-      <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 8 }}>
+      <div id={rowId} className={rowCls} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 8 }}>
         <div style={{ width: 28, height: 28, flexShrink: 0 }}>
           {showAvatar && !isMe && (
             msg.senderPicUrl
@@ -273,7 +292,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
 
   // ── Standard message ──────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
+    <div id={rowId} className={rowCls} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", alignItems: "flex-end", gap: 6, marginBottom: 2 }}>
       <div style={{ width: 28, height: 28, flexShrink: 0 }}>
         {showAvatar && !isMe && (
           msg.senderPicUrl
@@ -316,14 +335,18 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
 
             {/* Reply quote — FIX: renders msg.replyTo if present */}
             {msg.replyTo && (
-              <div style={{
-                borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.5)" : "#2563EB"}`,
-                paddingLeft: 8, marginBottom: 7,
-                background: isMe ? "rgba(0,0,0,0.1)" : "#EFF6FF",
-                borderRadius: "0 6px 6px 0",
-                padding: "4px 8px",
-                marginBottom: 6,
-              }}>
+              <div
+                onClick={(e) => { if (onJumpToReply && msg.replyTo.messageId) { e.stopPropagation(); onJumpToReply(msg.replyTo.messageId); } }}
+                title={onJumpToReply && msg.replyTo.messageId ? "Go to original message" : undefined}
+                style={{
+                  borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.5)" : "#2563EB"}`,
+                  paddingLeft: 8, marginBottom: 7,
+                  background: isMe ? "rgba(0,0,0,0.1)" : "#EFF6FF",
+                  borderRadius: "0 6px 6px 0",
+                  padding: "4px 8px",
+                  marginBottom: 6,
+                  cursor: onJumpToReply && msg.replyTo.messageId ? "pointer" : "default",
+                }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.85)" : "#2563EB", marginBottom: 1 }}>{msg.replyTo.senderName}</div>
                 <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>
                   {msg.replyTo.text || "📎 Attachment"}
@@ -426,7 +449,38 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
   const endRef = useRef(null);
   const editInputRef = useRef(null);
 
-  const dlFile = url => { const a = document.createElement("a"); a.href = url; a.download = "file_" + Date.now(); document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+  const dlFile = async (url) => {
+    if (!url) return;
+    // Derive a real filename from the URL, fallback to timestamp
+    const name = (() => {
+      try { const p = new URL(url).pathname.split("/").pop(); return p && p.includes(".") ? decodeURIComponent(p) : "file_" + Date.now(); }
+      catch { return "file_" + Date.now(); }
+    })();
+    // FIX: browsers ignore the `download` attribute on cross-origin URLs, so a plain
+    // <a download> just navigates to Cloudinary. For Cloudinary, inject fl_attachment
+    // so it responds with Content-Disposition: attachment → real download.
+    if (url.includes("res.cloudinary.com") && url.includes("/upload/") && !url.includes("fl_attachment")) {
+      const a = document.createElement("a");
+      a.href = url.replace("/upload/", "/upload/fl_attachment/");
+      a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    }
+    // Non-Cloudinary hosts: fetch → blob → object URL (download attr works on blob:)
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+    } catch (e) {
+      console.error("dlFile:", e);
+      window.open(url, "_blank"); // last resort — at least show the file
+    }
+  };
 
   useEffect(() => {
     setMsgsLoading(true);
@@ -880,6 +934,9 @@ export default function DirectMessagesPage() {
   const scrollAnchorRef = useRef(null);    // { scrollHeight, scrollTop } captured before prepend
   const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [jumpHighlightId, setJumpHighlightId] = useState(null);
+  const pendingJumpRef = useRef(null);
+  const jumpBusyRef = useRef(false);
   const pendingMapRef = useRef(new Map());
   const activeConv = useRef(null);
   const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
@@ -1084,6 +1141,81 @@ export default function DirectMessagesPage() {
     return () => document.removeEventListener("focusin", onFocus);
   }, []);
 
+  // ── Jump to original message when a reply preview is clicked (WhatsApp-style) ──
+  const flashMessage = useCallback((mid) => {
+    setJumpHighlightId(mid);
+    setTimeout(() => setJumpHighlightId(cur => (cur === mid ? null : cur)), 1900);
+  }, []);
+
+  const jumpToMessage = useCallback(async (targetMsgId) => {
+    if (!targetMsgId || !selectedPerson || !employeeId || jumpBusyRef.current) return;
+    const el = document.getElementById(`dm-msg-${targetMsgId}`);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); flashMessage(targetMsgId); return; }
+    if (!oldestDocRef.current) return;
+    jumpBusyRef.current = true;
+    setLoadingMore(true);
+    try {
+      const cid = convId(employeeId, selectedPerson.employeeId);
+      let cursor = oldestDocRef.current;
+      let oldestFetched = null;
+      let collected = [];
+      let found = false;
+      let lastLen = 0;
+      for (let page = 0; page < 10 && cursor; page++) {
+        const snap = await getDocs(query(
+          collection(firebaseDb, "cowork_direct_messages", cid, "messages"),
+          orderBy("createdAt", "asc"),
+          endBefore(cursor),
+          limitToLast(100)
+        ));
+        if (snap.docs.length === 0) break;
+        lastLen = snap.docs.length;
+        cursor = snap.docs[0];
+        oldestFetched = snap.docs[0];
+        const older = snap.docs.map(d => ({
+          ...d.data(), id: d.id,
+          createdAt: tsToISO(d.data().createdAt),
+          temp: false, sending: false, error: false,
+          _older: true,
+        }));
+        collected = [...older, ...collected];
+        if (older.some(m => (m.messageId || m.id) === targetMsgId)) { found = true; break; }
+        if (snap.docs.length < 100) break;
+      }
+      if (collected.length > 0) {
+        if (oldestFetched) oldestDocRef.current = oldestFetched;
+        setHasMoreMsgs(lastLen >= 100);
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.messageId || m.id));
+          const newOnes = collected.filter(m => !existingIds.has(m.messageId || m.id));
+          return [...newOnes, ...prev].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        });
+      }
+      if (found) {
+        pendingJumpRef.current = targetMsgId;
+      } else {
+        console.warn("[jumpToMessage] original not found (deleted or beyond 1000-msg cap):", targetMsgId);
+      }
+    } catch (e) { console.error("jumpToMessage:", e); }
+    finally { setLoadingMore(false); jumpBusyRef.current = false; }
+  }, [selectedPerson, employeeId, flashMessage]);
+
+  useEffect(() => {
+    const mid = pendingJumpRef.current;
+    if (!mid) return;
+    const el = document.getElementById(`dm-msg-${mid}`);
+    if (!el) return;
+    pendingJumpRef.current = null;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    flashMessage(mid);
+  }, [messages, flashMessage]);
+
+  useEffect(() => {
+    pendingJumpRef.current = null;
+    jumpBusyRef.current = false;
+    setJumpHighlightId(null);
+  }, [selectedPerson?.employeeId]);
+
   // ── Close nested state + reset sub-chat data when person changes ─────────
   useEffect(() => {
     setNestedOpen(false);
@@ -1174,6 +1306,18 @@ export default function DirectMessagesPage() {
       await updateDoc(doc(firebaseDb, "cowork_direct_messages", cid, "messages", msgId), {
         isDeleted: true, text: "", attachments: [], deletedAt: serverTimestamp(),
       });
+      // FIX: if the deleted message was the conversation's LATEST, the sidebar
+      // preview (conv.lastMessage) still shows its old text — update it too.
+      // Dot-notation touches ONLY text/messageType; sentAt/updatedAt untouched,
+      // so the conversation list does NOT reorder (WhatsApp behavior).
+      const realMsgs = messages.filter(m => !m.temp && !m.error);
+      const lastReal = realMsgs[realMsgs.length - 1];
+      if (lastReal && (lastReal.messageId || lastReal.id) === msgId) {
+        await updateDoc(doc(firebaseDb, "cowork_direct_messages", cid), {
+          "lastMessage.text": "This message was deleted.",
+          "lastMessage.messageType": "deleted",
+        });
+      }
     } catch (e) { console.error("deleteMsg:", e); }
   };
 
@@ -1213,15 +1357,52 @@ export default function DirectMessagesPage() {
 
   const selectPerson = person => {
     if (!person) return;
+    const cid = convId(employeeId, person.employeeId);
+
+    if (selectedPerson?.employeeId === person.employeeId) {
+      setMobileChatOpen(true);
+      setUnread(prev => { const n = { ...prev }; delete n[cid]; return n; });
+      return;
+    }
     setSelectedPerson(person);
     setMessages([]);
     pendingMapRef.current.clear();
     setMobileChatOpen(true);
-    const cid = convId(employeeId, person.employeeId);
     setUnread(prev => { const n = { ...prev }; delete n[cid]; return n; });
   };
 
-  const dlFile = url => { const a = document.createElement("a"); a.href = url; a.download = "file_" + Date.now(); document.body.appendChild(a); a.click(); document.body.removeChild(a); };
+  const dlFile = async (url) => {
+    if (!url) return;
+    // Derive a real filename from the URL, fallback to timestamp
+    const name = (() => {
+      try { const p = new URL(url).pathname.split("/").pop(); return p && p.includes(".") ? decodeURIComponent(p) : "file_" + Date.now(); }
+      catch { return "file_" + Date.now(); }
+    })();
+    // FIX: browsers ignore the `download` attribute on cross-origin URLs, so a plain
+    // <a download> just navigates to Cloudinary. For Cloudinary, inject fl_attachment
+    // so it responds with Content-Disposition: attachment → real download.
+    if (url.includes("res.cloudinary.com") && url.includes("/upload/") && !url.includes("fl_attachment")) {
+      const a = document.createElement("a");
+      a.href = url.replace("/upload/", "/upload/fl_attachment/");
+      a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    }
+    // Non-Cloudinary hosts: fetch → blob → object URL (download attr works on blob:)
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+    } catch (e) {
+      console.error("dlFile:", e);
+      window.open(url, "_blank"); // last resort — at least show the file
+    }
+  };
 
   // ── Thread request listener ───────────────────────────────────────────────
   useEffect(() => {
@@ -1594,6 +1775,8 @@ export default function DirectMessagesPage() {
                           onReply={handleReply}
                           onDeleteMsg={handleDeleteMsg}
                           onEditMsg={handleOpenEdit}
+                          onJumpToReply={jumpToMessage}
+                          highlight={jumpHighlightId === (item.messageId || item.id)}
                         />
                       );
                     });
@@ -1838,6 +2021,20 @@ const CSS = `
 .dm-bubble-wrap .dm-copy-btn { opacity: 0; transition: opacity 0.12s; }
 .dm-bubble-wrap:hover .dm-copy-btn { opacity: 1 !important; }
 @media (hover: none) { .dm-copy-btn { opacity: 1 !important; } }
+@keyframes dm-jump-flash {
+  0% { background: rgba(37,99,235,0.16); box-shadow: 0 0 0 4px rgba(37,99,235,0.10); }
+  60% { background: rgba(37,99,235,0.10); }
+  100% { background: transparent; box-shadow: none; }
+}
+.dm-jump-hl { animation: dm-jump-flash 1.9s ease-out; border-radius: 12px; }
+
+@keyframes dm-jump-flash {
+  0% { background: rgba(37,99,235,0.16); box-shadow: 0 0 0 4px rgba(37,99,235,0.10); }
+  60% { background: rgba(37,99,235,0.10); }
+  100% { background: transparent; box-shadow: none; }
+}
+.dm-jump-hl { animation: dm-jump-flash 1.9s ease-out; border-radius: 12px; }
+
 
 /* Header action buttons */
 .dm-head-call { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid #DCFCE7; background: #F0FDF4; color: #16A34A; cursor: pointer; flex-shrink: 0; transition: background 0.12s; }
