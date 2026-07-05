@@ -365,16 +365,22 @@ export default function PMPDashboard() {
                     <CompCard
                         label="C1 This Quarter"
                         value={loading ? null : c1SopPts > 0 ? `${fmt(c1SopPts)} pts` : "—"}
-                        sub={loading ? "..." : c1SopPts > 0 ? `/ ${c1Max} pts max` : "no closed tasks yet"}
+                        sub={loading ? "..." : c1SopPts > 0 ? "" : "no closed tasks yet"}
                         barPct={c1Max > 0 ? (c1SopPts / c1Max) * 100 : 0}
-                        color={COMP.c1.val} barColor={COMP.c1.bar} loading={loading} />
+                        color={COMP.c1.val}
+                        barColor={COMP.c1.bar}
+                        loading={loading}
+                    />
 
                     <CompCard
                         label="C2 This Quarter"
                         value={loading ? null : c2SopPts > 0 ? `${fmt(c2SopPts)} pts` : "—"}
-                        sub={loading ? "..." : c2SopPts > 0 ? `/ ${c2Max} pts max` : "no goals past deadline"}
+                        sub={loading ? "..." : c2SopPts > 0 ? "" : "no goals past deadline"}
                         barPct={c2Max > 0 ? (c2SopPts / c2Max) * 100 : 0}
-                        color={COMP.c2.val} barColor={COMP.c2.bar} loading={loading} />
+                        color={COMP.c2.val}
+                        barColor={COMP.c2.bar}
+                        loading={loading}
+                    />
 
                     <CompCard
                         label="C3 This Quarter"

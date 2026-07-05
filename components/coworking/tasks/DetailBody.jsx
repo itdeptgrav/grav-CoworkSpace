@@ -1205,7 +1205,7 @@ export default function DetailBody({
                 })()}
 
                 {/* ── EXTENSION REQUEST ── */}
-                {isAssignee && !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
+                {isAssignee & !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
                   <>
                     {!ef.showExtReqForm ? (() => {
                       const _pct = window.__extElapsedPct

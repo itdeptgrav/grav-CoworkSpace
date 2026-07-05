@@ -1111,7 +1111,7 @@ export default function TasksPage() {
         const settings = snap.exists() ? snap.data() : {};
 
         // Import pure utility (no React, safe to dynamic-import)
-        const { calcDueDate, snapToOfficeHours } = await import("../../../lib/officeDueDate");
+        const { calcDueDate, snapToOfficeHours, addWorkingSecs } = await import("../../../lib/officeDueDate");
 
         const taskCreatedAtMs = _task.createdAt?.seconds
           ? _task.createdAt.seconds * 1000
@@ -1119,12 +1119,89 @@ export default function TasksPage() {
             ? new Date(_task.createdAt).getTime()
             : Date.now();
 
-        const dueDate = calcDueDate(
-          Number(_task.deadlineWindowSecs),
-          settings.schedule || null,
-          settings.maxTaskActionGapMinutes || 120,
-          taskCreatedAtMs,
+        // ── ANCHOR CHECK: if a higher-priority task is already running,
+        // this task's dueDate must anchor from that chain, not from now.
+        // Find the highest-priority in_progress task for this employee
+        // that has a dueDate set (meaning it already played).
+        const _TERMINAL = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+        const _p1Priority = Number(_task.priority) || 1;
+        const _allCurrent = allTaskMapRef.current;
+
+        // Read higher-priority tasks directly from Firestore — NOT from allTaskMapRef
+        // because onSnapshot may not have fired yet with their latest dueDate.
+        const { getDocs, collection, query, where } = await import("firebase/firestore");
+        const _higherSnap = await getDocs(
+          query(
+            collection(firebaseDb, "cowork_tasks"),
+            where("assigneeIds", "array-contains", employeeId),
+          )
         );
+        const _higherRunning = _higherSnap.docs
+          .map(d => ({ taskId: d.id, ...d.data() }))
+          .filter(t =>
+            t.taskId !== newTaskId &&
+            Number(t.priority) < _p1Priority &&
+            t.dueDate &&
+            !_TERMINAL.includes(t.status)
+          )
+          .sort((a, b) => Number(b.priority) - Number(a.priority));
+
+        // Also find tasks between the running P1 and this task
+        // to compute cumulative anchor
+        let _anchorMs;
+        if (_higherRunning.length > 0) {
+          // There is a running higher-priority task.
+          // Walk the chain from P1 → this task's position.
+          // Find all tasks with priority between P1 and this task (exclusive)
+          const _runningP1 = _higherRunning[0]; // highest priority (lowest number) running
+          const _runningP1Priority = Number(_runningP1.priority);
+
+          // Get tasks between P1 and this task, sorted by priority
+          const _between = [...(_allCurrent?.values() || [])]
+            .filter(t =>
+              t.taskId !== newTaskId &&
+              Number(t.priority) > _runningP1Priority &&
+              Number(t.priority) < _p1Priority &&
+              !_TERMINAL.includes(t.status) &&
+              (t.assigneeIds || []).includes(employeeId)
+            )
+            .sort((a, b) => Number(a.priority) - Number(b.priority));
+
+          // Start anchor from P1's due date
+          _anchorMs = new Date(_runningP1.dueDate).getTime();
+
+          // Walk through intermediate tasks to build cumulative anchor
+          for (const _bt of _between) {
+            const _btWindow = Number(_bt.deadlineWindowSecs) || 0;
+            const _btTimerSnap = await _gd(
+              _d(firebaseDb, "cowork_task_timers", employeeId, "sessions", _bt.taskId)
+            ).catch(() => null);
+            const _btTd = _btTimerSnap?.exists() ? _btTimerSnap.data() : null;
+            const _btWorked = _btTd
+              ? (Number(_btTd.totalSeconds) || 0) +
+              (_btTd.isActive && _btTd.lastStartTime
+                ? Math.floor((Date.now() - Number(_btTd.lastStartTime)) / 1000) : 0)
+              : 0;
+            const _btRemaining = Math.max(0, _btWindow - _btWorked);
+            _anchorMs += _btRemaining * 1000;
+          }
+
+          console.log(`[anchor-check] P${_p1Priority} task anchored from P${_runningP1Priority} chain → ${new Date(_anchorMs).toISOString()}`);
+        }
+
+        // If anchor found → compute dueDate from chain anchor + this task's window
+        // If no higher running task → normal calcDueDate from now
+        const dueDate = _anchorMs
+          ? snapToOfficeHours(
+            _anchorMs + Number(_task.deadlineWindowSecs) * 1000,
+            settings.schedule || null
+          )
+          : calcDueDate(
+            Number(_task.deadlineWindowSecs),
+            settings.schedule || null,
+            settings.maxTaskActionGapMinutes || 120,
+            taskCreatedAtMs,
+          );
 
         // Start timer THEN write dueDate so the hook and Firestore are in sync
         timerStart(newTaskId, newTaskTitle);
@@ -1135,79 +1212,77 @@ export default function TasksPage() {
           updatedAt: _st(),
         });
 
-        // ── DELTA CORRECTION: shift lower-priority cascade-affected tasks ──────
-        // The cascade estimated P1 would finish at cascadeEstimatedDueDate.
-        // P1 actually started now → actual finish = now + deadlineWindowSecs.
-        // Delta = actual finish - estimated finish. If positive (late start),
-        // push every lower-priority task's deadline forward by that delta.
+        // ── CHAIN RECALCULATION: P1 first-play → recalculate all lower-priority deadlines ──
+        // Rule: P2.due = P1.due + P2.remainingWork (office-hours aware)
+        //       P3.due = P2.due + P3.remainingWork
+        //       ...sorted by priority ascending, processed sequentially.
+        // This fires ONCE on P1's first play. Post-swap corrections handled by delta block.
         try {
-          const _cascadeEstMs = Number(_task.cascadeEstimatedAtMs) || 0;
-          const _actualFinishMs = new Date(dueDate).getTime();
-          const _deltaMs = _actualFinishMs - _cascadeEstMs;
+          const _allCurrent = allTaskMapRef.current;
+          const _p1Priority = Number(_task.priority) || 1;
+          const _TERMINAL = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+          const _sched = settings.schedule || null;
 
-          if (_deltaMs > 5000) {  // only correct if >5s gap (ignore rounding noise)
-            console.log(`[delta-correction] P1 late by ${Math.round(_deltaMs / 1000)}s — shifting lower tasks`);
-            const _allCurrent = allTaskMapRef.current;
-            const _p1Priority = Number(_task.priority) || 1;
+          // Get all lower-priority active tasks for this employee, sorted P2→P3→P4...
+          const _lowerTasks = [...(_allCurrent?.values() || [])]
+            .filter(t =>
+              t.taskId !== newTaskId &&
+              Number(t.priority) > _p1Priority &&
+              !_TERMINAL.includes(t.status) &&
+              (t.assigneeIds || []).includes(employeeId) &&
+              (Number(t.deadlineWindowSecs) > 0 || t.fixedDeadline || t.dueDate)
+            )
+            .sort((a, b) => Number(a.priority) - Number(b.priority));
 
-            // Collect tasks to shift: lower priority + touched by cascade + not terminal
-            const _TERMINAL = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
-            const _toShift = [...(_allCurrent?.values() || [])]
-              .filter(t =>
-                t.taskId !== newTaskId &&
-                Number(t.priority) > _p1Priority &&
-                t.cascadeAssumedP1FinishMs > 0 &&
-                !_TERMINAL.includes(t.status) &&
-                (t.assigneeIds || []).includes(employeeId)
-              );
+          if (_lowerTasks.length > 0) {
+            // Start chain from P1's actual due date
+            let _chainAnchorMs = new Date(dueDate).getTime();
 
-            for (const _st_task of _toShift) {
-              const _hasDeadline = _st_task.fixedDeadline || _st_task.dueDate;
-              if (_hasDeadline) {
-                // Deadline task: shift the wall-clock deadline by delta
-                const _deadlineField = _st_task.fixedDeadline ? "fixedDeadline" : "dueDate";
-                const _oldDeadlineMs = new Date(_st_task[_deadlineField]).getTime();
-                // Snap to office hours: raw shift may land at night/weekend
-                const _newDeadlineISO = snapToOfficeHours(_oldDeadlineMs + _deltaMs, settings.schedule || null);
-                await _ud(_d(firebaseDb, "cowork_tasks", _st_task.taskId), {
-                  [_deadlineField]: _newDeadlineISO,
-                  cascadeAssumedP1FinishMs: null,   // clear — correction applied
-                  updatedAt: _st(),
-                });
-                // Optimistic local update
-                setAllTasks(prev => prev.map(t =>
-                  t.taskId === _st_task.taskId ? { ...t, [_deadlineField]: _newDeadlineISO } : t
-                ));
-                if (_allCurrent?.has(_st_task.taskId)) {
-                  _allCurrent.set(_st_task.taskId, { ..._allCurrent.get(_st_task.taskId), [_deadlineField]: _newDeadlineISO });
-                }
-                console.log(`[delta-correction] shifted ${_st_task.taskId} (${_st_task.title}) +${Math.round(_deltaMs / 60000)}min`);
-              } else if (_st_task.deadlineWindowSecs > 0) {
-                // Timer task: extend the budget by delta seconds
-                const _extraSecs = Math.round(_deltaMs / 1000);
-                const _newWindowSecs = Number(_st_task.deadlineWindowSecs) + _extraSecs;
-                await _ud(_d(firebaseDb, "cowork_tasks", _st_task.taskId), {
-                  deadlineWindowSecs: _newWindowSecs,
-                  cascadeAssumedP1FinishMs: null,
-                  updatedAt: _st(),
-                });
-                setAllTasks(prev => prev.map(t =>
-                  t.taskId === _st_task.taskId ? { ...t, deadlineWindowSecs: _newWindowSecs } : t
-                ));
-                if (_allCurrent?.has(_st_task.taskId)) {
-                  _allCurrent.set(_st_task.taskId, { ..._allCurrent.get(_st_task.taskId), deadlineWindowSecs: _newWindowSecs });
-                }
-                console.log(`[delta-correction] extended timer ${_st_task.taskId} (${_st_task.title}) +${_extraSecs}s`);
+            for (const _ct of _lowerTasks) {
+              // Remaining work = full window - already worked seconds
+              const _timerSnap = await _gd(
+                _d(firebaseDb, "cowork_task_timers", employeeId, "sessions", _ct.taskId)
+              ).catch(() => null);
+              const _td = _timerSnap?.exists() ? _timerSnap.data() : null;
+              const _workedSecs = _td
+                ? (Number(_td.totalSeconds) || 0) +
+                (_td.isActive && _td.lastStartTime
+                  ? Math.floor((Date.now() - Number(_td.lastStartTime)) / 1000)
+                  : 0)
+                : 0;
+              const _windowSecs = Number(_ct.deadlineWindowSecs) || 0;
+              const _remainingSecs = Math.max(0, _windowSecs - _workedSecs);
+
+              // New due = anchor + remaining working seconds (fully office-hours aware).
+              const _newDueISO = addWorkingSecs(_chainAnchorMs, _remainingSecs, _sched);
+
+              // Write to Firestore
+              const _updatePayload = {
+                dueDate: _newDueISO,
+                cascadeAssumedP1FinishMs: null, // clear post-swap flag
+                updatedAt: _st(),
+              };
+              await _ud(_d(firebaseDb, "cowork_tasks", _ct.taskId), _updatePayload);
+
+              // Optimistic local update
+              setAllTasks(prev => prev.map(t =>
+                t.taskId === _ct.taskId ? { ...t, dueDate: _newDueISO } : t
+              ));
+              if (_allCurrent?.has(_ct.taskId)) {
+                _allCurrent.set(_ct.taskId, { ..._allCurrent.get(_ct.taskId), dueDate: _newDueISO });
               }
+
+              console.log(`[chain-recalc] ${_ct.taskId} (P${_ct.priority}) → due ${_newDueISO} (anchor+${Math.round(_remainingSecs / 60)}min remaining)`);
+
+              // Next task anchors from THIS task's new due date
+              _chainAnchorMs = new Date(_newDueISO).getTime();
             }
-          } else {
-            console.log(`[delta-correction] delta=${Math.round((_deltaMs || 0) / 1000)}s — within tolerance, no correction needed`);
           }
-        } catch (_de) {
-          console.error("[delta-correction] failed:", _de.message);
-          // Non-fatal — timer already started, dueDate already written
+        } catch (_ce) {
+          console.error("[chain-recalc] failed:", _ce.message);
+          // Non-fatal — timer started, P1 dueDate written, lower tasks keep old deadlines
         }
-        // ── END DELTA CORRECTION ─────────────────────────────────────────────
+        // ── END CHAIN RECALCULATION ───────────────────────────────────────────
 
         // Optimistic local update so the banner / DetailBody reflect immediately
         const _now8 = Date.now() + 8000;
@@ -2392,7 +2467,95 @@ export default function TasksPage() {
     // API actions
     setActionBusy(true);
     try {
-      if (type === "confirm") await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+      if (type === "confirm") {
+        await apiFetch(`/cowork/task/${tid}/confirm`, { method: "POST" });
+
+        // ── CHAIN DUE DATE: set dueDate at confirm time if higher-priority
+        // tasks already have dueDates set (from P1 play chain recalculation).
+        // P2 must be confirmed before P3 → so by P3 confirm, P2.dueDate exists.
+        try {
+          // Read fresh from Firestore — allTaskMapRef may be stale at confirm time
+          const { getDoc: _ctGd, doc: _ctD } = await import("firebase/firestore");
+          const _ctSnap = await _ctGd(_ctD(firebaseDb, "cowork_tasks", tid));
+          const _ct = _ctSnap.exists() ? { taskId: tid, ..._ctSnap.data() } : targetTask;
+          const _ctP = Number(_ct?.priority) || 99;
+          const _ctWindow = Number(_ct?.deadlineWindowSecs)
+            || Number(_ct?.senderTimerWindowSecs)
+            || 0;
+          if (_ctWindow > 0) {
+            const _TERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+            // Find immediate predecessor — highest priority task with lower number than this
+            const { getDocs: _cDocs, collection: _cCol, query: _cQ, where: _cW }
+              = await import("firebase/firestore");
+            // Use the confirmed task's assignee — not the logged-in user (may be CEO)
+            const _taskAssignee = (_ct?.assigneeIds || [])[0] || employeeId;
+            const _freshSnap = await _cDocs(
+              _cQ(
+                _cCol(firebaseDb, "cowork_tasks"),
+                _cW("assigneeIds", "array-contains", _taskAssignee)
+              )
+            );
+            const _allHigher = _freshSnap.docs
+              .map(d => ({ taskId: d.id, ...d.data() }))
+              .filter(t =>
+                t.taskId !== tid &&
+                Number(t.priority) < _ctP &&
+                !_TERM.includes(t.status) &&
+                (t.assigneeIds || []).includes(_taskAssignee)
+              )
+              .sort((a, b) => Number(a.priority) - Number(b.priority)); // P1 first
+
+
+            // Load schedule + addWorkingSecs BEFORE the chain loop so estimated
+            // anchors (unplayed tasks) also respect office hours — not raw ms.
+            const { doc: _fd, updateDoc: _fu, serverTimestamp: _fs } = await import("firebase/firestore");
+            const { addWorkingSecs: _aws } = await import("../../../lib/officeDueDate");
+            const _settingsSnap = await (await import("firebase/firestore")).getDoc(
+              _fd(firebaseDb, "cowork_settings", "office")
+            );
+            const _sched = _settingsSnap.exists() ? (_settingsSnap.data().schedule || null) : null;
+
+            // Build cumulative anchor from the full chain above this task.
+            // If a task has no dueDate yet (not played), estimate using addWorkingSecs
+            // so office-hours boundaries are respected even for unplayed tasks.
+            let _chainAnchor = null;
+            for (const _ht of _allHigher) {
+              const _htWindow = Number(_ht.deadlineWindowSecs)
+                || Number(_ht.senderTimerWindowSecs) || 0;
+              if (_ht.dueDate) {
+                // Already played — use actual dueDate as anchor
+                _chainAnchor = new Date(_ht.dueDate).getTime();
+              } else if (_htWindow > 0) {
+                // Not played yet — estimate: addWorkingSecs from current anchor (office-hours aware)
+                const _base = _chainAnchor || Date.now();
+                const _estimated = _aws(_base, _htWindow, _sched);
+                _chainAnchor = new Date(_estimated).getTime();
+              }
+            }
+            const _predecessor = _chainAnchor ? { dueDate: new Date(_chainAnchor).toISOString() } : null;
+
+            if (_predecessor) {
+              const _anchorMs = new Date(_predecessor.dueDate).getTime();
+              const _newDue = _aws(_anchorMs, _ctWindow, _sched);
+
+              await _fu(_fd(firebaseDb, "cowork_tasks", tid), {
+                dueDate: _newDue,
+                updatedAt: _fs(),
+              });
+
+              // Optimistic update
+              setAllTasks(prev => prev.map(t => t.taskId === tid ? { ...t, dueDate: _newDue } : t));
+              if (allTaskMapRef.current?.has(tid)) {
+                allTaskMapRef.current.set(tid, { ...allTaskMapRef.current.get(tid), dueDate: _newDue });
+              }
+              console.log(`[confirm-chain] P${_ctP} dueDate set from P${_predecessor.priority} → ${_newDue}`);
+            }
+          }
+        } catch (_ce) {
+          console.error("[confirm-chain] FATAL:", _ce.message, _ce.stack);
+          alert("[confirm-chain] error: " + _ce.message);
+        }
+      }
       if (type === "start") await apiFetch(`/cowork/task/${tid}/start`, { method: "POST" });
       if (type === "confirm_and_start") {
         try {
@@ -2520,12 +2683,62 @@ export default function TasksPage() {
     if (approvedSecs <= 0) return;
     setApprovingSenderTimer(true);
     // Optimistic update
+    // Compute chain-aware dueDate — anchor from highest-priority predecessor's dueDate
+    let _senderDue = new Date(Date.now() + approvedSecs * 1000).toISOString();
+    try {
+      const { addWorkingSecs: _awsDefault } = await import("../../../lib/officeDueDate");
+      const _defSnap = await (await import("firebase/firestore")).getDoc(
+        (await import("firebase/firestore")).doc(firebaseDb, "cowork_settings", "office")
+      );
+      const _defSched = _defSnap.exists() ? (_defSnap.data().schedule || null) : null;
+      _senderDue = _awsDefault(Date.now(), approvedSecs, _defSched);
+    } catch (_defE) {
+      console.error("[senderTimer-default]", _defE.message);
+    }
+    try {
+      const _assignee = (selectedTask.assigneeIds || [])[0] || employeeId;
+      const _thisP = Number(selectedTask.priority) || 99;
+      const _TERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+      const _higherTasks = [...(allTaskMapRef.current?.values() || [])]
+        .filter(t =>
+          t.taskId !== selectedTask.taskId &&
+          Number(t.priority) < _thisP &&
+          !_TERM.includes(t.status) &&
+          (t.assigneeIds || []).includes(_assignee)
+        )
+        .sort((a, b) => Number(a.priority) - Number(b.priority));
+
+      if (_higherTasks.length > 0) {
+        const { addWorkingSecs: _aws } = await import("../../../lib/officeDueDate");
+        const _settingsSnap = await (await import("firebase/firestore")).getDoc(
+          (await import("firebase/firestore")).doc(firebaseDb, "cowork_settings", "office")
+        );
+        const _sched = _settingsSnap.exists() ? (_settingsSnap.data().schedule || null) : null;
+        let _anchor = null;
+        for (const _ht of _higherTasks) {
+          const _htW = Number(_ht.deadlineWindowSecs) || Number(_ht.senderTimerWindowSecs) || 0;
+          if (_ht.dueDate) {
+            _anchor = new Date(_ht.dueDate).getTime();
+          } else if (_htW > 0) {
+            const _base = _anchor || Date.now();
+            _anchor = new Date(_aws(_base, _htW, _sched)).getTime();
+          }
+        }
+        if (_anchor) {
+          _senderDue = _aws(_anchor, approvedSecs, _sched);
+        }
+      }
+    } catch (_e) {
+      console.error("[senderTimer-chain]", _e.message);
+    }
+
     const optimistic = {
       status: "in_progress",
       deadlineWindowSecs: approvedSecs,
       originalWindowSecs: approvedSecs,
-      dueDate: new Date(Date.now() + approvedSecs * 1000).toISOString(),
+      dueDate: _senderDue,
     };
+
     ignoreLiveUntilRef.current[selectedTask.taskId] = Date.now() + 5000;
     setAllTasks(prev => prev.map(t => t.taskId === selectedTask.taskId ? { ...t, ...optimistic } : t));
     setSelectedTask(prev => prev ? { ...prev, ...optimistic } : prev);
@@ -2533,9 +2746,16 @@ export default function TasksPage() {
     setSenderTimerNegotiateModal(null);
     try {
       await apiFetch(`/cowork/task/${selectedTask.taskId}/approve-sender-timer`, { method: "POST" });
-      // Confirm & start in the same action — no second "Confirm & Start" step needed
       await apiFetch(`/cowork/task/${selectedTask.taskId}/confirm`, { method: "POST" });
       await apiFetch(`/cowork/task/${selectedTask.taskId}/start`, { method: "POST" });
+      // Write chain-corrected dueDate to Firestore
+      if (_senderDue) {
+        const { doc: _fd, updateDoc: _fu } = await import("firebase/firestore");
+        await _fu(_fd(firebaseDb, "cowork_tasks", selectedTask.taskId), {
+          dueDate: _senderDue,
+          updatedAt: new Date(),
+        });
+      }
     } catch (e) {
       alert(e.message);
       // Rollback
