@@ -5608,13 +5608,18 @@ em-emoji-picker,
           })();
 
           filteredRoots.sort((a, b) => {
-            // Use per-person assigneePriorities when available, else fall back to shared priority/order
+            // FIX: display order follows the P-badge (priority field) so P3 can never
+            // render below P4. Positional data (assigneePriorities/order) only breaks
+            // ties WITHIN the same priority — drag-drop still reorders equal-P tasks.
+            const apr = Number(a.priority ?? 999);
+            const bpr = Number(b.priority ?? 999);
+            if (apr !== bpr) return apr - bpr;
             const ap = (_sortEmpId && a.assigneePriorities?.[_sortEmpId] !== undefined)
               ? a.assigneePriorities[_sortEmpId]
-              : (a.order !== undefined ? a.order / 1000 : Number(a.priority ?? 999));
+              : (a.order !== undefined ? a.order / 1000 : 999);
             const bp = (_sortEmpId && b.assigneePriorities?.[_sortEmpId] !== undefined)
               ? b.assigneePriorities[_sortEmpId]
-              : (b.order !== undefined ? b.order / 1000 : Number(b.priority ?? 999));
+              : (b.order !== undefined ? b.order / 1000 : 999);
             if (ap !== bp) return ap - bp;
             return getCreatedMs(b) - getCreatedMs(a);
           });
