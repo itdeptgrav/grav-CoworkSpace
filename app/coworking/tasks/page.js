@@ -9314,7 +9314,9 @@ em-emoji-picker,
               {/* Task info */}
               <div style={{ padding: "10px 14px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Extension Request</div>
-                <div style={{ fontSize: 11, color: "#6B7280" }}>Employee filed a deadline extension before the deadline passed.</div>
+                <div style={{ fontSize: 11, color: "#6B7280" }}>{selectedTask?.deadlineExtRequest?.isPenaltyWaived
+                  ? "✅ Filed before 70% elapsed — recommend Waive Deduction."
+                  : "⚠️ Filed after 70% elapsed — deduction applies per policy."}</div>
               </div>
 
               {/* Confirm Deduction option */}
