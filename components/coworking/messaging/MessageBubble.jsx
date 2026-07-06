@@ -68,12 +68,16 @@ export default function MessageBubble({
     msg, isMe, showSender = true, showAvatar = true,
     isHost = false, onViewSummary = null, onEdit = null, onCancel = null, onCopied,
     onReply = null, onDeleteMsg = null, onEditMsg = null, onImageClick = null,
+    onJumpToReply = null, highlight = false,
 }) {
     const [pdfOpen, setPdfOpen] = useState(false);
     const [imgOpen, setImgOpen] = useState(null);
     const [copyFlash, setCopyFlash] = useState(false);
     const [ctxMenu, setCtxMenu] = useState(false);
     const lastTapRef = useRef(0);
+    // Jump-to-reply: stable DOM id so a reply quote can scroll to this message
+    const rowId = `gc-msg-${msg.messageId || msg.id || ""}`;
+    const rowCls = highlight ? "gc-jump-hl" : "";
 
     const handleCopy = () => {
         if (!msg.text) return;
@@ -95,7 +99,7 @@ export default function MessageBubble({
     /* ── Deleted message placeholder ─────────────────────── */
     if (msg.isDeleted) {
         return (
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexDirection: isMe ? "row-reverse" : "row", minWidth: 0 }}>
+            <div id={rowId} className={rowCls} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, flexDirection: isMe ? "row-reverse" : "row", minWidth: 0 }}>
                 {!isMe && <div style={{ width: 28, flexShrink: 0 }} />}
                 <div style={{ padding: "9px 14px", borderRadius: 12, border: "1.5px dashed #D1D5DB", background: "#F9FAFB", fontSize: 13, color: "#9CA3AF", fontStyle: "italic", display: "flex", alignItems: "center", gap: 7 }}>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
@@ -239,7 +243,8 @@ export default function MessageBubble({
 
     return (
         <div
-            className="mb-bubble-in"
+            id={rowId}
+            className={"mb-bubble-in " + rowCls}
             style={{
                 display: "flex",
                 gap: 8,
@@ -359,7 +364,10 @@ export default function MessageBubble({
                                 boxShadow: isMe && !msg.error ? "0 1px 4px rgba(37,99,235,0.18)" : "none",
                             }}>
                             {msg.replyTo && (
-                                <div style={{ borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.45)" : "#2563EB"}`, padding: "4px 8px", marginBottom: 6, background: isMe ? "rgba(0,0,0,0.12)" : "#EFF6FF", borderRadius: "0 6px 6px 0" }}>
+                                <div
+                                    onClick={(e) => { if (onJumpToReply && msg.replyTo.messageId) { e.stopPropagation(); onJumpToReply(msg.replyTo.messageId); } }}
+                                    title={onJumpToReply && msg.replyTo.messageId ? "Go to original message" : undefined}
+                                    style={{ borderLeft: `3px solid ${isMe ? "rgba(255,255,255,0.45)" : "#2563EB"}`, padding: "4px 8px", marginBottom: 6, background: isMe ? "rgba(0,0,0,0.12)" : "#EFF6FF", borderRadius: "0 6px 6px 0", cursor: onJumpToReply && msg.replyTo.messageId ? "pointer" : "default" }}>
                                     <div style={{ fontSize: 10, fontWeight: 700, color: isMe ? "rgba(255,255,255,0.85)" : "#2563EB", marginBottom: 1 }}>{msg.replyTo.senderName}</div>
                                     <div style={{ fontSize: 11, color: isMe ? "rgba(255,255,255,0.7)" : "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{msg.replyTo.text || "📎 Attachment"}</div>
                                 </div>

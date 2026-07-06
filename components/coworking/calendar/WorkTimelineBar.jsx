@@ -158,6 +158,19 @@ export default function WorkTimelineBar({ employeeId, selectedDate, tasksForDay 
     const [hoveredSeg, setHoveredSeg] = useState(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const containerRef = useRef(null);
+    const [officeSchedule, setOfficeSchedule] = useState(null);
+
+    // ── Fetch office schedule once ────────────────────────────────────────────
+    useEffect(() => {
+        (async () => {
+            try {
+                const { doc, getDoc } = await import("firebase/firestore");
+                const { firebaseDb } = await import("../../../lib/coworkFirebase");
+                const snap = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
+                if (snap.exists()) setOfficeSchedule(snap.data().schedule || null);
+            } catch (e) { console.error("[WorkTimelineBar] schedule fetch:", e.message); }
+        })();
+    }, []);
 
     // ── Fetch logs for all tasks on selectedDate ──────────────────────────────
     useEffect(() => {
@@ -451,6 +464,51 @@ export default function WorkTimelineBar({ employeeId, selectedDate, tasksForDay 
                                         <span style={{ fontSize: 10, color: "#9CA3AF" }}>Idle &gt;10m</span>
                                     </div>
                                 )}
+                            </div>
+                        );
+                    })()}
+                    {/* ── Office Hours Split Summary ── */}
+                    {logs && logs.length > 0 && officeSchedule && (() => {
+                        const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+                        const parseMins = t => { if (!t) return 0; const [h, m] = t.split(":").map(Number); return h * 60 + (m || 0); };
+                        let officeMs = 0, afterMs = 0;
+                        logs.forEach(({ startMs, endMs }) => {
+                            // Walk second by second is too slow — split at office boundary instead
+                            const d = new Date(startMs);
+                            const dayKey = DAY_KEYS[d.getDay()];
+                            const dayCfg = officeSchedule[dayKey];
+                            if (!dayCfg || dayCfg.isOff) { afterMs += endMs - startMs; return; }
+                            const inMins = parseMins(dayCfg.inTime);
+                            const outMins = parseMins(dayCfg.outTime);
+                            const baseDate = new Date(startMs); baseDate.setHours(0, 0, 0, 0);
+                            const officeStart = baseDate.getTime() + inMins * 60000;
+                            const officeEnd = baseDate.getTime() + outMins * 60000;
+                            // Overlap with office hours
+                            const oStart = Math.max(startMs, officeStart);
+                            const oEnd = Math.min(endMs, officeEnd);
+                            const overlap = Math.max(0, oEnd - oStart);
+                            officeMs += overlap;
+                            afterMs += (endMs - startMs) - overlap;
+                        });
+                        const fmtMs = ms => {
+                            const s = Math.round(ms / 1000);
+                            if (s < 60) return `${s}s`;
+                            if (s < 3600) return `${Math.round(s / 60)}m`;
+                            const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+                            return m > 0 ? `${h}h ${m}m` : `${h}h`;
+                        };
+                        return (
+                            <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                                <div style={{ flex: 1, padding: "10px 14px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8 }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: "#16A34A", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Office Hours</div>
+                                    <div style={{ fontSize: 20, fontWeight: 700, color: "#16A34A", fontFamily: "monospace" }}>{fmtMs(officeMs)}</div>
+                                    <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>worked within {officeSchedule[DAY_KEYS[new Date(selectedDate).getDay()]]?.inTime} – {officeSchedule[DAY_KEYS[new Date(selectedDate).getDay()]]?.outTime}</div>
+                                </div>
+                                <div style={{ flex: 1, padding: "10px 14px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 8 }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: "#D97706", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>After Hours</div>
+                                    <div style={{ fontSize: 20, fontWeight: 700, color: "#D97706", fontFamily: "monospace" }}>{fmtMs(afterMs)}</div>
+                                    <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>worked outside office hours</div>
+                                </div>
                             </div>
                         );
                     })()}

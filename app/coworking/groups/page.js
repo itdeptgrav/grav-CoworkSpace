@@ -404,6 +404,8 @@ export default function GroupChatView({ groupId, onBack }) {
 
         const tempId = "temp_" + Date.now();
         const resolvedType = resolveType(messageType, attachments);
+        const currentReplyTo = replyTo;   // capture before clearing
+        setReplyTo(null);                 // clear the "Replying to" banner immediately
 
         const optimistic = {
             messageId: tempId,
@@ -417,6 +419,7 @@ export default function GroupChatView({ groupId, onBack }) {
             messageType: resolvedType,
             type: resolvedType,
             readBy: [employeeId],
+            ...(currentReplyTo ? { replyTo: currentReplyTo } : {}),
             temp: true,
             sending: true,
             error: false,
@@ -477,6 +480,17 @@ export default function GroupChatView({ groupId, onBack }) {
             });
             setEditingMsg(null); setEditText("");
         } catch (e) { console.error("editMsg:", e); }
+    };
+
+    // Jump to the original message when a reply quote is clicked.
+    // Scope: only the loaded window (last 100 msgs) — no pagination in this component.
+    const jumpToMessage = (targetMsgId) => {
+        if (!targetMsgId) return;
+        const el = document.getElementById(`gc-msg-${targetMsgId}`);
+        if (!el) { console.warn("[jumpToMessage] original not in the loaded 100 messages:", targetMsgId); return; }
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setJumpHighlightId(targetMsgId);
+        setTimeout(() => setJumpHighlightId(cur => (cur === targetMsgId ? null : cur)), 1900);
     };
 
     const handleReply = (msg) => {

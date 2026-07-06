@@ -277,6 +277,7 @@ export default function GroupChatView({ groupId, onBack }) {
 
     // ── Reply / Edit state ─────────────────────────────────────────────────
     const [replyTo, setReplyTo] = useState(null);
+    const [jumpHighlightId, setJumpHighlightId] = useState(null); // reply-quote jump flash
     const [editingMsg, setEditingMsg] = useState(null);
     const [editText, setEditText] = useState("");
     const editInputRef = useRef(null);
@@ -397,6 +398,13 @@ export default function GroupChatView({ groupId, onBack }) {
         if (!groupId || !employeeId) return;
 
         const tempId = "temp_" + Date.now();
+        // Deterministic dedup: WE pick the final messageId and seed the pending map
+        // BEFORE the request, so the listener drops the optimistic copy the instant
+        // the real doc arrives — even when Firestore beats the POST response.
+        const clientMsgId = (typeof crypto !== "undefined" && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16); });
+        pendingMapRef.current.set(tempId, clientMsgId);
         const resolvedType = resolveType(messageType, attachments);
 
         const optimistic = {
@@ -411,13 +419,14 @@ export default function GroupChatView({ groupId, onBack }) {
             messageType: resolvedType,
             type: resolvedType,
             readBy: [employeeId],
+            ...(replyTo ? { replyTo } : {}),
             temp: true,
             sending: true,
             error: false,
             createdAt: new Date().toISOString(),
         };
-
         setMessages(prev => [...prev, optimistic]);
+        setReplyTo(null);   // clear the "Replying to" banner
 
         try {
             const result = await apiFetch(`/group/${groupId}/message`, {
@@ -427,6 +436,8 @@ export default function GroupChatView({ groupId, onBack }) {
                     attachments: attachments || [],
                     messageType: resolvedType,
                     mentions: Array.isArray(mentions) ? mentions : [],
+                    ...(replyTo ? { replyTo } : {}),
+                    clientMessageId: clientMsgId,
                 }),
             });
 
@@ -467,6 +478,17 @@ export default function GroupChatView({ groupId, onBack }) {
             });
             setEditingMsg(null); setEditText("");
         } catch (e) { console.error("editMsg:", e); }
+    };
+
+    // Jump to the original message when a reply quote is clicked.
+    // Scope: only the loaded window (last 100 msgs) — no pagination in this component.
+    const jumpToMessage = (targetMsgId) => {
+        if (!targetMsgId) return;
+        const el = document.getElementById(`gc-msg-${targetMsgId}`);
+        if (!el) { console.warn("[jumpToMessage] original not in the loaded 100 messages:", targetMsgId); return; }
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setJumpHighlightId(targetMsgId);
+        setTimeout(() => setJumpHighlightId(cur => (cur === targetMsgId ? null : cur)), 1900);
     };
 
     const handleReply = (msg) => {
@@ -1043,7 +1065,10 @@ export default function GroupChatView({ groupId, onBack }) {
                                     onViewSummary={handleViewSummary}
                                     onCancel={handleCancelMeet}
                                     onEdit={setEditModal}
+
                                     onReply={handleReply}
+                                    onJumpToReply={jumpToMessage}
+                                    highlight={jumpHighlightId === (item.messageId || item.id)}
                                     onDeleteMsg={handleDeleteMsg}
                                     onEditMsg={handleOpenEdit}
                                     onImageClick={(url, name) => setImgLightbox({ url, name })}
@@ -1452,5 +1477,11 @@ const GROUP_CHAT_CSS = `
     .gc-header-btn { padding: 0 !important; width: 34px !important; justify-content: center; }
   }
   @keyframes gc-spin { to { transform: rotate(360deg); } }
+  @keyframes gc-jump-flash {
+    0% { background: rgba(37,99,235,0.16); box-shadow: 0 0 0 4px rgba(37,99,235,0.10); border-radius: 12px; }
+    60% { background: rgba(37,99,235,0.10); }
+    100% { background: transparent; box-shadow: none; }
+  }
+  .gc-jump-hl { animation: gc-jump-flash 1.9s ease-out; }
   @keyframes gc-toast-in { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 `;
