@@ -2069,7 +2069,7 @@ export default function SopPage() {
         )}
 
         {/* ── Employee own history ── */}
-        {role === "employee" && <OwnHistory employeeId={employeeId} />}
+        {(role === "employee" || role === "tl") && <OwnHistory employeeId={employeeId} />}
 
         {/* ── SOP list ── */}
         {(role === "ceo" || role === "tl") && (
