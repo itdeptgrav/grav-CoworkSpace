@@ -191,8 +191,13 @@ export default function WorkTimelineBar({ employeeId, selectedDate, tasksForDay 
 
                 // Fetch all commits for this employee and filter by date in JS
                 // (Firestore Timestamp comparison requires server-side index we may not have)
+                const { query: _wq, orderBy: _wo, limit: _wl } = await import("firebase/firestore");
                 const snap = await getDocs(
-                    collection(firebaseDb, "cowork_work_commits", employeeId, "logs")
+                    _wq(
+                        collection(firebaseDb, "cowork_work_commits", employeeId, "logs"),
+                        _wo("stoppedAt", "desc"),
+                        _wl(200)
+                    )
                 );
 
                 const dayLogs = [];

@@ -1346,16 +1346,6 @@ export default function DirectMessagesPage() {
     } catch (e) { console.error("editMsg:", e); }
   };
 
-  // Jump to the original message when a reply quote is clicked.
-  // Scope: only the loaded window (last 100 msgs) — no pagination in this component.
-  const jumpToMessage = (targetMsgId) => {
-    if (!targetMsgId) return;
-    const el = document.getElementById(`gc-msg-${targetMsgId}`);
-    if (!el) { console.warn("[jumpToMessage] original not in the loaded 100 messages:", targetMsgId); return; }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setJumpHighlightId(targetMsgId);
-    setTimeout(() => setJumpHighlightId(cur => (cur === targetMsgId ? null : cur)), 1900);
-  };
 
   const handleReply = (msg) => { setReplyTo({ messageId: msg.messageId || msg.id, senderName: msg.senderName || "Unknown", text: (msg.text || "").slice(0, 120) }); setEditingMsg(null); };
   const handleOpenEdit = (msg) => { if (msg.senderId !== employeeId) return; setEditingMsg(msg); setEditText(msg.text || ""); setReplyTo(null); setTimeout(() => editInputRef.current?.focus(), 50); };

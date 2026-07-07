@@ -1097,12 +1097,7 @@ export default function TasksPage() {
           const _EXTERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
 
           // Fresh read from Firestore — not stale state
-          const _exFreshSnap = await _exGD(
-            _exQ(
-              _exCol(firebaseDb, "cowork_tasks"),
-              _exW("assigneeIds", "array-contains", _exAssignee)
-            )
-          );
+          const _exFreshSnap = { docs: [...allTaskMapRef.current.values()].filter(t => (t.assigneeIds || []).includes(_exAssignee)).map(t => ({ id: t.taskId, data: () => t })) };
           const _exLower = _exFreshSnap.docs
             .map(d => ({ taskId: d.id, ...d.data() }))
             .filter(t =>
@@ -1177,12 +1172,13 @@ export default function TasksPage() {
         // Read higher-priority tasks directly from Firestore — NOT from allTaskMapRef
         // because onSnapshot may not have fired yet with their latest dueDate.
         const { getDocs, collection, query, where } = await import("firebase/firestore");
-        const _higherSnap = await getDocs(
-          query(
-            collection(firebaseDb, "cowork_tasks"),
-            where("assigneeIds", "array-contains", employeeId),
-          )
-        );
+        // Use allTaskMapRef (already live via onSnapshot) — no extra Firestore read needed.
+        // onSnapshot keeps this current so dueDate is always fresh.
+        const _higherSnap = {
+          docs: [...allTaskMapRef.current.values()]
+            .filter(t => (t.assigneeIds || []).includes(employeeId))
+            .map(t => ({ id: t.taskId, data: () => t }))
+        };
         const _higherRunning = _higherSnap.docs
           .map(d => ({ taskId: d.id, ...d.data() }))
           .filter(t =>
@@ -1630,6 +1626,7 @@ export default function TasksPage() {
         batch.update(_doc(firebaseDb, "cowork_tasks", u.taskId), fields);
       });
       await batch.commit();
+
     } catch (e) { console.error("[drag] batch update:", e.message); }
   }, []);
 
@@ -1820,7 +1817,7 @@ export default function TasksPage() {
             const { getDocs: _gd, collection: _col, query: _q, where: _w, doc: _d, updateDoc: _u, serverTimestamp: _st } = await import("firebase/firestore");
 
             // Fresh Firestore read — no stale state
-            const _snap = await _gd(_q(_col(firebaseDb, "cowork_tasks"), _w("assigneeIds", "array-contains", _assignee)));
+            const _snap = { docs: [...allTaskMapRef.current.values()].filter(t => (t.assigneeIds || []).includes(_assignee)).map(t => ({ id: t.taskId, data: () => t })) };
             const _lower = _snap.docs
               .map(d => ({ taskId: d.id, ...d.data() }))
               .filter(t =>
@@ -2167,11 +2164,17 @@ export default function TasksPage() {
     };
   }, []);
 
-  const loadAllTasks = useCallback(async () => {
+  const taskCursorRef = useRef(null);
+  const loadingMoreRef = useRef(false);
+  const loadAllTasks = useCallback(async (reset = true) => {
     if (!employeeId) return;
+    if (reset) taskCursorRef.current = null;
     setTasksLoading(true);
     try {
-      let tasks = await listTasks();
+      const { tasks: fetchedTasks, nextCursor, hasMore } = await listTasks(taskCursorRef.current, 100);
+      taskCursorRef.current = hasMore ? nextCursor : null;
+      const existing = reset ? [] : [...allTaskMapRef.current.values()];
+      let tasks = [...existing, ...fetchedTasks];
 
       // ── Dedup by taskId (backend may return duplicates from multiple queries) ──
       const seenIds = new Set();
@@ -5297,7 +5300,7 @@ em-emoji-picker,
                       const _BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
                       const _assignees = allTaskMapRef.current?.get(dragId)?.assigneeIds || [];
                       for (const _empId of _assignees) {
-                        fetch(`${_BASE}/cowork/task/p1-conflict-check`, {
+                        await fetch(`${_BASE}/cowork/task/p1-conflict-check`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json", Authorization: `Bearer ${_token}` },
                           body: JSON.stringify({
@@ -5312,6 +5315,58 @@ em-emoji-picker,
                             newP1Priority: _newP1Priority,
                           }),
                         }).catch(e => console.error("[drag-priority-conflict]", e.message));
+                      }
+
+                      // ── Recalculate due dates AFTER conflict check ──
+                      const { addWorkingSecs: _swAws } = await import("../../../lib/officeDueDate");
+                      const { doc: _swDoc, updateDoc: _swUpd, getDoc: _swGet } = await import("firebase/firestore");
+                      const { firebaseDb: _swDb } = await import("../../../lib/coworkFirebase");
+                      const _swSettingsSnap = await _swGet(_swDoc(_swDb, "cowork_settings", "office"));
+                      const _swSched = _swSettingsSnap.exists() ? (_swSettingsSnap.data().schedule || null) : null;
+                      const _swSharedAssignee = (_assignees || [])[0] || null;
+                      const _swSiblings = [...(allTaskMapRef.current?.values() || [])]
+                        .filter(t => {
+                          if ((t.parentTaskId || null) !== (parentId || null)) return false;
+                          if (["done", "cancelled"].includes(t.status)) return false;
+                          if (!t.deadlineWindowSecs && !t.senderTimerWindowSecs) return false;
+                          return (t.assigneeIds || []).includes(_swSharedAssignee);
+                        })
+                        .sort((a, b) => {
+                          const ap = _swSharedAssignee ? (a.assigneePriorities?.[_swSharedAssignee] ?? a.priority ?? 999) : (a.priority ?? 999);
+                          const bp = _swSharedAssignee ? (b.assigneePriorities?.[_swSharedAssignee] ?? b.priority ?? 999) : (b.priority ?? 999);
+                          return ap - bp;
+                        });
+                      const _swP1Task = _swSiblings[0];
+                      const _swP1StartedAt = (() => {
+                        const _s = _swP1Task?.startedAt;
+                        if (!_s) return null;
+                        if (_s?.seconds) return _s.seconds * 1000;
+                        if (_s?._seconds) return _s._seconds * 1000;
+                        const _ms = new Date(_s).getTime();
+                        return isNaN(_ms) ? null : _ms;
+                      })();
+                      const _swTodayKey = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][new Date().getDay()];
+                      const _swDayCfg = _swSched?.[_swTodayKey];
+                      const _swOfficeOpenMs = (() => {
+                        if (_swDayCfg && !_swDayCfg.isOff && _swDayCfg.inTime) {
+                          const [_h, _m] = _swDayCfg.inTime.split(":").map(Number);
+                          const _open = new Date(); _open.setHours(_h, _m, 0, 0);
+                          return _open.getTime();
+                        }
+                        return Date.now();
+                      })();
+                      let _swAnchorMs = (_swP1StartedAt && (Date.now() - _swP1StartedAt) < 86400000)
+                        ? _swP1StartedAt : _swOfficeOpenMs;
+                      for (const _swT of _swSiblings) {
+                        const _swWindow = Number(_swT.deadlineWindowSecs) || Number(_swT.senderTimerWindowSecs) || 0;
+                        if (_swWindow <= 0) continue;
+                        const _swNewDue = _swAws(_swAnchorMs, _swWindow, _swSched);
+                        _swAnchorMs = new Date(_swNewDue).getTime();
+                        await _swUpd(_swDoc(_swDb, "cowork_tasks", _swT.taskId), { dueDate: _swNewDue, updatedAt: new Date() });
+                        setAllTasks(prev => prev.map(t => t.taskId === _swT.taskId ? { ...t, dueDate: _swNewDue } : t));
+                        if (allTaskMapRef.current?.has(_swT.taskId)) {
+                          allTaskMapRef.current.set(_swT.taskId, { ...allTaskMapRef.current.get(_swT.taskId), dueDate: _swNewDue });
+                        }
                       }
                     } catch (e) {
                       console.error("[drag-priority-conflict]", e.message);
@@ -6505,7 +6560,17 @@ em-emoji-picker,
                   </div>
                 ))}
               </div>
-              <div className="gv-list-body">
+              <div
+                className="gv-list-body"
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+                  if (nearBottom && taskCursorRef.current && !loadingMoreRef.current) {
+                    loadingMoreRef.current = true;
+                    loadAllTasks(false).finally(() => { loadingMoreRef.current = false; });
+                  }
+                }}
+              >
                 {/* Timeline View */}
 
 
