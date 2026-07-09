@@ -428,9 +428,6 @@ export default function GroupChatView({ groupId, onBack }) {
 
         setMessages(prev => [...prev, optimistic]);
 
-        const currentReplyTo = replyTo;
-        setReplyTo(null);
-
         try {
             const result = await apiFetch(`/group/${groupId}/message`, {
                 method: "POST",
