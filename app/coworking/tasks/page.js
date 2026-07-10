@@ -1136,6 +1136,7 @@ export default function TasksPage() {
     // settings to compute the correct wall-clock dueDate before starting.
     const _task = allTaskMapRef.current?.get(newTaskId);
     const _existingSession = timerSessionMap?.get(newTaskId);
+    const _taskWindowSecs = Number(_task?.deadlineWindowSecs) || Number(_task?.senderTimerWindowSecs) || 0;
     const _isFirstStart = _task && (
       ["confirmed", "deadline_approved"].includes(_task.status) ||
       (
@@ -1145,7 +1146,7 @@ export default function TasksPage() {
       )
     );
 
-    if (_isFirstStart && Number(_task.deadlineWindowSecs) > 0) {
+    if (_isFirstStart && _taskWindowSecs > 0) {
       try {
         const { getDoc: _gd, doc: _d, updateDoc: _ud, serverTimestamp: _st }
           = await import("firebase/firestore");
@@ -1236,11 +1237,11 @@ export default function TasksPage() {
         // If no higher running task → normal calcDueDate from now
         const dueDate = _anchorMs
           ? snapToOfficeHours(
-            _anchorMs + Number(_task.deadlineWindowSecs) * 1000,
+            _anchorMs + _taskWindowSecs * 1000,
             settings.schedule || null
           )
           : calcDueDate(
-            Number(_task.deadlineWindowSecs),
+            _taskWindowSecs,
             settings.schedule || null,
             settings.maxTaskActionGapMinutes || 120,
             taskCreatedAtMs,
@@ -1715,6 +1716,12 @@ export default function TasksPage() {
         attachments,
         hasAttachments: attachments.length > 0,
       });
+
+      // ── Timer SOP evaluation — fire-and-forget ────────────────────────
+      apiFetch("/cowork/timer-sop/evaluate", {
+        method: "POST",
+        body: JSON.stringify({ employeeId, employeeName }),
+      }).catch(e => console.warn("[timerSop] evaluate call failed:", e.message));
     } catch (e) {
       console.error("[commit] write error:", e.message);
     } finally {
@@ -7834,8 +7841,13 @@ em-emoji-picker,
                       </div>
                     )}
 
-                    {/* Step 1b: Timer task — sender preset OR employee proposes duration */}
-                    {!hasDueDate && status === "open" && task.hasTimer === true && (() => {
+                    {/* Step 1b: Timer task — sender preset OR employee proposes duration.
+                        Self-assigned tasks are excluded — they already have their own
+                        "Awaiting approval" banner above; this one is for a DIFFERENT
+                        person (the manager) having set a suggested time for the
+                        assignee to approve or negotiate, which doesn't apply when the
+                        creator and the assignee are the same person. */}
+                    {!hasDueDate && status === "open" && task.hasTimer === true && !task.isSelfAssigned && (() => {
                       const senderSecs = Number(task.senderTimerWindowSecs) || 0;
                       const fmtS = (s) => { if (!s) return "0m"; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`; if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`; return `${m}m`; };
                       if (senderSecs > 0 && !task.senderTimerRejected) {
@@ -9236,7 +9248,11 @@ em-emoji-picker,
             autoStopped: true,
             reason: "submission",
           });
+          apiFetch("/cowork/timer-sop/evaluate", { method: "POST", body: JSON.stringify({}) })
+            .catch(e => console.warn("[timerSop] evaluate call failed:", e.message));
+
         } catch (e) {
+
           console.error("[auto-pause on submit]", e.message);
         }
         timerPause(taskId, taskTitle);

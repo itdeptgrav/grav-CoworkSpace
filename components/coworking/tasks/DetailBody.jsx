@@ -16,13 +16,15 @@
  * - IBM Plex Sans, #1B4F8A brand color
  */
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GwAvatar } from "../shared/CoworkShared";
 import { ReportCard, ReportDateGroup } from "./ReportCard";
 import ThirdPartyTask from "./ThirdPartyTask";
 import GoalTask from "./GoalTask";
 import DeadlineBreakdown from "./DeadlineBreakdown";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
+import { firebaseDb } from "../../../lib/coworkFirebase";
+import { addWorkingSecs } from "../../../lib/officeDueDate";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
@@ -302,7 +304,7 @@ function WorkLogsSection({ task }) {
   const [loading, setLoading] = useState(false);
   const [logError, setLogError] = useState("");
 
-  const _origWindowTop = Number(task.deadlineWindowSecs) || 0;
+  const _origWindowTop = Number(task.deadlineWindowSecs) || Number(task.senderTimerWindowSecs) || 0;
   const _hasExtTop = task.deadlineExtRequest?.status === "approved" && task.dueDate;
   const _wallTotalTop = _hasExtTop
     ? Math.round((new Date(task.dueDate).getTime() - (task.startedAt?.seconds
@@ -603,7 +605,7 @@ export default function DetailBody({
   const workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
   // Total window = original + extension (if extension was approved and timer resumed)
   // Use wall-clock remaining from dueDate as total window when extension exists
-  const _origWindow = Number(task.deadlineWindowSecs) || 0;
+  const _origWindow = Number(task.deadlineWindowSecs) || Number(task.senderTimerWindowSecs) || 0;
   const _hasExtension = task.deadlineExtRequest?.status === "approved" && task.dueDate;
   const _wallClockTotal = _hasExtension
     ? Math.round((new Date(task.dueDate).getTime() - (task.startedAt?.seconds
@@ -641,6 +643,126 @@ export default function DetailBody({
 
   // Fixed from the moment the task starts — never recalculates on pause/resume
   const liveDeadlineStr = task.dueDate ? fmtDateTime(task.dueDate) : null;
+
+  // ── Estimated due date (before first play) ──────────────────────────────
+  // task.dueDate is intentionally null until the timer is first started —
+  // the real calculation has to check whether a higher-priority task is
+  // already running and anchor after it, which can't be known in advance.
+  // This is a separate, lower-stakes estimate: "if you started right now,
+  // roughly when would this be due" — same office-hours math, no P1
+  // chain-anchoring. Shown only so the field isn't blank; never written
+  // anywhere, never used by handleTimerStart, never affects the real
+  // dueDate computed at first play.
+  const [officeSchedule, setOfficeSchedule] = useState(null);
+  const [chainAnchorMs, setChainAnchorMs] = useState(undefined); // undefined = not loaded yet, null = no chain
+  const _chainForTaskRef = useRef(null); // which taskId chainAnchorMs currently belongs to
+  // Mirrors handleTimerStart's own _isFirstStart check exactly — a task can
+  // be "in_progress" and still be pre-first-play (self-tasks land here),
+  // not just "confirmed"/"deadline_approved". Missing that branch was why
+  // the estimate went blank again for a task sitting in that exact state.
+  const _neverStarted = !timerSession?.lastStartTime && (timerSession?.totalSeconds || 0) === 0;
+  const _windowSecsForEstimate = Number(task.deadlineWindowSecs) || Number(task.senderTimerWindowSecs) || 0;
+  const _needsEstimate = !task.dueDate && task.hasTimer !== false
+    && _windowSecsForEstimate > 0
+    && (
+      ["confirmed", "deadline_approved"].includes(task.status) ||
+      (task.status === "in_progress" && _neverStarted)
+    );
+
+  useEffect(() => {
+    if (!_needsEstimate || officeSchedule) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getDoc, doc } = await import("firebase/firestore");
+        const snap = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
+        if (!cancelled) setOfficeSchedule(snap.exists() ? (snap.data() || {}) : {});
+      } catch (e) { if (!cancelled) setOfficeSchedule({}); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_needsEstimate, task.taskId]);
+
+  // ── Priority-chain-aware estimate ────────────────────────────────────────
+  // A lower-priority task's estimate should assume it runs AFTER any
+  // higher-priority sibling task, same as what actually happens when you
+  // press Play in priority order. Walks every non-terminal higher-priority
+  // task for the same assignee: uses its real dueDate if it's already been
+  // played, otherwise its OWN stable estimate (from ITS creation time, not
+  // "now" — keeps this whole preview non-drifting the same way the single-
+  // task estimate already is). Deliberately different from the real
+  // confirm-chain logic in tasks/page.js, which anchors an unplayed
+  // predecessor from "now" — that's correct there because it WRITES a
+  // value at that instant; a preview that gets re-rendered repeatedly
+  // shouldn't use a moving anchor.
+  useEffect(() => {
+    if (!_needsEstimate || !officeSchedule || _chainForTaskRef.current === task.taskId) return;
+    _chainForTaskRef.current = task.taskId; // mark immediately — no other effect run for this task will re-enter
+    setChainAnchorMs(undefined); // this task hasn't got a result yet — don't show a stale one from the last task
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getDocs, collection, query, where } = await import("firebase/firestore");
+        const assignee = (task.assigneeIds || [])[0] || task.assignedBy;
+        const thisPriority = Number(task.priority) || 99;
+        if (!assignee || thisPriority <= 1) { if (!cancelled) setChainAnchorMs(null); return; }
+        const TERM = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+        const snap = await getDocs(query(
+          collection(firebaseDb, "cowork_tasks"),
+          where("assigneeIds", "array-contains", assignee),
+        ));
+        const higher = snap.docs
+          .map(d => ({ taskId: d.id, ...d.data() }))
+          .filter(t => t.taskId !== task.taskId && Number(t.priority) < thisPriority && !TERM.includes(t.status))
+          .sort((a, b) => Number(a.priority) - Number(b.priority));
+
+        console.log(`[chain-estimate] ${task.taskId} (P${thisPriority}): found ${snap.docs.length} sibling task(s) for assignee ${assignee}, ${higher.length} qualify as higher-priority:`,
+          higher.map(h => ({ taskId: h.taskId, priority: h.priority, status: h.status, dueDate: h.dueDate, deadlineWindowSecs: h.deadlineWindowSecs, senderTimerWindowSecs: h.senderTimerWindowSecs })));
+
+        let anchor = null;
+        for (const ht of higher) {
+          if (ht.dueDate) {
+            anchor = new Date(ht.dueDate).getTime();
+            continue;
+          }
+          const htWindow = Number(ht.deadlineWindowSecs) || Number(ht.senderTimerWindowSecs) || 0;
+          if (htWindow <= 0) continue;
+          const htCreatedMs = ht.createdAt?.seconds ? ht.createdAt.seconds * 1000
+            : ht.createdAt ? new Date(ht.createdAt).getTime() : Date.now();
+          const base = anchor || htCreatedMs;
+          anchor = new Date(addWorkingSecs(base, htWindow, officeSchedule.schedule || null)).getTime();
+        }
+        console.log(`[chain-estimate] ${task.taskId}: final chain anchor =`, anchor ? new Date(anchor).toString() : "null (no chain)");
+        if (!cancelled) setChainAnchorMs(anchor);
+      } catch (e) {
+        console.error(`[chain-estimate] ${task.taskId}: FAILED —`, e.message, e);
+        if (!cancelled) setChainAnchorMs(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_needsEstimate, officeSchedule, task.taskId]);
+
+  const estimatedDueStr = (() => {
+    if (!_needsEstimate || !officeSchedule || chainAnchorMs === undefined) return null;
+    const createdAtMs = task.createdAt?.seconds
+      ? task.createdAt.seconds * 1000
+      : task.createdAt ? new Date(task.createdAt).getTime() : Date.now();
+    try {
+      // Anchored at createdAtMs (or the chain anchor, whichever is later) —
+      // NOT "now". A preview should read the same whether you check it the
+      // second the task was created or an hour later; only the real
+      // first-play calculation should anchor to "now" (and it does, in
+      // handleTimerStart — untouched by this).
+      const anchorMs = chainAnchorMs ? Math.max(chainAnchorMs, createdAtMs) : createdAtMs;
+      const iso = addWorkingSecs(
+        anchorMs,
+        _windowSecsForEstimate,
+        officeSchedule.schedule || null,
+      );
+      return fmtDateTime(iso);
+    } catch (e) { return null; }
+  })();
 
   // Show date + time (previously only date)
   const createdAt = task.createdAt
@@ -790,7 +912,7 @@ export default function DetailBody({
           )}
 
           {/* ── SECTION: TIMELINE ── */}
-          {(task.dueDate || task.fixedDeadline || task.deadlineWindowSecs) && (
+          {(task.dueDate || task.fixedDeadline || task.deadlineWindowSecs || task.senderTimerWindowSecs) && (
             <>
               <Section title="Timeline" />
 
@@ -885,6 +1007,15 @@ export default function DetailBody({
                     </InfoRow>
                   )}
 
+                  {!liveDeadlineStr && estimatedDueStr && (
+                    <InfoRow label="Est. Due at">
+                      <span style={{ fontWeight: 600, color: "#6B7280" }}>{estimatedDueStr}</span>
+                      <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F3F4F6", padding: "1px 6px", borderRadius: 4 }} title="Not final — the real deadline is set the moment you press Play, and may shift if a higher-priority task is running first.">
+                        estimate
+                      </span>
+                    </InfoRow>
+                  )}
+
                   {/* ── Work Timeline: sessions, usage summary, extension history ── */}
                   <div style={{ padding: "8px 0" }}>
                     <WorkLogsSection task={task} />
@@ -964,12 +1095,12 @@ export default function DetailBody({
                     </div>
                   </div>
                   <button
-                    disabled={(timerBlocked && !isRunningThis) || isTimerExceeded}
+                    disabled={isTimerExceeded}
                     onClick={() => isRunningThis ? timerPause?.(task.taskId, task.title) : timerStart?.(task.taskId, task.title)}
                     style={{
-                      padding: "7px 14px", borderRadius: 6, border: "none", cursor: (timerBlocked && !isRunningThis) || isTimerExceeded ? "not-allowed" : "pointer",
+                      padding: "7px 14px", borderRadius: 6, border: "none", cursor: isTimerExceeded ? "not-allowed" : "pointer",
                       fontFamily: F, fontSize: 11, fontWeight: 600, transition: "all 0.15s",
-                      opacity: (timerBlocked && !isRunningThis) || isTimerExceeded ? 0.4 : 1,
+                      opacity: isTimerExceeded ? 0.4 : 1,
                       background: isRunningThis ? "#DCFCE7" : "#EBF2FA",
                       color: isRunningThis ? "#16A34A" : BRAND,
                     }}>
@@ -982,8 +1113,8 @@ export default function DetailBody({
                   </div>
                 )}
                 {timerBlocked && !isRunningThis && !isTimerExceeded && (
-                  <div style={{ padding: "8px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, fontSize: 11, color: "#92400E" }}>
-                    Another task is currently running. Pause it first.
+                  <div style={{ padding: "8px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1D4ED8" }}>
+                    Another task is currently running — pressing Resume will pause it and start this one.
                   </div>
                 )}
               </div>

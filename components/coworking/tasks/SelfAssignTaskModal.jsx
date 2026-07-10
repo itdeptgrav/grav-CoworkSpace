@@ -16,9 +16,8 @@ export default function SelfAssignTaskModal({
         title: "",
         description: "",
         notes: "",
-        hasTimer: false,
-        deadline: "",
-        deadlineTime: "",
+        requestedHours: 1,
+        requestedMinutes: 0,
     });
 
     const [approvers, setApprovers] = useState([]);
@@ -96,17 +95,11 @@ export default function SelfAssignTaskModal({
 
         if (!form.title.trim()) { setError("Title is required."); return; }
         if (!selectedApprover) { setError("Select an approver (TL or CEO) who will review this task."); return; }
-        if (!form.hasTimer) {
-            if (!form.deadline) { setError("Deadline date is required."); return; }
-            if (!form.deadlineTime) { setError("Deadline time is required."); return; }
-        }
+        const _reqSecs = (Number(form.requestedHours) || 0) * 3600 + (Number(form.requestedMinutes) || 0) * 60;
+        if (_reqSecs <= 0) { setError("Enter how much time you need for this task."); return; }
 
         setSubmitting(true);
         try {
-            const fixedDeadlineISO = (!form.hasTimer && form.deadline)
-                ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString()
-                : null;
-
             const newTask = await createTask({
                 title: form.title.trim(),
                 description: form.description,
@@ -121,8 +114,9 @@ export default function SelfAssignTaskModal({
                 createdByTl: currentRole === "tl",
                 status: "open",
                 isFolder: false,
-                hasTimer: form.hasTimer,
-                fixedDeadline: fixedDeadlineISO,
+                hasTimer: true,
+                fixedDeadline: null,
+                senderTimerWindowSecs: _reqSecs,
                 isRepeat: false,
                 isThirdParty: false,
                 isGoal: false,
@@ -396,71 +390,39 @@ export default function SelfAssignTaskModal({
                             )}
                         </div>
 
-                        {/* Timer / Deadline */}
+                        {/* Timer duration — self-tasks are always timer-based, no fixed-deadline option */}
                         <div style={s.field}>
                             <label style={s.label}>⏱ Time Tracking</label>
+                            <p style={{ fontSize: 11, color: "#6B7280", margin: "0 0 10px", lineHeight: 1.5 }}>
+                                You'll set how much time you need below — your approver reviews it when confirming.
+                            </p>
 
-                            <label style={{
-                                display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer",
-                                padding: "12px 14px", borderRadius: 10, marginBottom: 10,
-                                background: form.hasTimer ? "#EFF6FF" : "#F8FAFC",
-                                border: `1.5px solid ${form.hasTimer ? "#93C5FD" : "#E2E8F0"}`,
-                                transition: "all 0.15s",
-                            }}>
-                                <div style={{ marginTop: 2 }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={form.hasTimer}
-                                        onChange={e => set("hasTimer", e.target.checked)}
-                                        style={{ width: 16, height: 16, accentColor: "#2563EB", cursor: "pointer" }}
-                                    />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: form.hasTimer ? "#1D4ED8" : "#374151" }}>
-                                            {form.hasTimer ? "⏱ Timer enabled — Start / Pause" : "📅 No timer — use deadline instead"}
-                                        </span>
-                                        {form.hasTimer && (
-                                            <span style={{ fontSize: 10, fontWeight: 600, background: "#DBEAFE", color: "#1D4ED8", borderRadius: 99, padding: "1px 8px" }}>ON</span>
-                                        )}
-                                    </div>
-                                    <p style={{ fontSize: 11, color: "#6B7280", margin: "3px 0 0", lineHeight: 1.5 }}>
-                                        {form.hasTimer
-                                            ? "You'll propose a deadline — your approver must confirm before work begins."
-                                            : "Set a fixed date and time. Confirm directly once approver sees the task."}
-                                    </p>
-                                </div>
-                            </label>
-
-                            {!form.hasTimer && (
+                            <div>
+                                <label style={{ ...s.label, marginBottom: 4 }}>How much time do you need? <span style={s.req}>*</span></label>
                                 <div style={{ display: "flex", gap: 10 }}>
-                                    <div style={{ flex: 2 }}>
-                                        <label style={{ ...s.label, marginBottom: 4 }}>Deadline Date <span style={s.req}>*</span></label>
+                                    <div style={{ flex: 1 }}>
                                         <input
                                             className="sam-input" style={s.input}
-                                            type="date"
-                                            value={form.deadline}
-                                            min={new Date().toISOString().split("T")[0]}
-                                            onChange={e => set("deadline", e.target.value)}
+                                            type="number" min={0} max={99}
+                                            value={form.requestedHours}
+                                            onChange={e => set("requestedHours", Math.max(0, Math.min(99, Number(e.target.value) || 0)))}
                                         />
+                                        <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>hours</div>
                                     </div>
                                     <div style={{ flex: 1 }}>
-                                        <label style={{ ...s.label, marginBottom: 4 }}>Time <span style={s.req}>*</span></label>
                                         <input
                                             className="sam-input" style={s.input}
-                                            type="time"
-                                            value={form.deadlineTime}
-                                            onChange={e => set("deadlineTime", e.target.value)}
+                                            type="number" min={0} max={59} step={5}
+                                            value={form.requestedMinutes}
+                                            onChange={e => set("requestedMinutes", Math.max(0, Math.min(59, Number(e.target.value) || 0)))}
                                         />
+                                        <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>minutes</div>
                                     </div>
                                 </div>
-                            )}
-
-                            {form.hasTimer && (
-                                <div style={{ background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 7, padding: "8px 11px", fontSize: 11, color: "#92400E", lineHeight: 1.5 }}>
-                                    ℹ️ After the approver confirms this task, you'll be able to propose your working deadline via the task panel.
-                                </div>
-                            )}
+                                <p style={{ fontSize: 11, color: "#6B7280", margin: "6px 0 0", lineHeight: 1.5 }}>
+                                    This is what you're requesting — your approver reviews it when confirming the task.
+                                </p>
+                            </div>
                         </div>
 
                         {/* Spacer so content isn't hidden behind footer */}

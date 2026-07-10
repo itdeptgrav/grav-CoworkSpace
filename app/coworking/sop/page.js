@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
 import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
@@ -210,6 +210,13 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
   const [c2GlobalMaxPointsDesc, setC2GlobalMaxPointsDesc] = useState("");
   const [openDesc, setOpenDesc] = useState(null);
 
+  // ── Timer SOP Settings ───────────────────────────────────────────────
+  const [timerMinDailyHrs, setTimerMinDailyHrs] = useState("8");
+  const [timerDeficitThresholdHrs, setTimerDeficitThresholdHrs] = useState("1");
+  const [timerDeficitPoints, setTimerDeficitPoints] = useState("0.5");
+  const [timerOvertimeThresholdHrs, setTimerOvertimeThresholdHrs] = useState("1");
+  const [timerOvertimePoints, setTimerOvertimePoints] = useState("0.5");
+
   // ── Role Band Configuration state ─────────────────────────────────────────
   const BAND_NAMES = ["execution-led", "balanced", "outcome-led"];
   const BAND_META = {
@@ -260,6 +267,12 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
           setC1ReworkDesc(d.c1ReworkDesc || "");
           setC1RejectDesc(d.c1RejectDesc || "");
           setC2GlobalMaxPointsDesc(d.c2GlobalMaxPointsDesc || "");
+          // Timer SOP
+          setTimerMinDailyHrs(d.timerMinDailyHrs != null ? String(d.timerMinDailyHrs) : "8");
+          setTimerDeficitThresholdHrs(d.timerDeficitThresholdHrs != null ? String(d.timerDeficitThresholdHrs) : "1");
+          setTimerDeficitPoints(d.timerDeficitPoints != null ? String(d.timerDeficitPoints) : "0.5");
+          setTimerOvertimeThresholdHrs(d.timerOvertimeThresholdHrs != null ? String(d.timerOvertimeThresholdHrs) : "1");
+          setTimerOvertimePoints(d.timerOvertimePoints != null ? String(d.timerOvertimePoints) : "0.5");
         }
       })
       .catch(console.error)
@@ -320,6 +333,12 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
         updatedBy: employeeId,
         updatedByName: employeeName,
         updatedAt: new Date().toISOString(),
+        // ── Timer SOP ──
+        timerMinDailyHrs: parseFloat(timerMinDailyHrs) || 8,
+        timerDeficitThresholdHrs: parseFloat(timerDeficitThresholdHrs) || 1,
+        timerDeficitPoints: parseFloat(timerDeficitPoints) || 0.5,
+        timerOvertimeThresholdHrs: parseFloat(timerOvertimeThresholdHrs) || 1,
+        timerOvertimePoints: parseFloat(timerOvertimePoints) || 0.5,
       });
       // Sync to MongoDB
       const token = await firebaseAuth.currentUser?.getIdToken();
@@ -563,6 +582,90 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* ── Timer SOP Point Engine ── */}
+              <div style={{ borderRadius: 7, border: "2px solid #0D9488", marginBottom: 12 }}>
+                <div style={{ padding: "10px 14px", background: "#0D9488", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 16 }}>⏱</span>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Timer SOP Point Engine</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>
+                      Auto-deduct or reward SOP points based on accumulated work time
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "14px", background: "#F0FDFA", display: "flex", flexDirection: "column", gap: 14 }}>
+
+                  {/* Daily Minimum */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#0D9488", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                      Daily Minimum Required Hours
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="number" min="0" step="0.5" value={timerMinDailyHrs}
+                        onChange={e => setTimerMinDailyHrs(e.target.value)}
+                        style={{ ...iStyle, width: 80 }} placeholder="8" />
+                      <span style={{ fontSize: 11, color: "#374151" }}>hours/day minimum</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#6B7280", marginTop: 4 }}>
+                      If employee works less than this per day, deficit accumulates.
+                    </div>
+                  </div>
+
+                  {/* Deficit Rule */}
+                  <div style={{ padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 7 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                      📉 Deficit Penalty Rule
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4 }}>Penalty Threshold (hrs)</div>
+                        <input type="number" min="0" step="0.5" value={timerDeficitThresholdHrs}
+                          onChange={e => setTimerDeficitThresholdHrs(e.target.value)}
+                          style={{ ...iStyle }} placeholder="1" />
+                        <div style={{ fontSize: 9, color: "#9CA3AF", marginTop: 2 }}>Cut points when total deficit reaches this</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4 }}>Points Deducted</div>
+                        <input type="number" min="0" step="0.1" value={timerDeficitPoints}
+                          onChange={e => setTimerDeficitPoints(e.target.value)}
+                          style={{ ...iStyle }} placeholder="0.5" />
+                        <div style={{ fontSize: 9, color: "#9CA3AF", marginTop: 2 }}>SOP points cut per trigger</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 8, padding: "6px 8px", background: "#fff", borderRadius: 5, fontSize: 10, color: "#DC2626" }}>
+                      Example: Miss 20min/day × 3 days = 1h deficit → cut {timerDeficitPoints || "0.5"} pts → accumulator reduces by the threshold (remainder carries forward)
+                    </div>
+                  </div>
+
+                  {/* Overtime Reward */}
+                  <div style={{ padding: "10px 12px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 7 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#16A34A", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                      📈 Overtime Reward Rule
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4 }}>Reward Threshold (hrs)</div>
+                        <input type="number" min="0" step="0.5" value={timerOvertimeThresholdHrs}
+                          onChange={e => setTimerOvertimeThresholdHrs(e.target.value)}
+                          style={{ ...iStyle }} placeholder="1" />
+                        <div style={{ fontSize: 9, color: "#9CA3AF", marginTop: 2 }}>Add points when total overtime reaches this</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#6B7280", marginBottom: 4 }}>Points Added</div>
+                        <input type="number" min="0" step="0.1" value={timerOvertimePoints}
+                          onChange={e => setTimerOvertimePoints(e.target.value)}
+                          style={{ ...iStyle }} placeholder="0.5" />
+                        <div style={{ fontSize: 9, color: "#9CA3AF", marginTop: 2 }}>SOP points added per trigger</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 8, padding: "6px 8px", background: "#fff", borderRadius: 5, fontSize: 10, color: "#16A34A" }}>
+                      Example: Work 30min extra/day × 2 days = 1h overtime → add {timerOvertimePoints || "0.5"} pts → accumulator reduces by the threshold (remainder carries forward)
+                    </div>
+                  </div>
+
                 </div>
               </div>
 
@@ -1136,6 +1239,442 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
 }
 
 // ── Employee Own History ──────────────────────────────────────────────────────
+function TodayWorkBreakdown({ employeeId }) {
+  const { role: myRole } = useCoworkAuth();
+  const [logs, setLogs] = useState(null);
+  const [officeSchedule, setOfficeSchedule] = useState(null);
+  const [cfg, setCfg] = useState(null);
+  const [accum, setAccum] = useState(null);
+  const [showRules, setShowRules] = useState(false);
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const evalFiredRef = useRef(false);
+
+  const runTestFinalize = async () => {
+    setTestRunning(true);
+    setTestResult(null);
+    try {
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${BASE}/cowork/timer-sop/test-finalize/${employeeId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setTestResult({ status: res.status, data });
+      if (data.ok) {
+        const accRes = await fetch(`${BASE}/cowork/timer-sop/accum/${employeeId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (accRes.ok) setAccum(await accRes.json());
+      }
+    } catch (e) {
+      setTestResult({ status: 0, data: { error: e.message } });
+    } finally {
+      setTestRunning(false);
+    }
+  };
+
+  const loadAll = () => {
+    if (!employeeId) return;
+    // Load office schedule
+    getDoc(doc(firebaseDb, "cowork_settings", "office"))
+      .then(snap => { setOfficeSchedule(snap.exists() ? (snap.data().schedule || null) : null); })
+      .catch(e => { console.error("[TodayWorkBreakdown] office schedule fetch failed:", e.message); setOfficeSchedule(null); });
+    // Load SOP config
+    getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"))
+      .then(snap => { setCfg(snap.exists() ? snap.data() : {}); })
+      .catch(e => { console.error("[TodayWorkBreakdown] SOP config fetch failed:", e.message); setCfg({}); });
+
+    // Load accumulator counters from backend
+    (async () => {
+      try {
+        const token = await firebaseAuth.currentUser?.getIdToken();
+        const res = await fetch(`${BASE}/cowork/timer-sop/accum/${employeeId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setAccum(await res.json());
+      } catch (e) { console.warn("[dashboard] accum fetch:", e.message); }
+    })();
+
+    // Load today's work commits
+    (async () => {
+      try {
+        const { collection, getDocs } = await import("firebase/firestore");
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+        const todayStr = nowIST.toISOString().split("T")[0];
+        const todayStartUTC = new Date(todayStr + "T00:00:00+05:30").getTime();
+        const todayEndUTC = todayStartUTC + 24 * 60 * 60 * 1000;
+
+        const snap = await getDocs(collection(firebaseDb, "cowork_work_commits", employeeId, "logs"));
+        const dayLogs = [];
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const stoppedMs = data.stoppedAt?.seconds
+            ? data.stoppedAt.seconds * 1000
+            : data.stoppedAt ? new Date(data.stoppedAt).getTime() : null;
+          if (!stoppedMs) return;
+          const workedSecs = Number(data.secondsWorked) || 0;
+          if (workedSecs <= 0) return;
+          const startMs = stoppedMs - workedSecs * 1000;
+          if (startMs > todayEndUTC || stoppedMs < todayStartUTC) return;
+          dayLogs.push({ startMs: Math.max(startMs, todayStartUTC), endMs: Math.min(stoppedMs, todayEndUTC) });
+        });
+        setLogs(dayLogs);
+      } catch (e) { setLogs([]); }
+    })();
+  };
+
+  useEffect(loadAll, [employeeId]);
+
+  const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+  // Total worked today — this is the ONLY number points are based on.
+  const totalMs = (logs || []).reduce((sum, { startMs, endMs }) => sum + Math.max(0, endMs - startMs), 0);
+
+  // IST-safe date helpers — do NOT use new Date().getDay()/.setHours() here.
+  // Those read the BROWSER's local system timezone. On any device not set
+  // to IST, that silently shifts the whole office window, making the split
+  // come out wrong while the total stays correct. Always anchor to +05:30.
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const istDateStr = ms => new Date(ms + IST_OFFSET_MS).toISOString().split("T")[0];
+  const istDow = ms => new Date(Date.parse(istDateStr(ms) + "T00:00:00.000Z")).getUTCDay();
+
+  // Office-window split — INFO ONLY (does not affect points, that's computed
+  // server-side). Shows how the day's time was distributed relative to the
+  // office clock schedule.
+  let officeMs = 0, afterMs = 0;
+  if (officeSchedule) {
+    (logs || []).forEach(({ startMs, endMs }) => {
+      const dateStr = istDateStr(startMs);
+      const dayKey = DAY_KEYS[istDow(startMs)];
+      const dayCfg = officeSchedule[dayKey];
+      if (!dayCfg || dayCfg.isOff) { afterMs += endMs - startMs; return; }
+      const officeStart = Date.parse(`${dateStr}T${dayCfg.inTime}:00+05:30`);
+      const officeEnd = Date.parse(`${dateStr}T${dayCfg.outTime}:00+05:30`);
+      const overlap = Math.max(0, Math.min(endMs, officeEnd) - Math.max(startMs, officeStart));
+      officeMs += overlap;
+      afterMs += (endMs - startMs) - overlap;
+    });
+  }
+
+  const fmtMs = ms => {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  };
+  const fmtHrs = h => h >= 1 ? `${(+h.toFixed(2))}h` : `${Math.round(h * 60)}min`;
+
+  const minHrs = parseFloat(cfg?.timerMinDailyHrs) || 0;
+  const defThresh = parseFloat(cfg?.timerDeficitThresholdHrs) || 0;
+  const defPts = parseFloat(cfg?.timerDeficitPoints) || 0;
+  const otThresh = parseFloat(cfg?.timerOvertimeThresholdHrs) || 0;
+  const otPts = parseFloat(cfg?.timerOvertimePoints) || 0;
+  const defAccum = parseFloat(accum?.timerDeficitAccumHrs) || 0;
+  const otAccum = parseFloat(accum?.timerOvertimeAccumHrs) || 0;
+
+  const workedHrs = totalMs / 3600000;
+  const isOffToday = (() => {
+    if (!officeSchedule) return false;
+    const dayKey = DAY_KEYS[istDow(Date.now())];
+    return !!officeSchedule[dayKey]?.isOff;
+  })();
+  const shortfallHrs = Math.max(0, minHrs - workedHrs);
+  const extraHrs = Math.max(0, workedHrs - minHrs);
+  const donePct = minHrs > 0 ? Math.min(100, (workedHrs / minHrs) * 100) : 0;
+  const defPct = defThresh > 0 ? Math.min(100, (defAccum / defThresh) * 100) : 0;
+  const otPct = otThresh > 0 ? Math.min(100, (otAccum / otThresh) * 100) : 0;
+
+  // ── Auto-evaluate when data is ready ─────────────────────────────────
+  useEffect(() => {
+    if (!cfg || !employeeId || !logs || !officeSchedule) return;
+    if (evalFiredRef.current) return;
+    evalFiredRef.current = true;
+    (async () => {
+      try {
+        const token = await firebaseAuth.currentUser?.getIdToken();
+        // wait:true -> backend finishes finalizing before responding, so
+        // the counter re-fetch below gets FRESH values. Without this, the
+        // page shows counters from before finalization until next reload.
+        await fetch(`${BASE}/cowork/timer-sop/evaluate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ wait: true }),
+        });
+        const res = await fetch(`${BASE}/cowork/timer-sop/accum/${employeeId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setAccum(await res.json());
+      } catch (e) { console.warn("[auto-evaluate]", e.message); }
+    })();
+  }, [cfg, logs, officeSchedule, employeeId]);
+
+  if (!cfg) {
+    return (
+      <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#FAFAFA", fontSize: 11, color: "#9CA3AF" }}>
+        Loading timer settings…
+      </div>
+    );
+  }
+  if (!minHrs && !defThresh && !otThresh) return null; // genuinely not configured — nothing to show
+
+  const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+  const met = minHrs > 0 && workedHrs >= minHrs;
+
+  const S = {
+    label: { fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#6B7280" },
+    big: { fontSize: 22, fontWeight: 700, fontFamily: "monospace" },
+    sub: { fontSize: 10, color: "#6B7280" },
+  };
+
+  return (
+    <div style={{ marginBottom: 16, borderRadius: 10, border: "1px solid #E5E7EB", overflow: "hidden", background: "#fff" }}>
+
+      {/* ── Header ── */}
+      <div style={{ padding: "9px 14px", background: "#1B4F8A", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>⏱ Today's Work — {today}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={loadAll} title="Refresh — re-fetches everything on this card right now, no page reload needed"
+            style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+            🔄
+          </button>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "rgba(255,255,255,0.15)", padding: "2px 10px", borderRadius: 20 }}>
+            {fmtMs(totalMs)} worked
+          </span>
+        </div>
+      </div>
+
+      {/* ── 1. Big progress: worked vs required ── */}
+      <div style={{ padding: "14px 14px 10px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <span style={S.label}>Today's Target</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: met ? "#16A34A" : "#1F2937" }}>
+            {fmtMs(totalMs)} <span style={{ color: "#9CA3AF", fontWeight: 500 }}>of</span> {fmtHrs(minHrs)}
+          </span>
+        </div>
+        <div style={{ height: 10, background: "#F1F5F9", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${donePct}%`, background: met ? "#16A34A" : "#F59E0B", borderRadius: 99, transition: "width 0.3s" }} />
+        </div>
+
+        {/* Status line — one plain sentence saying exactly where you stand */}
+        {isOffToday ? (
+          <div style={{ marginTop: 8, padding: "7px 10px", borderRadius: 6, background: "#F0F9FF", fontSize: 11, color: "#0284C7", lineHeight: 1.5 }}>
+            Weekly off today — no target, no deficit. {totalMs > 0 && <>All <strong>{fmtMs(totalMs)}</strong> worked today counts as <strong style={{ color: "#16A34A" }}>overtime</strong> at day end.</>}
+          </div>
+        ) : met ? (
+          <div style={{ marginTop: 8, padding: "7px 10px", borderRadius: 6, background: "#F0FDF4", fontSize: 11, color: "#166534", lineHeight: 1.5 }}>
+            ✅ Target done.{afterMs > 0 && <> <strong>{fmtMs(afterMs)}</strong> worked after office close — goes into your <strong>Overtime Counter</strong> at day end.</>}
+          </div>
+        ) : (
+          <div style={{ marginTop: 8, padding: "7px 10px", borderRadius: 6, background: "#FFF7ED", fontSize: 11, color: "#9A3412", lineHeight: 1.5 }}>
+            ⏳ <strong>{fmtMs(shortfallHrs * 3600000)} left</strong> to reach today's target. Whatever is still missing at day-end goes into your <strong>Deficit Counter</strong>.
+            {afterMs > 0 && <> Your <strong style={{ color: "#166534" }}>{fmtMs(afterMs)}</strong> after office close still goes into the <strong style={{ color: "#166534" }}>Overtime Counter</strong>.</>}
+          </div>
+        )}
+
+        {/* Office window split — the after-close part IS overtime */}
+        {officeSchedule && totalMs > 0 && (
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, color: "#6B7280", background: "#F8FAFC", border: "1px solid #E5E7EB", padding: "3px 8px", borderRadius: 99 }}>
+              🏢 In office hours: <strong style={{ color: "#334155" }}>{fmtMs(officeMs)}</strong>
+            </span>
+            <span style={{ fontSize: 10, color: "#166534", background: "#F0FDF4", border: "1px solid #BBF7D0", padding: "3px 8px", borderRadius: 99 }}>
+              🌙 After office close: <strong>{fmtMs(afterMs)}</strong> → Overtime Counter
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── 2. The two counters ── */}
+      <div style={{ display: "flex", borderTop: "1px solid #F1F5F9" }}>
+        {defThresh > 0 && defPts > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9" }}>
+            <div style={{ ...S.label, color: "#DC2626", marginBottom: 5 }}>Deficit Counter</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#DC2626", fontFamily: "monospace" }}>
+              {fmtHrs(defAccum)} <span style={{ color: "#9CA3AF", fontSize: 11, fontWeight: 500 }}>/ {fmtHrs(defThresh)}</span>
+            </div>
+            <div style={{ marginTop: 6, height: 6, background: "#FEE2E2", borderRadius: 99 }}>
+              <div style={{ height: "100%", width: `${defPct}%`, background: "#DC2626", borderRadius: 99 }} />
+            </div>
+            <div style={{ ...S.sub, marginTop: 5 }}>Full = <strong style={{ color: "#DC2626" }}>−{defPts} pts</strong> cut, counter restarts</div>
+          </div>
+        )}
+        {otThresh > 0 && otPts > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px" }}>
+            <div style={{ ...S.label, color: "#16A34A", marginBottom: 5 }}>Overtime Counter</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#16A34A", fontFamily: "monospace" }}>
+              {fmtHrs(otAccum)} <span style={{ color: "#9CA3AF", fontSize: 11, fontWeight: 500 }}>/ {fmtHrs(otThresh)}</span>
+            </div>
+            <div style={{ marginTop: 6, height: 6, background: "#DCFCE7", borderRadius: 99 }}>
+              <div style={{ height: "100%", width: `${otPct}%`, background: "#16A34A", borderRadius: 99 }} />
+            </div>
+            <div style={{ ...S.sub, marginTop: 5 }}>Full = <strong style={{ color: "#16A34A" }}>+{otPts} pts</strong> added, counter restarts</div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 3. How it works (collapsed by default) ── */}
+      <div style={{ borderTop: "1px solid #F1F5F9" }}>
+        <button onClick={() => setShowRules(v => !v)}
+          style={{ width: "100%", padding: "8px 14px", border: "none", background: "#FAFAFA", fontSize: 10, fontWeight: 600, color: "#6B7280", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+          {showRules ? "▾" : "▸"} How points are calculated
+        </button>
+        {showRules && (
+          <div style={{ padding: "4px 14px 12px", fontSize: 11, color: "#4B5563", lineHeight: 1.8, background: "#FAFAFA" }}>
+            1. Your daily target is <strong>{fmtHrs(minHrs)}</strong> of timer work (set by admin).<br />
+            2. Day ends, worked <strong>less than target</strong> → the missing time is added to your <strong style={{ color: "#DC2626" }}>Deficit Counter</strong>.<br />
+            3. Time worked <strong>after office closing hour</strong> (and any work on weekly-off days) is added to your <strong style={{ color: "#16A34A" }}>Overtime Counter</strong>. Both can happen on the same day.<br />
+            4. Deficit Counter reaches {fmtHrs(defThresh)} → <strong style={{ color: "#DC2626" }}>−{defPts} pts</strong>. Overtime Counter reaches {fmtHrs(otThresh)} → <strong style={{ color: "#16A34A" }}>+{otPts} pts</strong>. Both show in your history below with the reason.<br />
+            5. Nothing is counted for today until the day is actually over.
+          </div>
+        )}
+      </div>
+
+      {/* ── 4. CEO-only test tool ── */}
+      {myRole === "ceo" && (
+        <div style={{ borderTop: "1px solid #F1F5F9", padding: "10px 14px", background: "#FEFCE8" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#854D0E" }}>
+              🔧 CEO TEST TOOL — forces today to finalize right now, bypassing the office-hours-over check
+            </div>
+            <button onClick={runTestFinalize} disabled={testRunning}
+              style={{ fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "1px solid #CA8A04", background: testRunning ? "#FEF3C7" : "#FACC15", color: "#713F12", cursor: testRunning ? "default" : "pointer" }}>
+              {testRunning ? "Running…" : "Force-Finalize Today"}
+            </button>
+          </div>
+          {testResult && (
+            <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 6, background: "#fff", border: "1px solid #FDE68A", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap", color: "#374151" }}>
+              {testResult.data.ok === false
+                ? `⚠️ ${testResult.data.reason || testResult.data.error || "failed"}${testResult.data.message ? " — " + testResult.data.message : ""}`
+                : (testResult.data.bleachesApplied || []).length === 0
+                  ? "ℹ️ Ran successfully — no threshold crossed, nothing to apply."
+                  : `✅ ${testResult.data.bleachesApplied.map(b => `${b.bleachType === "credit" ? "CUT" : "GAIN"} ${b.points}pts (${b.sopName}, ${b.date})`).join("  |  ")}\nDeficit: ${testResult.data.deficitAccum.before}h → ${testResult.data.deficitAccum.after}h   Overtime: ${testResult.data.overtimeAccum.before}h → ${testResult.data.overtimeAccum.after}h\n\nReload the page to see the new entry in the history list below.`}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimerSopRulesPanel({ employeeId }) {
+  const [cfg, setCfg] = useState(null);
+  const [accum, setAccum] = useState(null);
+
+  useEffect(() => {
+    getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"))
+      .then(snap => { if (snap.exists()) setCfg(snap.data()); })
+      .catch(() => { });
+
+    if (!employeeId) return;
+    // Fetch accumulator values from backend
+    (async () => {
+      try {
+        const token = await firebaseAuth.currentUser?.getIdToken();
+        const res = await fetch(`${BASE}/cowork/timer-sop/accum/${employeeId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const d = await res.json();
+          setAccum(d);
+        }
+      } catch (e) { console.warn("[TimerSopRulesPanel] accum fetch:", e.message); }
+    })();
+  }, [employeeId]);
+
+  if (!cfg) return null;
+  const minHrs = parseFloat(cfg.timerMinDailyHrs) || 0;
+  const defThresh = parseFloat(cfg.timerDeficitThresholdHrs) || 0;
+  const defPts = parseFloat(cfg.timerDeficitPoints) || 0;
+  const otThresh = parseFloat(cfg.timerOvertimeThresholdHrs) || 0;
+  const otPts = parseFloat(cfg.timerOvertimePoints) || 0;
+  if (!minHrs && !defThresh && !otThresh) return null;
+
+  const defAccum = parseFloat(accum?.timerDeficitAccumHrs) || 0;
+  const otAccum = parseFloat(accum?.timerOvertimeAccumHrs) || 0;
+  const defLeft = Math.max(0, defThresh - defAccum);
+  const otLeft = Math.max(0, otThresh - otAccum);
+  const defPct = defThresh > 0 ? Math.min(100, (defAccum / defThresh) * 100) : 0;
+  const otPct = otThresh > 0 ? Math.min(100, (otAccum / otThresh) * 100) : 0;
+
+  const fmtHrs = h => h >= 1 ? `${h}h` : `${Math.round(h * 60)}min`;
+
+  return (
+    <div style={{ marginBottom: 16, borderRadius: 8, border: "1px solid #E5E7EB", overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "8px 14px", background: "#0D9488", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 13 }}>⏱</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>Timer Work Rules</span>
+        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginLeft: 4 }}>
+          Auto-applied to your SOP score
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 0, background: "#fff" }}>
+        {/* Daily Minimum */}
+        {minHrs > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+              Daily Minimum
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#0D9488" }}>{fmtHrs(minHrs)}</div>
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>required per day</div>
+          </div>
+        )}
+        {/* Deficit Rule */}
+        {defThresh > 0 && defPts > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9", background: "#FEF2F2" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#DC2626", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+              📉 Deficit Penalty
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#DC2626" }}>−{defPts} pts</div>
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>
+              after {fmtHrs(defThresh)} total shortfall
+            </div>
+            {/* Progress bar */}
+            <div style={{ marginTop: 8, height: 5, background: "#FECACA", borderRadius: 99 }}>
+              <div style={{ height: "100%", width: `${defPct}%`, background: "#DC2626", borderRadius: 99, transition: "width 0.3s" }} />
+            </div>
+            <div style={{ marginTop: 5, fontSize: 10, color: "#991B1B", lineHeight: 1.6 }}>
+              {defLeft > 0
+                ? <><strong>{fmtHrs(defLeft)} more</strong> deficit needed before {defPts} pts cut</>
+                : <strong>⚠ Threshold reached — points will be cut on next evaluation</strong>
+              }
+              <br />
+              Accumulated: {fmtHrs(defAccum)} / {fmtHrs(defThresh)}
+            </div>
+          </div>
+        )}
+        {/* Overtime Reward */}
+        {otThresh > 0 && otPts > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px", background: "#F0FDF4" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#16A34A", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+              📈 Overtime Reward
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#16A34A" }}>+{otPts} pts</div>
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>
+              after {fmtHrs(otThresh)} total overtime
+            </div>
+            {/* Progress bar */}
+            <div style={{ marginTop: 8, height: 5, background: "#BBF7D0", borderRadius: 99 }}>
+              <div style={{ height: "100%", width: `${otPct}%`, background: "#16A34A", borderRadius: 99, transition: "width 0.3s" }} />
+            </div>
+            <div style={{ marginTop: 5, fontSize: 10, color: "#166534", lineHeight: 1.6 }}>
+              {otLeft > 0
+                ? <><strong>{fmtHrs(otLeft)} more</strong> overtime needed before {otPts} pts added</>
+                : <strong>🎉 Threshold reached — points will be added on next evaluation</strong>
+              }
+              <br />
+              Accumulated: {fmtHrs(otAccum)} / {fmtHrs(otThresh)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OwnHistory({ employeeId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1229,6 +1768,10 @@ function OwnHistory({ employeeId }) {
             </div>
           );
         })()}
+
+        {/* ── Today's Work Breakdown ── */}
+        <TodayWorkBreakdown employeeId={employeeId} />
+        {/* ── Timer SOP Rules Info Panel ── */}
 
         {/* ── Filters — always shown ── */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
