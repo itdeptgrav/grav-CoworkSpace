@@ -1864,7 +1864,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
       taskDocs.forEach(({ id: taskId, isGoal }) => {
         const unsub = onSnapshot(
-          query(collection(firebaseDb, "cowork_tasks", taskId, "chat"), orderBy("createdAt", "asc")),
+          query(collection(firebaseDb, "cowork_tasks", taskId, "chat"), orderBy("createdAt", "desc"), limit(200)),
           snap => {
             const count = snap.docs.filter(d => {
               const data = d.data();
@@ -1908,9 +1908,12 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           if (convCountMap[cid] !== undefined) return; // already watching
           convCountMap[cid] = 0;
           const unsub = onSnapshot(
-            query(collection(firebaseDb, "cowork_direct_messages", cid, "messages"), where("senderId", "!=", employeeId)),
+            query(collection(firebaseDb, "cowork_direct_messages", cid, "messages"), orderBy("createdAt", "desc"), limit(200)),
             msgSnap => {
-              convCountMap[cid] = msgSnap.docs.filter(d => !(d.data().readBy || []).includes(employeeId)).length;
+              convCountMap[cid] = msgSnap.docs.filter(d => {
+                const data = d.data();
+                return data.senderId !== employeeId && !(data.readBy || []).includes(employeeId);
+              }).length;
               recalcDm();
             },
             () => { convCountMap[cid] = 0; recalcDm(); }
@@ -2143,9 +2146,9 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const openChatForReq = (reqId, req) => {
     setActiveChatReqId(prev => prev === reqId ? null : reqId);
     setActiveChatReq(prev => prev?.id === reqId ? null : (req || null));
-    if (!chatThreads[reqId]) {
+    if (!reqChatUnsubsRef.current[reqId]) {
       const q = query(collection(firebaseDb, "cowork_requests", reqId, "chat"), orderBy("createdAt", "asc"));
-      onSnapshot(q, snap => {
+      reqChatUnsubsRef.current[reqId] = onSnapshot(q, snap => {
         const msgs = snap.docs.map(d => ({
           id: d.id, ...d.data(),
           createdAt: d.data().createdAt?.seconds
@@ -2251,11 +2254,13 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         // Use the proper openChatForReq logic inline
         const reqId = e.detail.requestId;
         setActiveChatReqId(reqId);
-        const q2 = query(collection(firebaseDb, "cowork_requests", reqId, "chat"), orderBy("createdAt", "asc"));
-        onSnapshot(q2, snap => {
-          const msgs = snap.docs.map(d => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.seconds ? new Date(d.data().createdAt.seconds * 1000).toISOString() : d.data().createdAt }));
-          setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
-        }, () => { });
+        if (!reqChatUnsubsRef.current[reqId]) {
+          const q2 = query(collection(firebaseDb, "cowork_requests", reqId, "chat"), orderBy("createdAt", "asc"));
+          reqChatUnsubsRef.current[reqId] = onSnapshot(q2, snap => {
+            const msgs = snap.docs.map(d => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.seconds ? new Date(d.data().createdAt.seconds * 1000).toISOString() : d.data().createdAt }));
+            setChatThreads(prev => ({ ...prev, [reqId]: msgs }));
+          }, () => { });
+        }
       }
     };
     window.addEventListener("openRequestPanel", handler);

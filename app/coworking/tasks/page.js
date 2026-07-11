@@ -2078,12 +2078,12 @@ export default function TasksPage() {
       if (chatCountListenersRef.current[t.taskId]) return;
 
       const msgsRef = collection(firebaseDb, "cowork_tasks", t.taskId, "chat");
-      const unsub = onSnapshot(query(msgsRef, orderBy("createdAt", "asc")), snap => {
+      const unsub = onSnapshot(query(msgsRef, orderBy("createdAt", "desc"), limit(200)), snap => {
         totalMsgCountsRef.current[t.taskId] = snap.size;
 
-        // Track latest message time
+        // Track latest message time — docs are now newest-first, so the latest is index 0
         if (snap.docs.length > 0) {
-          const lastDoc = snap.docs[snap.docs.length - 1];
+          const lastDoc = snap.docs[0];
           const createdAt = lastDoc.data().createdAt;
           let ms = 0;
           if (createdAt?.seconds) ms = createdAt.seconds * 1000;
@@ -3480,6 +3480,7 @@ export default function TasksPage() {
 
     // For CEO: also listen to tasks assigned TO the CEO (by TL etc.)
     let unsubCeoAssigned = null;
+    let unsubApprover = null;
     if (role === "ceo") {
       const qAssigned = query(tasksRef, where("assigneeIds", "array-contains", employeeId), orderBy("updatedAt", "desc"), limit(100));
       unsubCeoAssigned = onSnapshot(qAssigned, snap => {
@@ -3493,7 +3494,7 @@ export default function TasksPage() {
 
       // Also listen to self-assign tasks where CEO is the approver
       const qApprover = query(tasksRef, where("approverId", "==", employeeId), orderBy("updatedAt", "desc"), limit(100));
-      onSnapshot(qApprover, snap => {
+      unsubApprover = onSnapshot(qApprover, snap => {
         if (snap.empty) return;
         setAllTasks(prev => {
           const map = new Map(prev.map(t => [t.taskId, t]));
@@ -3629,6 +3630,7 @@ export default function TasksPage() {
       unsub();
       if (unsubTlAssigned) unsubTlAssigned();
       if (unsubCeoAssigned) unsubCeoAssigned();
+      if (unsubApprover) unsubApprover();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId, role]);

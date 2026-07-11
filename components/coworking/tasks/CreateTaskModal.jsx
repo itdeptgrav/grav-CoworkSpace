@@ -47,7 +47,7 @@ const TYPE_COPY = {
 // MUST be outside CreateTaskModal. If defined inside, React sees a new function
 // reference on every render → unmounts + remounts the input DOM node → focus
 // lost mid-keystroke → deadline field appears to auto-disable.
-function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDurationVal, timerDurationUnit }) {
+function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDurationDays, timerDurationHours, timerDurationMinutes }) {
   const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none", transition: "border-color 0.12s" };
   const _lbl = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 };
   // Local date string avoids UTC midnight drift for IST / UTC+ users
@@ -71,15 +71,24 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
           <div>
             <label style={_lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(optional — assignee can negotiate)</span></label>
             <div style={{ display: "flex", gap: 8 }}>
-              <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3"
-                value={timerDurationVal || ""}
-                onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationVal", v); }} />
-              <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }}
-                value={timerDurationUnit || "hours"} onChange={e => onSet("timerDurationUnit", e.target.value)}>
-                <option value="minutes">Minutes</option>
-                <option value="hours">Hours</option>
-                <option value="days">Days</option>
-              </select>
+              <div style={{ flex: 1 }}>
+                <input className="ctm-inp" style={_inp} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="0"
+                  value={timerDurationDays || ""}
+                  onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationDays", v); }} />
+                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3, textAlign: "center" }}>days</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <input className="ctm-inp" style={_inp} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3"
+                  value={timerDurationHours || ""}
+                  onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationHours", v); }} />
+                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3, textAlign: "center" }}>hours</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <input className="ctm-inp" style={_inp} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="0"
+                  value={timerDurationMinutes || ""}
+                  onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ""); onSet("timerDurationMinutes", v); }} />
+                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 3, textAlign: "center" }}>minutes</div>
+              </div>
             </div>
           </div>
         </div>
@@ -215,8 +224,9 @@ export default function CreateTaskModal({
     deadline: _fixedDL ? _fixedDL.toISOString().split("T")[0] : "",
     deadlineTime: _fixedDL ? _fixedDL.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "",
     priority: editTask?.priority || 5,
-    timerDurationVal: editTask?.timerDurationVal || "",
-    timerDurationUnit: editTask?.timerDurationUnit || "hours",
+    timerDurationDays: editTask?.timerDurationDays || "",
+    timerDurationHours: editTask?.timerDurationHours || "",
+    timerDurationMinutes: editTask?.timerDurationMinutes || "",
   });
 
   // Per-assignee priority: queries only tasks that include these specific people,
@@ -537,12 +547,13 @@ export default function CreateTaskModal({
         const timerOn = isSpecialType ? undefined : form.hasTimer;
         const fixedDeadlineISO = (!isSpecialType && !form.hasTimer && form.deadline)
           ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null;
-        // ── Sender-preset timer: convert timerDurationVal/Unit → seconds ──
+        // ── Sender-preset timer: sum Days/Hours/Minutes → seconds ──
         let _senderTimerSecs = 0;
-        if (!isSpecialType && form.hasTimer && form.timerDurationVal) {
-          const val = Number(form.timerDurationVal) || 0;
-          const unit = form.timerDurationUnit || "hours";
-          _senderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
+        if (!isSpecialType && form.hasTimer) {
+          const days = Number(form.timerDurationDays) || 0;
+          const hours = Number(form.timerDurationHours) || 0;
+          const mins = Number(form.timerDurationMinutes) || 0;
+          _senderTimerSecs = days * 86400 + hours * 3600 + mins * 60;
         }
 
         // ── C2 Band hard-block validation ────────────────────────────────────
@@ -992,7 +1003,7 @@ export default function CreateTaskModal({
 
                   {!isFolder && !isRepeat && !isThirdParty && !isGoal && (
                     <>
-                      <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationVal={form.timerDurationVal} timerDurationUnit={form.timerDurationUnit} />
+                      <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationDays={form.timerDurationDays} timerDurationHours={form.timerDurationHours} timerDurationMinutes={form.timerDurationMinutes} />
                       {/* ── ETC auto-calculated (C1 scoring) ── */}
                       {autoEtcHours > 0 && (
                         <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6 }}>
