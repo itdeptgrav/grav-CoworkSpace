@@ -16,6 +16,8 @@ const emptySubtask = () => ({
   hasTimer: true,
   deadline: "",
   deadlineTime: "",
+  timerDurationVal: "",
+  timerDurationUnit: "hours",
   priority: 5,
   attachments: [],
 });
@@ -518,10 +520,21 @@ export default function CreateTaskModal({
             rowPriority = await fetchNextPriorityForAssignees(row.assigneeIds);
           }
           priorityCache[cacheKey] = rowPriority + 1; // bump for any next row with same assignees
+          // Sender-preset timer: convert this row's timerDurationVal/Unit → seconds.
+          // Mirrors the single-task path below — subtasks never had this at all,
+          // so even with the display bug fixed, a typed duration had no effect
+          // on the actual created subtask.
+          let _rowSenderTimerSecs = 0;
+          if (row.hasTimer && row.timerDurationVal) {
+            const val = Number(row.timerDurationVal) || 0;
+            const unit = row.timerDurationUnit || "hours";
+            _rowSenderTimerSecs = val * (unit === "minutes" ? 60 : unit === "days" ? 86400 : 3600);
+          }
           const newTask = await createTask({
             title: row.title.trim(), description: row.description, notes: row.notes,
             assigneeIds: row.assigneeIds, dueDate: null, priority: rowPriority,
             hasTimer: row.hasTimer, fixedDeadline: fixedDL,
+            senderTimerWindowSecs: _rowSenderTimerSecs,
             parentTaskId: parentTask?.taskId || null,
             createdByRole: currentRole, createdBy: currentEmployeeId,
             createdByCeo: currentRole === "ceo", createdByTl: currentRole === "tl",
@@ -825,7 +838,7 @@ export default function CreateTaskModal({
               </button>
             </div>
           </div>
-          <TimeTrackingSection hasTimer={activeRow.hasTimer} deadline={activeRow.deadline} deadlineTime={activeRow.deadlineTime} onSet={(k, v) => setActiveRowField(k, v)} />
+          <TimeTrackingSection hasTimer={activeRow.hasTimer} deadline={activeRow.deadline} deadlineTime={activeRow.deadlineTime} onSet={(k, v) => setActiveRowField(k, v)} timerDurationVal={activeRow.timerDurationVal} timerDurationUnit={activeRow.timerDurationUnit} />
         </>
       )}
 
@@ -1288,6 +1301,13 @@ export default function CreateTaskModal({
 
               {step === 2 && (
                 <>
+                  {isFolder && (
+                    <div style={{ padding: "14px 16px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12, color: "#4B5563", lineHeight: 1.6, textAlign: "center" }}>
+                      <div style={{ fontSize: 22, marginBottom: 6 }}>📁</div>
+                      <div style={{ fontWeight: 600, color: "#374151", marginBottom: 3 }}>Folders don't need an assignee</div>
+                      A folder is just an organizational container for subtasks — no one person owns it, so there's nothing to assign here. Press <strong>Create Folder</strong> below to finish.
+                    </div>
+                  )}
                   {!isFolder && (
                     <>
                       {allDepts.length > 0 && (
