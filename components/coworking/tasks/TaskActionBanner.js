@@ -26,6 +26,7 @@ export default function TaskActionBanner({
   timerActiveTaskId,
   handleTimerStart,
   handleTimerPause,
+  allTaskMap,
 }) {
   if (!task || task.isFolder) return null;
 
@@ -221,10 +222,12 @@ export default function TaskActionBanner({
   // is skipped entirely for regular tasks. No banner needed here.
 
   // ── 10. TIMER TASK in progress — Play/Pause + worked/total bar ──────────
+  const _hasForwardedChild = (task.subtaskIds || []).some(sid => allTaskMap?.get(sid)?.isForwardedTask);
   if (!banner && isAssignee && isStarted && status === "in_progress" && task.deadlineWindowSecs > 0 &&
+    !_hasForwardedChild &&
     !["submitted", "tl_approved", "tl_final_approved", "ceo_approved"].includes(comp)) {
     const isRunning = timerActiveTaskId === task.taskId;
-    const worked    = getDisplaySeconds?.(task.taskId) || 0;
+    const worked = getDisplaySeconds?.(task.taskId) || 0;
     // Remaining = wall-clock until fixed dueDate (never shifts on pause/resume)
     const remaining = task.dueDate
       ? Math.max(0, (new Date(task.dueDate).getTime() - Date.now()) / 1000)
@@ -437,8 +440,8 @@ export default function TaskActionBanner({
           : task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) >= new Date()
             ? `Deadline extended to ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`
             : task.deadlineExtRequest?.status === "approved" && new Date(task.fixedDeadline) < new Date()
-            ? `Extended deadline also passed (${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}). Request another extension from Details tab.`
-            : `Deadline passed on ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Request an extension from Details tab.`
+              ? `Extended deadline also passed (${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}). Request another extension from Details tab.`
+              : `Deadline passed on ${new Date(task.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Request an extension from Details tab.`
         }
       </span>
     </div>

@@ -2203,12 +2203,33 @@ export default function TasksPage() {
         // 1. Tasks directly assigned to them
         // 2. Tasks they created (subtasks they assigned to others)
         // 3. Folder tasks that contain any of the above
+        // 4. ANY ancestor (parent/grandparent) of #1 or #2 — context for subtask
+        //    assignment and forwarded tasks, regardless of isFolder/assigneeIds
+        //    on that ancestor. Backend now sends this chain via walkUp.
         const taskMap = new Map(tasks.map(t => [t.taskId, t]));
+        const mineIds = new Set(
+          tasks
+            .filter(t => (t.assigneeIds || []).includes(employeeId) || t.assignedBy === employeeId)
+            .map(t => t.taskId)
+        );
+        const ancestorIds = new Set();
+        mineIds.forEach(id => {
+          let cur = taskMap.get(id);
+          // Forward-created tasks hide their own parent chain entirely.
+          if (cur?.isForwardedTask) return;
+          while (cur?.parentTaskId) {
+            ancestorIds.add(cur.parentTaskId);
+            cur = taskMap.get(cur.parentTaskId);
+            if (cur?.isForwardedTask) break; // don't climb past a forwarded task
+          }
+        });
         tasks = tasks.filter(t => {
           // Directly assigned to me
           if ((t.assigneeIds || []).includes(employeeId)) return true;
           // Task I created (I'm the assignedBy)
           if (t.assignedBy === employeeId) return true;
+          // Parent-chain context for a task that IS mine
+          if (ancestorIds.has(t.taskId)) return true;
           // Folder task — show if any subtask involves me (assigned to me OR created by me)
           if (t.isFolder === true || (t.isFolder === undefined && !t.assigneeIds?.length)) {
             const subtaskIds = t.subtaskIds || [];
@@ -2229,7 +2250,7 @@ export default function TasksPage() {
       if (role === "employee" && tasks.length > 0) {
         const existingIds = new Set(tasks.map(t => t.taskId));
         const missingParentIds = [...new Set(
-          tasks.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId)
+          tasks.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId) && !t.isForwardedTask).map(t => t.parentTaskId)
         )];
         if (missingParentIds.length) {
           try {
@@ -2245,7 +2266,7 @@ export default function TasksPage() {
                 alreadyFetched.add(t.taskId);
                 if (t.isFolder !== true && !t.parentTaskId && !t.assigneeIds?.length) t.isFolder = true;
                 allFetchedChain.push(t);
-                if (t.parentTaskId && !alreadyFetched.has(t.parentTaskId)) {
+                if (t.parentTaskId && !t.isForwardedTask && !alreadyFetched.has(t.parentTaskId)) {
                   nextToFetch.push(t.parentTaskId);
                   alreadyFetched.add(t.parentTaskId);
                 }
@@ -3541,9 +3562,12 @@ export default function TasksPage() {
         // For employees: fetch full parent chain so folder structure shows correctly
         // (subtasks may be 2+ levels deep: folder → task1 → subtask1)
         if (role === "employee") {
-          const existingIds = new Set(newDocs.map(t => t.taskId));
+          // Check against the FULL accumulated map, not just this snapshot's
+          // batch — otherwise a parent that's already cached gets re-fetched
+          // from Firestore on every unrelated write to any other task field.
+          const existingIds = new Set([...newDocs.map(t => t.taskId), ...allTaskMapRef.current.keys()]);
           const initialParentIds = [...new Set(
-            newDocs.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId)).map(t => t.parentTaskId)
+            newDocs.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId) && !t.isForwardedTask).map(t => t.parentTaskId)
           )];
           if (initialParentIds.length) {
             const fetchChain = async (startIds) => {
@@ -3563,7 +3587,7 @@ export default function TasksPage() {
                   alreadyFetched.add(t.taskId);
                   if (t.isFolder !== true && !t.parentTaskId && !t.assigneeIds?.length) t.isFolder = true;
                   fetched.push(t);
-                  if (t.parentTaskId && !alreadyFetched.has(t.parentTaskId)) {
+                  if (t.parentTaskId && !t.isForwardedTask && !alreadyFetched.has(t.parentTaskId)) {
                     nextToFetch.push(t.parentTaskId);
                     alreadyFetched.add(t.parentTaskId);
                   }
@@ -5548,13 +5572,26 @@ em-emoji-picker,
           // Deduplicate allTasks first — guards against any race condition duplicates
           const dedupedTasks = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
           const rootTasks = (role === "employee"
-            ? dedupedTasks.filter(t => !t.parentTaskId || !allTaskMapRef.current.has(t.parentTaskId))
+            ? dedupedTasks.filter(t => !t.parentTaskId || t.isForwardedTask || !allTaskMapRef.current.has(t.parentTaskId))
             : dedupedTasks.filter(t => !t.parentTaskId)
           ).filter(t => {
             if (isGoalView ? !t.isGoal : t.isGoal) return false;
             if (taskSection === "assigned") {
               if (t.isSelfAssigned) return (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId;
-              return (t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId;
+              if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
+              // Also match if any descendant (a regular subtask, not forwarded)
+              // is assigned to me. A forward-created descendant does NOT count —
+              // once work is forwarded, the original above it stays hidden.
+              const _hasAssignedDescendant = (taskId, visited = new Set()) => {
+                if (visited.has(taskId)) return false;
+                visited.add(taskId);
+                const dt = allTaskMapRef.current.get(taskId);
+                if (!dt) return false;
+                if (dt.isForwardedTask) return false;
+                if ((dt.assigneeIds || []).includes(employeeId) && dt.assignedBy !== employeeId) return true;
+                return (dt.subtaskIds || []).some(sid => _hasAssignedDescendant(sid, visited));
+              };
+              return _hasAssignedDescendant(t.taskId);
             }
             if (taskSection === "created") {
               if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
@@ -6614,7 +6651,12 @@ em-emoji-picker,
                     const assignedToMe = filteredRoots.filter(t => {
                       if (t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId) return true;
                       if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
-                      if (t.isFolder) return hasDescendantAssignedToMe(t.taskId);
+                      // Not gated to isFolder — Forward & Split creates subtasks
+                      // under regular tasks too, and this check works the same
+                      // regardless of parent type. Gating it to folders only
+                      // meant a subtask assigned to someone else, under a
+                      // regular (non-folder) parent, was invisible to them.
+                      return hasDescendantAssignedToMe(t.taskId);
                       return false;
                     });
                     // Section B: Created by me (direct OR folder with subtask I created) — exclude self tasks
@@ -6622,7 +6664,8 @@ em-emoji-picker,
                       if (assignedToMe.find(x => x.taskId === t.taskId)) return false;
                       if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
                       if (t.assignedBy === employeeId) return true;
-                      if (t.isFolder) return hasDescendantCreatedByMe(t.taskId);
+                      // Same reasoning as the assigned-to-me check above.
+                      return hasDescendantCreatedByMe(t.taskId);
                       return false;
                     });
 
@@ -6961,7 +7004,7 @@ em-emoji-picker,
 
 
                                 <div className="col-timer" onClick={e => e.stopPropagation()}>
-                                  {t.deadlineWindowSecs > 0 && (() => {
+                                  {t.deadlineWindowSecs > 0 && !(t.subtaskIds || []).some(sid => allTaskMap.get(sid)?.isForwardedTask) && (() => {
                                     const isRunning = timerActiveTaskId === t.taskId;
                                     const isAssigneeOfThis = (t.assigneeIds || []).includes(employeeId);
                                     const _mine = getDisplaySeconds ? getDisplaySeconds(t.taskId) : 0;
@@ -7063,7 +7106,7 @@ em-emoji-picker,
                                   </button>
                                 </>
                               )}
-                              {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && (() => {
+                              {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && !(t.subtaskIds || []).some(sid => allTaskMap.get(sid)?.isForwardedTask) && (() => {
                                 const _run = timerActiveTaskId === t.taskId;
                                 const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
                                 const _sec = getDisplaySeconds(t.taskId);
@@ -7111,7 +7154,7 @@ em-emoji-picker,
                     // ─── renderTaskGroup ────────────────────────────────────────
                     const renderTaskGroup = (tasks, section) => {
                       if (!tasks || tasks.length === 0) return null;
-                      const roots = tasks.filter(t => !t.parentTaskId);
+                      const roots = tasks.filter(t => !t.parentTaskId || (role === "employee" && t.isForwardedTask));
                       return (
                         <div style={{ background: "#fff" }}>
                           {roots.map(t => (
@@ -7686,7 +7729,7 @@ em-emoji-picker,
             {/* === Image-2: chat content shows ONLY when no detail tab is active === */}
             {(rightPanel === null) && (<>
 
-              <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
+              <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
 
               {/* ── TASK GUIDE — formal info strip for new open tasks ── */}
               {task && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
@@ -8433,7 +8476,7 @@ em-emoji-picker,
             {task && !task.isFolder && rightPanel && (
               <div className="gv-chat-inline-detail" style={{ flex: 1, overflowY: task.isGoal ? "auto" : "hidden", background: "#fff", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
-                <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} />
+                <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
 
                 {rightPanel === "files" ? (
                   filesLoading ? (
@@ -8490,6 +8533,7 @@ em-emoji-picker,
                 ) : (
                   <DetailBody
                     task={task}
+                    allTaskMap={allTaskMap}
                     dailyReports={dailyReports}
                     reportsLoading={reportsLoading}
                     activeDetailTab={rightPanel === "reports" ? "reports" : "info"}
@@ -8652,6 +8696,7 @@ em-emoji-picker,
 
               <DetailBody
                 task={task}
+                allTaskMap={allTaskMap}
                 dailyReports={dailyReports}
                 reportsLoading={reportsLoading}
                 activeDetailTab={mobDetailPanel}
@@ -8904,6 +8949,7 @@ em-emoji-picker,
                   ) : (
                     <DetailBody
                       task={task}
+                      allTaskMap={allTaskMap}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}
                       activeDetailTab={activeDetailTab}

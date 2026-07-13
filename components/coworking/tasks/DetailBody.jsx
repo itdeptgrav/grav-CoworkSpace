@@ -595,7 +595,7 @@ export default function DetailBody({
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow,
+  deadlineFlow, onUpdatePriority, extFlow, allTaskMap,
 }) {
   const df = deadlineFlow || {};
   const ef = extFlow || {};
@@ -872,6 +872,21 @@ export default function DetailBody({
             </InfoRow>
           )}
 
+          {Array.isArray(task.path) && task.path.length > 0 && (
+            <InfoRow label="Parent Task">
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4, fontSize: 12 }}>
+                {task.path.map((p, i) => (
+                  <span key={p.taskId} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ background: "#F1F5F9", color: "#334155", padding: "2px 8px", borderRadius: 5, fontWeight: 500 }}>
+                      {p.title || p.taskId}
+                    </span>
+                    {i < task.path.length - 1 && <span style={{ color: "#9CA3AF" }}>›</span>}
+                  </span>
+                ))}
+              </div>
+            </InfoRow>
+          )}
+
           {assigneeList.length > 0 && (
             <InfoRow label="People">
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1082,44 +1097,45 @@ export default function DetailBody({
 
 
           {/* ── SECTION: TIMER CONTROL (assignee, in progress) ── */}
-          {isAssignee && isConfirmed && isStarted && !task.isFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
-            <>
-              <Section title="Timer" />
-              <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
-                {/* Live time display */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: isRunningThis ? "#F0FDF4" : "#F8FAFC", border: `1px solid ${isRunningThis ? "#BBF7D0" : "#E5E7EB"}`, borderRadius: 6 }}>
-                  <div>
-                    <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9CA3AF", marginBottom: 3 }}>Time Worked</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "monospace", color: isRunningThis ? "#16A34A" : "#1F2937", letterSpacing: "0.04em" }}>
-                      {formatTimeHMS ? formatTimeHMS(workedSecs) : fmtSecs(workedSecs)}
+          {isAssignee && isConfirmed && isStarted && !task.isFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
+            !(task.subtaskIds || []).some(sid => allTaskMap?.get(sid)?.isForwardedTask) && (
+              <>
+                <Section title="Timer" />
+                <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* Live time display */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: isRunningThis ? "#F0FDF4" : "#F8FAFC", border: `1px solid ${isRunningThis ? "#BBF7D0" : "#E5E7EB"}`, borderRadius: 6 }}>
+                    <div>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9CA3AF", marginBottom: 3 }}>Time Worked</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "monospace", color: isRunningThis ? "#16A34A" : "#1F2937", letterSpacing: "0.04em" }}>
+                        {formatTimeHMS ? formatTimeHMS(workedSecs) : fmtSecs(workedSecs)}
+                      </div>
                     </div>
+                    <button
+                      disabled={isTimerExceeded}
+                      onClick={() => isRunningThis ? timerPause?.(task.taskId, task.title) : timerStart?.(task.taskId, task.title)}
+                      style={{
+                        padding: "7px 14px", borderRadius: 6, border: "none", cursor: isTimerExceeded ? "not-allowed" : "pointer",
+                        fontFamily: F, fontSize: 11, fontWeight: 600, transition: "all 0.15s",
+                        opacity: isTimerExceeded ? 0.4 : 1,
+                        background: isRunningThis ? "#DCFCE7" : "#EBF2FA",
+                        color: isRunningThis ? "#16A34A" : BRAND,
+                      }}>
+                      {isRunningThis ? "⏸ Pause" : "▶ Resume"}
+                    </button>
                   </div>
-                  <button
-                    disabled={isTimerExceeded}
-                    onClick={() => isRunningThis ? timerPause?.(task.taskId, task.title) : timerStart?.(task.taskId, task.title)}
-                    style={{
-                      padding: "7px 14px", borderRadius: 6, border: "none", cursor: isTimerExceeded ? "not-allowed" : "pointer",
-                      fontFamily: F, fontSize: 11, fontWeight: 600, transition: "all 0.15s",
-                      opacity: isTimerExceeded ? 0.4 : 1,
-                      background: isRunningThis ? "#DCFCE7" : "#EBF2FA",
-                      color: isRunningThis ? "#16A34A" : BRAND,
-                    }}>
-                    {isRunningThis ? "⏸ Pause" : "▶ Resume"}
-                  </button>
+                  {isTimerExceeded && !task.deadlineExtRequest && (
+                    <div style={{ padding: "8px 10px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.5 }}>
+                      Deadline exceeded. Request an extension to continue working.
+                    </div>
+                  )}
+                  {timerBlocked && !isRunningThis && !isTimerExceeded && (
+                    <div style={{ padding: "8px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1D4ED8" }}>
+                      Another task is currently running — pressing Resume will pause it and start this one.
+                    </div>
+                  )}
                 </div>
-                {isTimerExceeded && !task.deadlineExtRequest && (
-                  <div style={{ padding: "8px 10px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.5 }}>
-                    Deadline exceeded. Request an extension to continue working.
-                  </div>
-                )}
-                {timerBlocked && !isRunningThis && !isTimerExceeded && (
-                  <div style={{ padding: "8px 10px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 6, fontSize: 11, color: "#1D4ED8" }}>
-                    Another task is currently running — pressing Resume will pause it and start this one.
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+              </>
+            )}
 
           {/* ── SECTION: WORKFLOW ACTIONS ── */}
           {!task.isFolder && (
