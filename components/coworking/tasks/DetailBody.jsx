@@ -595,7 +595,7 @@ export default function DetailBody({
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow, allTaskMap,
+  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, handleTimerStart, handleTimerPause,
 }) {
   const df = deadlineFlow || {};
   const ef = extFlow || {};
@@ -854,7 +854,7 @@ export default function DetailBody({
             <StatusBadge status={status} />
           </InfoRow>
 
-          {task.priority && (
+          {task.priority && !hasForwardedChild && (
             <InfoRow label="Priority">
               <PriBadge priority={task.priority} />
             </InfoRow>
@@ -927,7 +927,7 @@ export default function DetailBody({
           )}
 
           {/* ── SECTION: TIMELINE ── */}
-          {(task.dueDate || task.fixedDeadline || task.deadlineWindowSecs || task.senderTimerWindowSecs) && (
+          {(task.dueDate || task.fixedDeadline || task.deadlineWindowSecs || task.senderTimerWindowSecs) && !hasForwardedChild && (
             <>
               <Section title="Timeline" />
 
@@ -1098,7 +1098,7 @@ export default function DetailBody({
 
           {/* ── SECTION: TIMER CONTROL (assignee, in progress) ── */}
           {isAssignee && isConfirmed && isStarted && !task.isFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
-            !(task.subtaskIds || []).some(sid => allTaskMap?.get(sid)?.isForwardedTask) && (
+            !hasForwardedChild && (
               <>
                 <Section title="Timer" />
                 <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1112,7 +1112,7 @@ export default function DetailBody({
                     </div>
                     <button
                       disabled={isTimerExceeded}
-                      onClick={() => isRunningThis ? timerPause?.(task.taskId, task.title) : timerStart?.(task.taskId, task.title)}
+                      onClick={() => isRunningThis ? handleTimerPause?.(task.taskId, task.title) : handleTimerStart?.(task.taskId, task.title)}
                       style={{
                         padding: "7px 14px", borderRadius: 6, border: "none", cursor: isTimerExceeded ? "not-allowed" : "pointer",
                         fontFamily: F, fontSize: 11, fontWeight: 600, transition: "all 0.15s",

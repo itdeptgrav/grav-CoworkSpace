@@ -223,7 +223,7 @@ export default function CreateTaskModal({
 
   // Per-assignee priority: queries only tasks that include these specific people,
   // so Person A's P1 stays P1 regardless of how many tasks other people have.
-  const fetchNextPriorityForAssignees = async (assigneeIds) => {
+  const fetchNextPriorityForAssignees = async (assigneeIds, excludeTaskId = null) => {
     if (!assigneeIds?.length) return 1;
     try {
       const snapshots = await Promise.all(
@@ -232,7 +232,13 @@ export default function CreateTaskModal({
         )
       );
       const allPriorities = snapshots
-        .flatMap(snap => snap.docs.map(d => Number(d.data().priority) || 0))
+        .flatMap(snap => snap.docs
+          // Exclude the task we're currently adding a subtask under, by ID —
+          // it's about to become a container, but its subtaskIds won't say so
+          // until AFTER this creation finishes. Also still exclude any OTHER
+          // task that's already a container from something unrelated.
+          .filter(d => d.id !== excludeTaskId && !((d.data().subtaskIds || []).length))
+          .map(d => Number(d.data().priority) || 0))
         .filter(p => p > 0);
       return allPriorities.length > 0 ? Math.max(...allPriorities) + 1 : 1;
     } catch {
@@ -517,7 +523,7 @@ export default function CreateTaskModal({
           if (priorityCache[cacheKey] !== undefined) {
             rowPriority = priorityCache[cacheKey];
           } else {
-            rowPriority = await fetchNextPriorityForAssignees(row.assigneeIds);
+            rowPriority = await fetchNextPriorityForAssignees(row.assigneeIds, parentTask?.taskId);
           }
           priorityCache[cacheKey] = rowPriority + 1; // bump for any next row with same assignees
           // Sender-preset timer: convert this row's timerDurationVal/Unit → seconds.
@@ -597,7 +603,7 @@ export default function CreateTaskModal({
         }
         // ─────────────────────────────────────────────────────────────────────
 
-        const computedPriority = isFolder ? 5 : await fetchNextPriorityForAssignees(selectedIds);
+        const computedPriority = isFolder ? 5 : await fetchNextPriorityForAssignees(selectedIds, parentTask?.taskId);
         const newTask = await createTask({
           title: form.title.trim(), description: form.description,
           notes: isFolder ? "" : form.notes,

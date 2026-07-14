@@ -1173,22 +1173,24 @@ export default function TasksPage() {
         // Read higher-priority tasks directly from Firestore — NOT from allTaskMapRef
         // because onSnapshot may not have fired yet with their latest dueDate.
         const { getDocs, collection, query, where } = await import("firebase/firestore");
-        // Use allTaskMapRef (already live via onSnapshot) — no extra Firestore read needed.
-        // onSnapshot keeps this current so dueDate is always fresh.
+        // Actually do the live read the old comment above promised — the
+        // local cache can lag the write by 1-2 seconds, long enough for a
+        // second same-priority Play to miss the first one's fresh dueDate.
+        const _liveSnap = await getDocs(
+          query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId))
+        );
         const _higherSnap = {
-          docs: [...allTaskMapRef.current.values()]
-            .filter(t => (t.assigneeIds || []).includes(employeeId))
-            .map(t => ({ id: t.taskId, data: () => t }))
+          docs: _liveSnap.docs.map(d => ({ id: d.id, data: () => ({ ...d.data(), taskId: d.id }) }))
         };
         const _higherRunning = _higherSnap.docs
           .map(d => ({ taskId: d.id, ...d.data() }))
           .filter(t =>
             t.taskId !== newTaskId &&
-            Number(t.priority) < _p1Priority &&
+            Number(t.priority) <= _p1Priority &&
             t.dueDate &&
             !_TERMINAL.includes(t.status)
           )
-          .sort((a, b) => Number(b.priority) - Number(a.priority));
+          .sort((a, b) => Number(b.priority) - Number(a.priority) || new Date(a.dueDate) - new Date(b.dueDate));
 
         // Also find tasks between the running P1 and this task
         // to compute cumulative anchor
@@ -1479,8 +1481,9 @@ export default function TasksPage() {
     const _dragAssignees = new Set(dragTask.assigneeIds || []);
     const _sharedAssignee = (dropTask.assigneeIds || []).find(a => _dragAssignees.has(a)) || null;
 
-    // Compute cascade result WITHOUT writing anything — just for preview
-    const _siblings = [...allTaskMapRef.current.values()]
+    // Same candidate-finding logic as before, using the local cache — that
+    // part (who's a sibling) is structural and doesn't go stale.
+    const _siblingCandidates = [...allTaskMapRef.current.values()]
       .filter(t => {
         if ((t.parentTaskId || null) !== (dropParent || null)) return false;
         if (["done", "cancelled"].includes(t.status)) return false;
@@ -1489,7 +1492,17 @@ export default function TasksPage() {
           && ["open", "not_started"].includes(t.status);
         if (_isDraftSibling) return false;
         return (t.assigneeIds || []).some(a => _dragAssignees.has(a));
-      })
+      });
+
+    // Live read for the actual priority/assigneePriorities values — the
+    // cache can lag a just-written swap by a second or two, which is exactly
+    // what showed a stale "P3" instead of the real current "P2" here.
+    const { getDoc: _gdc, doc: _dc } = await import("firebase/firestore");
+    const _freshDocs = await Promise.all(
+      _siblingCandidates.map(t => _gdc(_dc(firebaseDb, "cowork_tasks", t.taskId)))
+    );
+    const _siblings = _siblingCandidates
+      .map((t, i) => (_freshDocs[i].exists() ? { ...t, ..._freshDocs[i].data() } : t))
       .sort((a, b) => {
         const ap = (_sharedAssignee && a.assigneePriorities?.[_sharedAssignee] !== undefined)
           ? a.assigneePriorities[_sharedAssignee]
@@ -1678,6 +1691,53 @@ export default function TasksPage() {
       console.error("[priority] update error:", e.message);
       // Revert on failure
       setAllTasks(prev => prev.map(t => t.taskId === taskId ? { ...t, priority: t.priority } : t));
+    }
+  }, []);
+
+  const recalcDueDateForPriorityChange = useCallback(async (taskId) => {
+    try {
+      const { getDoc: _gd, doc: _d, updateDoc: _ud, serverTimestamp: _st, getDocs: _gds, collection: _col, query: _q, where: _w }
+        = await import("firebase/firestore");
+      const taskSnap = await _gd(_d(firebaseDb, "cowork_tasks", taskId));
+      if (!taskSnap.exists()) return;
+      const _task = { ...taskSnap.data(), taskId };
+      // Only an already-started task (has its own dueDate) needs recomputing —
+      // a task that hasn't been played yet gets it right on first Play anyway.
+      if (!_task.hasTimer || !_task.dueDate) return;
+
+      const settingsSnap = await _gd(_d(firebaseDb, "cowork_settings", "office"));
+      const settings = settingsSnap.exists() ? settingsSnap.data() : {};
+      const { calcDueDate, snapToOfficeHours } = await import("../../../lib/officeDueDate");
+
+      const taskCreatedAtMs = _task.createdAt?.seconds
+        ? _task.createdAt.seconds * 1000
+        : _task.createdAt ? new Date(_task.createdAt).getTime() : Date.now();
+
+      const _TERMINAL = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+      const _myPriority = Number(_task.priority) || 1;
+      const _taskWindowSecs = Number(_task.deadlineWindowSecs) || Number(_task.senderTimerWindowSecs) || 0;
+      const _myAssignee = (_task.assigneeIds || [])[0];
+
+      // Live read, same reason as the first-play anchor check: local cache
+      // can lag a just-written priority/dueDate by a second or two.
+      const _liveSnap = await _gds(_q(_col(firebaseDb, "cowork_tasks"), _w("assigneeIds", "array-contains", _myAssignee)));
+      const _candidates = _liveSnap.docs
+        .map(d => ({ taskId: d.id, ...d.data() }))
+        .filter(t =>
+          t.taskId !== taskId &&
+          Number(t.priority) <= _myPriority &&
+          t.dueDate &&
+          !_TERMINAL.includes(t.status)
+        )
+        .sort((a, b) => Number(b.priority) - Number(a.priority) || new Date(a.dueDate) - new Date(b.dueDate));
+
+      const dueDate = _candidates.length
+        ? snapToOfficeHours(new Date(_candidates[0].dueDate).getTime() + _taskWindowSecs * 1000, settings.schedule || null)
+        : calcDueDate(_taskWindowSecs, settings.schedule || null, settings.maxTaskActionGapMinutes || 120, taskCreatedAtMs);
+
+      await _ud(_d(firebaseDb, "cowork_tasks", taskId), { dueDate, updatedAt: _st() });
+    } catch (e) {
+      console.error("[priority-swap] recalc error:", e.message);
     }
   }, []);
 
@@ -2071,6 +2131,17 @@ export default function TasksPage() {
   }, [employeeId]);
 
   const setupChatCountListeners = useCallback((tasks) => {
+    // Stop listening to tasks no longer in the current list — otherwise every
+    // task ever loaded keeps a live chat listener open for the whole session,
+    // costing a read on every message anywhere, even tasks nobody's viewing.
+    const currentIds = new Set(tasks.map(t => t.taskId));
+    Object.keys(chatCountListenersRef.current).forEach(taskId => {
+      if (!currentIds.has(taskId)) {
+        chatCountListenersRef.current[taskId]();
+        delete chatCountListenersRef.current[taskId];
+      }
+    });
+
     tasks.forEach(t => {
       // Load lastReadAt from Firestore first (async, non-blocking)
       loadLastReadAt(t.taskId);
@@ -3562,10 +3633,7 @@ export default function TasksPage() {
         // For employees: fetch full parent chain so folder structure shows correctly
         // (subtasks may be 2+ levels deep: folder → task1 → subtask1)
         if (role === "employee") {
-          // Check against the FULL accumulated map, not just this snapshot's
-          // batch — otherwise a parent that's already cached gets re-fetched
-          // from Firestore on every unrelated write to any other task field.
-          const existingIds = new Set([...newDocs.map(t => t.taskId), ...allTaskMapRef.current.keys()]);
+          const existingIds = new Set(newDocs.map(t => t.taskId));
           const initialParentIds = [...new Set(
             newDocs.filter(t => t.parentTaskId && !existingIds.has(t.parentTaskId) && !t.isForwardedTask).map(t => t.parentTaskId)
           )];
@@ -6200,7 +6268,7 @@ em-emoji-picker,
                   <div className="gv-row-menu" style={{ top: Math.min(rowMenuPos.y + 4, window.innerHeight - 280), left: Math.min(rowMenuPos.x - 160, window.innerWidth - 190) }} onMouseDown={e => e.stopPropagation()}>
                     {[
                       ...(!t.isFolder ? [{ l: "Open Chat", a: () => { handleSelectNode(t); setRowMenuOpen(null); } }] : []),
-                      ...((isCEO || isTL) ? [{ l: "Add Subtask", a: () => { setActiveModal({ type: "add_subtask", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
+                      ...((isCEO || isTL || (t.assigneeIds || []).includes(employeeId) || t.assignedBy === employeeId) ? [{ l: "Add Subtask", a: () => { setActiveModal({ type: "add_subtask", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(!isCEO && !t.isFolder ? [{ l: "Forward Task", a: () => { setActiveModal({ type: "forward", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(!isCEO && !t.isFolder ? [{ l: "Daily Report", a: () => { setActiveModal({ type: "report", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
                       ...(isCEO && t.completionStatus === "submitted" ? [{ l: "Review Completion", a: () => { setActiveModal({ type: "review_completion", taskId: t.taskId, task: t }); setRowMenuOpen(null); } }] : []),
@@ -6404,7 +6472,7 @@ em-emoji-picker,
                     </button>
                   ))}
                   <div style={{ flex: 1 }} />
-                  {(isCEO || isTL) && taskSection === "created" && (
+                  {taskSection === "created" && (
                     <button
                       onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
                       title="Create new task"
@@ -6447,6 +6515,24 @@ em-emoji-picker,
                       <span style={{ position: "absolute", top: 4, right: 4, width: 5, height: 5, borderRadius: "50%", background: "#1B4F8A" }} />
                     )}
                   </button>
+                  {(isCEO || isTL) && (
+                    <button
+                      onClick={() => setPrioritySwapOpen(true)}
+                      title="Change Priority"
+                      style={{
+                        width: 30, height: 30,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1px solid #D1D5DB", borderRadius: 6,
+                        background: "#fff", cursor: "pointer", flexShrink: 0,
+                        color: "#6B7280",
+                      }}
+                    >
+
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2v20M4 8l8-6 8 6M4 16l8 6 8-6" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -6738,7 +6824,11 @@ em-emoji-picker,
                         const palette = ["#DC2626", "#EA580C", "#D97706", "#CA8A04", "#2563EB", "#7C3AED", "#059669", "#0891B2", "#64748B", "#16A34A"];
                         return { label: `P${n}`, color: palette[Math.min(n - 1, palette.length - 1)] };
                       };
-                      const prior = getPrior(t.priority);
+                      // Broadened: ANY subtask — forwarded or a regular split —
+                      // means this parent's own priority/deadline/timer are no
+                      // longer meaningful. The real work moved to the subtasks.
+                      const hasForwardedChild = (t.subtaskIds || []).length > 0;
+                      const prior = hasForwardedChild ? { label: "—", color: "#94A3B8" } : getPrior(t.priority);
 
                       const fmtTs = (ts) => {
                         if (!ts) return null;
@@ -7004,7 +7094,7 @@ em-emoji-picker,
 
 
                                 <div className="col-timer" onClick={e => e.stopPropagation()}>
-                                  {t.deadlineWindowSecs > 0 && !(t.subtaskIds || []).some(sid => allTaskMap.get(sid)?.isForwardedTask) && (() => {
+                                  {t.deadlineWindowSecs > 0 && !(t.subtaskIds || []).length && (() => {
                                     const isRunning = timerActiveTaskId === t.taskId;
                                     const isAssigneeOfThis = (t.assigneeIds || []).includes(employeeId);
                                     const _mine = getDisplaySeconds ? getDisplaySeconds(t.taskId) : 0;
@@ -7106,7 +7196,7 @@ em-emoji-picker,
                                   </button>
                                 </>
                               )}
-                              {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && !(t.subtaskIds || []).some(sid => allTaskMap.get(sid)?.isForwardedTask) && (() => {
+                              {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && !(t.subtaskIds || []).length && (() => {
                                 const _run = timerActiveTaskId === t.taskId;
                                 const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
                                 const _sec = getDisplaySeconds(t.taskId);
@@ -7351,7 +7441,7 @@ em-emoji-picker,
                                         {draftSectionOpen && renderTaskGroup(assignedDraft, "assigned")}
                                       </div>
                                     )}
-                                    {(isCEO || isTL) && taskSection === "created" && (
+                                    {taskSection === "created" && (
                                       <button
                                         type="button"
                                         onClick={() => setActiveModal({ type: "add_subtask", taskId: null, task: null })}
@@ -8534,6 +8624,7 @@ em-emoji-picker,
                   <DetailBody
                     task={task}
                     allTaskMap={allTaskMap}
+                    hasForwardedChild={(task?.subtaskIds || []).length > 0}
                     dailyReports={dailyReports}
                     reportsLoading={reportsLoading}
                     activeDetailTab={rightPanel === "reports" ? "reports" : "info"}
@@ -8697,6 +8788,7 @@ em-emoji-picker,
               <DetailBody
                 task={task}
                 allTaskMap={allTaskMap}
+                hasForwardedChild={(task?.subtaskIds || []).length > 0}
                 dailyReports={dailyReports}
                 reportsLoading={reportsLoading}
                 activeDetailTab={mobDetailPanel}
@@ -8950,6 +9042,7 @@ em-emoji-picker,
                     <DetailBody
                       task={task}
                       allTaskMap={allTaskMap}
+                      hasForwardedChild={(task?.subtaskIds || []).length > 0}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}
                       activeDetailTab={activeDetailTab}
@@ -9187,6 +9280,7 @@ em-emoji-picker,
       )}
 
       {activeModal?.type === "forward" && <ForwardTaskModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); if (selectedTask) loadDetail(selectedTask.taskId); }} />}
+
       {activeModal?.type === "report" && <DailyReportModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); setActiveDetailTab("reports"); }} />}
       {activeModal?.type === "deadline" && task && (
         activeModal.task?.hasTimer === false && activeModal.task?.proposedFixedDeadline
@@ -9262,6 +9356,7 @@ em-emoji-picker,
         />
       )}
       {activeModal?.type === "forward" && <ForwardTaskModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); if (selectedTask) loadDetail(selectedTask.taskId); }} />}
+
       {activeModal?.type === "report" && <DailyReportModal task={getModalTask()} currentEmployeeId={employeeId} onClose={() => setActiveModal(null)} onSuccess={() => { setActiveModal(null); loadDetail(selectedTask.taskId); setActiveDetailTab("reports"); }} />}
       {activeModal?.type === "deadline" && task && (
         activeModal.task?.hasTimer === false && activeModal.task?.proposedFixedDeadline

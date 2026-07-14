@@ -567,42 +567,44 @@ export default function CreateEmployeePage() {
 
                     {/* Actions */}
                     <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>
-                      {emp.role !== "ceo" && (
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            onClick={() => openReset(emp)}
-                            style={{ padding: "5px 12px", border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", color: "#374151", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#fffbeb"; e.currentTarget.style.borderColor = "#fcd34d"; e.currentTarget.style.color = "#92400e"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; }}
-                          >
-                            Reset Password
-                          </button>
-                          <button
-                            onClick={() => openEditId(emp)}
-                            style={{ padding: "5px 12px", border: "1px solid #a5b4fc", borderRadius: 4, background: "#eef2ff", color: "#3730a3", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#e0e7ff"; e.currentTarget.style.borderColor = "#818cf8"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#eef2ff"; e.currentTarget.style.borderColor = "#a5b4fc"; }}
-                          >
-                            Edit ID
-                          </button>
-                          <button
-                            onClick={() => openRole(emp)}
-                            style={{ padding: "5px 12px", border: "1px solid #bfdbfe", borderRadius: 4, background: "#eff6ff", color: "#1e40af", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#dbeafe"; e.currentTarget.style.borderColor = "#93c5fd"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#eff6ff"; e.currentTarget.style.borderColor = "#bfdbfe"; }}
-                          >
-                            Change Role
-                          </button>
-                          <button
-                            onClick={() => openDelete(emp)}
-                            style={{ padding: "5px 12px", border: "1px solid #fca5a5", borderRadius: 4, background: "#fff5f5", color: "#dc2626", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#ef4444"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff5f5"; e.currentTarget.style.borderColor = "#fca5a5"; }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => openReset(emp)}
+                          style={{ padding: "5px 12px", border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", color: "#374151", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#fffbeb"; e.currentTarget.style.borderColor = "#fcd34d"; e.currentTarget.style.color = "#92400e"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; }}
+                        >
+                          Reset Password
+                        </button>
+                        <button
+                          onClick={() => openEditId(emp)}
+                          style={{ padding: "5px 12px", border: "1px solid #a5b4fc", borderRadius: 4, background: "#eef2ff", color: "#3730a3", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#e0e7ff"; e.currentTarget.style.borderColor = "#818cf8"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "#eef2ff"; e.currentTarget.style.borderColor = "#a5b4fc"; }}
+                        >
+                          Edit ID
+                        </button>
+                        {emp.role !== "ceo" && (
+                          <>
+                            <button
+                              onClick={() => openRole(emp)}
+                              style={{ padding: "5px 12px", border: "1px solid #bfdbfe", borderRadius: 4, background: "#eff6ff", color: "#1e40af", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                              onMouseEnter={e => { e.currentTarget.style.background = "#dbeafe"; e.currentTarget.style.borderColor = "#93c5fd"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "#eff6ff"; e.currentTarget.style.borderColor = "#bfdbfe"; }}
+                            >
+                              Change Role
+                            </button>
+                            <button
+                              onClick={() => openDelete(emp)}
+                              style={{ padding: "5px 12px", border: "1px solid #fca5a5", borderRadius: 4, background: "#fff5f5", color: "#dc2626", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                              onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#ef4444"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "#fff5f5"; e.currentTarget.style.borderColor = "#fca5a5"; }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
