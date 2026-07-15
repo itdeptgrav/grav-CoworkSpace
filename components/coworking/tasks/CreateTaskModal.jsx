@@ -58,7 +58,7 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
     <div>
       <label style={_lbl}>Time Tracking</label>
       <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
-        {[{ val: true, label: "Timer — Start / Pause" },].map(opt => (
+        {[{ val: true, label: "Timer — Start / Pause" }, { val: false, label: "Deadline — Fixed Date" }].map(opt => (
           <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
             style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
             {opt.label}
@@ -87,20 +87,25 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
         </div>
       )}
       {!hasTimer && (
-        <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
-          <div style={{ flex: 2 }}>
-            <label style={_lbl}>Deadline Date *</label>
-            <input className="ctm-inp" style={_inp} type="date"
-              value={deadline || ""} min={todayStr}
-              onChange={e => onSet("deadline", e.target.value)} />
+        <>
+          <div style={{ padding: "7px 10px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 5, fontSize: 11, color: "#92400E", lineHeight: 1.5, marginBottom: 8 }}>
+            ⚠️ Deadline-based tasks are intended only for cross-department tasks. Please use this option only when assigning tasks to another department.
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={_lbl}>Time *</label>
-            <input className="ctm-inp" style={_inp} type="time"
-              value={deadlineTime || ""}
-              onChange={e => onSet("deadlineTime", e.target.value)} />
+          <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+            <div style={{ flex: 2 }}>
+              <label style={_lbl}>Deadline Date *</label>
+              <input className="ctm-inp" style={_inp} type="date"
+                value={deadline || ""} min={todayStr}
+                onChange={e => onSet("deadline", e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={_lbl}>Time *</label>
+              <input className="ctm-inp" style={_inp} type="time"
+                value={deadlineTime || ""}
+                onChange={e => onSet("deadlineTime", e.target.value)} />
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -617,7 +622,7 @@ export default function CreateTaskModal({
           isRepeat: isRepeat || false, repeatConfig: isRepeat ? repeatConfig : null,
           isThirdParty: isThirdParty || false, thirdPartyConfig: isThirdParty ? thirdPartyConfig : null,
           isGoal: isGoal || false, goalConfig: isGoal ? goalConfig : null,
-          etcHours: (!isGoal && !isFolder && !isRepeat && !isThirdParty) ? autoEtcHours : 0,
+          etcHours: (!isGoal && !isFolder && !isRepeat && !isThirdParty && form.hasTimer) ? autoEtcHours : 0,
           isGoldTask: (isGoal && isGoldTask) || false,
           c2Config: (isGoal && isGoldTask && c2WeightPct && c2GlobalMaxPts > 0) ? {
             weightagePercent: parseFloat(c2WeightPct),
@@ -1012,16 +1017,8 @@ export default function CreateTaskModal({
                   {!isFolder && !isRepeat && !isThirdParty && !isGoal && (
                     <>
                       <TimeTrackingSection hasTimer={form.hasTimer} deadline={form.deadline} deadlineTime={form.deadlineTime} onSet={set} timerDurationVal={form.timerDurationVal} timerDurationUnit={form.timerDurationUnit} />
-                      {/* ── ETC auto-calculated (C1 scoring) ── */}
-                      {autoEtcHours > 0 && (
-                        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6 }}>
-                          <span style={{ fontSize: 10, color: "#15803D", fontWeight: 700 }}>⏱ ETC</span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#15803D" }}>
-                            {autoEtcHours >= 1 ? `${autoEtcHours}h` : `${Math.round(autoEtcHours * 60)} min`}
-                          </span>
-                          <span style={{ fontSize: 10, color: "#6B7280" }}>working hours until deadline · used for C1 scoring</span>
-                        </div>
-                      )}
+                      {/* ETC-from-deadline banner removed — deadline is reference only now.
+                          Real hours now come from B's department TL after creation. */}
                     </>
                   )}
 
