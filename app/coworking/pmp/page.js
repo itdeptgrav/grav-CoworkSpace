@@ -745,7 +745,7 @@ export default function PMPDashboard() {
                         </div>
                         <div style={{ fontSize: 17, fontWeight: 600, color: C.textMut }}>
                             0.0
-                        </div>
+                            ``              </div>
                         <div style={{ fontSize: 9, color: C.textHint, marginTop: 2 }}>
                             0.0 pts (annual avg)
                         </div>
