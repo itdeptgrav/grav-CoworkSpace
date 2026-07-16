@@ -372,7 +372,7 @@ export default function PMPDashboard() {
                         loading={loading}
                     />
 
-                    <CompCard
+                    <CompCarda
                         label="C2 This Quarter"
                         value={loading ? null : c2SopPts > 0 ? `${fmt(c2SopPts)} pts` : "—"}
                         sub={loading ? "..." : c2SopPts > 0 ? "" : "no goals past deadline"}
