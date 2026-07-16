@@ -96,6 +96,10 @@ const STATUS = {
   in_progress: { label: "In Progress", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
   pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
+  pending_department_approval: { label: "Pending Dept. Approval", color: "#B45309", bg: "#FEF3C7", dot: "#B45309", glow: "rgba(180,83,9,0.3)" },
+  rejected: { label: "Assignment Rejected", color: "#DC2626", bg: "#FEF2F2", dot: "#DC2626", glow: "rgba(220,38,38,0.3)" },
+  draft: { label: "Draft", color: "#6B7280", bg: "#F3F4F6", dot: "#6B7280", glow: "rgba(107,114,128,0.3)" },
+  pending_tl_hours: { label: "Pending TL Hours", color: "#B45309", bg: "#FEF3C7", dot: "#B45309", glow: "rgba(180,83,9,0.3)" },
   pending_deadline_approval: { label: "Deadline Pending", color: "#D97706", bg: "#FFFBEB", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
   pending_employee_deadline_confirmation: { label: "Employee Confirming", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   deadline_approved: { label: "Deadline Approved", color: "#059669", bg: "#ECFDF5", dot: "#059669", glow: "rgba(5,150,105,0.3)" },
@@ -689,7 +693,9 @@ export default function TasksPage() {
   const [draftSectionOpen, setDraftSectionOpen] = useState(false);
   const [fixedDeadlineNegotiateModal, setFixedDeadlineNegotiateModal] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
-  const [showDeleteConf, setShowDeleteConf] = useState(false);
+  const [draftHoursValMap, setDraftHoursValMap] = useState({});
+  const [draftHoursUnitMap, setDraftHoursUnitMap] = useState({});
+  const [draftHoursBusyId, setDraftHoursBusyId] = useState(null); const [showDeleteConf, setShowDeleteConf] = useState(false);
   const [priorityToast, setPriorityToast] = useState(null); // { label, taskTitle }
 
   // ── Work commit modal (shown when employee pauses timer) ─────────────────────
@@ -827,8 +833,17 @@ export default function TasksPage() {
   const [taskSection, setTaskSection] = useState("assigned"); // "assigned" | "created" | "self"
   const [viewFilter, setViewFilter] = useState(""); // "" | "today" | "week" | "overdue" | "completed"
 
-  const [employeeMapFull, setEmployeeMapFull] = useState(new Map());
-  const [filterOpen, setFilterOpen] = useState(false);
+  // ── Cross-department approvals waiting on ME ──────────────────────────────
+  // Separate from the assigned/created/self tabs above on purpose: these tasks
+  // have an EMPTY assigneeIds (the pending assignee isn't added until both
+  // approvals land — see backend /task/create), so they'd never appear in any
+  // of the existing tabs' filters no matter how those filters were extended.
+  const [pendingDeptApprovals, setPendingDeptApprovals] = useState([]);
+  const [pendingDraftHours, setPendingDraftHours] = useState([]);
+  const [myPendingCrossDeptTasks, setMyPendingCrossDeptTasks] = useState([]);
+  const [myTlHoursSetTasks, setMyTlHoursSetTasks] = useState([]); const [deptApprovalBusy, setDeptApprovalBusy] = useState(null); // taskId currently being approved/rejected
+
+  const [employeeMapFull, setEmployeeMapFull] = useState(new Map()); const [filterOpen, setFilterOpen] = useState(false);
   const [priCtxMenu, setPriCtxMenu] = useState(null); // { x, y, taskId, current }
 
   // ── Resizable split panel state ──
@@ -3353,6 +3368,103 @@ export default function TasksPage() {
     }
   }, [user, employeeId, role, loadAllTasks, loadEmployees]);
 
+  // Cross-department approvals waiting on me. Queried separately from
+  // loadAllTasks because these tasks have an empty assigneeIds (the pending
+  // assignee is only added once both approvals land), so no assignee/creator
+  // filter would ever surface them. Firestore can't query inside an array of
+  // objects for "my id + status=pending", so this fetches the (normally small)
+  // set of all pending-approval tasks and filters client-side.
+  useEffect(() => {
+    if (!employeeId) return;
+    const q = query(collection(firebaseDb, "cowork_tasks"), where("status", "==", "pending_department_approval"));
+    const unsub = onSnapshot(q, snap => {
+      const mine = [];
+      snap.forEach(d => {
+        const t = { taskId: d.id, ...d.data() };
+        const myEntry = (t.departmentApprovals || []).find(a => a.approverId === employeeId && a.status === "pending");
+        if (myEntry) mine.push({ ...t, _myApprovalSide: myEntry.side });
+      });
+      setPendingDeptApprovals(mine);
+    }, err => console.error("[pendingDeptApprovals]", err.message));
+    return () => unsub();
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (!employeeId || role !== "tl" || employeeMapFull.size === 0) { setPendingDraftHours([]); return; }
+    const q = query(collection(firebaseDb, "cowork_tasks"), where("status", "==", "pending_tl_hours"));
+    const unsub = onSnapshot(q, snap => {
+      const mine = [];
+      const myDept = employeeMapFull.get(employeeId)?.department || "";
+      snap.forEach(d => {
+        const t = { taskId: d.id, ...d.data() };
+        if (t.isSelfAssigned) return;
+        const assigneeId = (t.assigneeIds || [])[0];
+        if (!assigneeId) return;
+        const assigneeDept = employeeMapFull.get(assigneeId)?.department || "";
+        if (myDept && assigneeDept === myDept) mine.push(t);
+      });
+      setPendingDraftHours(mine);
+    }, err => console.error("[pendingDraftHours]", err.message));
+    return () => unsub();
+  }, [employeeId, role, employeeMapFull]);
+  // A's own cross-department tasks, while pending — queried by assignedBy,
+  // not assigneeIds, so it shows up for A regardless of whether the empty
+  // assigneeIds (used to hide the task from B) also hides it elsewhere.
+  useEffect(() => {
+    if (!employeeId) return;
+    const q = query(collection(firebaseDb, "cowork_tasks"), where("assignedBy", "==", employeeId));
+    const unsub = onSnapshot(q, snap => {
+      const mine = [];
+      snap.forEach(d => {
+        const t = { taskId: d.id, ...d.data() };
+        if (["pending_department_approval", "pending_tl_hours"].includes(t.status)) mine.push(t);
+      });
+      setMyPendingCrossDeptTasks(mine);
+    }, err => console.error("[myPendingCrossDeptTasks]", err.message));
+    return () => unsub();
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (!employeeId || role !== "tl") { setMyTlHoursSetTasks([]); return; }
+    const q = query(collection(firebaseDb, "cowork_tasks"), where("tlHoursSetBy", "==", employeeId));
+    const unsub = onSnapshot(q, snap => {
+      const mine = [];
+      snap.forEach(d => mine.push({ taskId: d.id, ...d.data() }));
+      setMyTlHoursSetTasks(mine);
+    }, err => console.error("[myTlHoursSetTasks]", err.message));
+    return () => unsub();
+  }, [employeeId, role]);
+
+  const handleSetDraftHours = async (taskId) => {
+    const val = Number(draftHoursValMap[taskId]);
+    if (!val || val <= 0) { alert("Enter a valid number of hours."); return; }
+    const unit = draftHoursUnitMap[taskId] || "hours";
+    setDraftHoursBusyId(taskId);
+    try {
+      await apiFetch(`/cowork/task/${taskId}/department-tl-set-hours`, { method: "POST", body: JSON.stringify({ hoursValue: val, hoursUnit: unit }) });
+      setDraftHoursValMap(m => ({ ...m, [taskId]: "" }));
+    } catch (e) { alert(e.message); } finally { setDraftHoursBusyId(null); }
+  };
+
+  const handleDeptApproval = async (taskId, decision) => {
+    let rejectionReason = "";
+    if (decision === "reject") {
+      rejectionReason = prompt("Reason for rejecting this cross-department assignment:") || "";
+      if (rejectionReason === "") return; // user cancelled the prompt
+    }
+    setDeptApprovalBusy(taskId);
+    try {
+      await apiFetch(`/cowork/task/${taskId}/department-approve`, {
+        method: "POST",
+        body: JSON.stringify({ decision, rejectionReason }),
+      });
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setDeptApprovalBusy(null);
+    }
+  };
+
   // Auto-switch chat tab based on task status
   useEffect(() => {
     if (!selectedTask) return;
@@ -3775,7 +3887,7 @@ export default function TasksPage() {
   // Stats: root = strict !parentTaskId for ALL roles (CEO, TL, employee)
   // Subtasks always have parentTaskId — never count them in total regardless of role
 
-  const dedupedForStats = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
+  const dedupedForStats = [...new Map([...allTasks, ...myPendingCrossDeptTasks, ...myTlHoursSetTasks].map(t => [t.taskId, t])).values()];
   const rootOnlyTasks = dedupedForStats.filter(t => !t.parentTaskId);
   // In goal view, stats must reflect the current section (assigned/created), not all tasks
   const statsBaseTasks = (() => {
@@ -3788,9 +3900,16 @@ export default function TasksPage() {
     });
     if (taskSection === "created") return base.filter(t => {
       if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
-      return t.assignedBy === employeeId && !t.isSelfAssigned;
-    });
-    if (taskSection === "self") return base.filter(t => t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId));
+      if (t.assignedBy === employeeId) return true;
+      if (t.tlHoursSetBy === employeeId) return true;
+      if (t.status === "pending_tl_hours" && role === "tl") {
+        const draftAssignee = (t.assigneeIds || [])[0];
+        const draftDept = employeeMapFull.get(draftAssignee)?.department;
+        const myDept = employeeMapFull.get(employeeId)?.department;
+        if (draftDept && myDept && draftDept === myDept) return true;
+      }
+      return false;
+    }); if (taskSection === "self") return base.filter(t => t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId));
     return base;
   })();
   const stats = {
@@ -5638,7 +5757,8 @@ em-emoji-picker,
           // For employees: show ALL tasks assigned to them (including forwarded subtasks)
           // For CEO/TL: show only root tasks (they see full hierarchy via subtask expansion)
           // Deduplicate allTasks first — guards against any race condition duplicates
-          const dedupedTasks = [...new Map(allTasks.map(t => [t.taskId, t])).values()];
+          const dedupedTasks = [...new Map([...allTasks, ...myPendingCrossDeptTasks, ...myTlHoursSetTasks].map(t => [t.taskId, t])).values()];
+
           const rootTasks = (role === "employee"
             ? dedupedTasks.filter(t => !t.parentTaskId || t.isForwardedTask || !allTaskMapRef.current.has(t.parentTaskId))
             : dedupedTasks.filter(t => !t.parentTaskId)
@@ -5663,7 +5783,9 @@ em-emoji-picker,
             }
             if (taskSection === "created") {
               if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
-              return t.assignedBy === employeeId && !t.isSelfAssigned;
+              if (t.assignedBy === employeeId && !t.isSelfAssigned) return true;
+              if (t.tlHoursSetBy === employeeId) return true;
+              return false;
             }
 
             if (taskSection === "self") return t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId);
@@ -6387,8 +6509,160 @@ em-emoji-picker,
                 )}
               </div>
 
-              {/* === Section tabs: Assigned / Created / Self Tasks === */}
-              {/* === Section tabs — goal view shows its own tabs, regular view shows Assigned/Created/Self === */}
+              {/* === Cross-department approvals waiting on me === */}
+              {pendingDeptApprovals.length > 0 && (
+                <div style={{ padding: "10px 16px", background: "#FFFBEB", borderBottom: "1px solid #FDE68A", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#92400E", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                    🔔 Cross-Department Approval Needed ({pendingDeptApprovals.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {pendingDeptApprovals.map(t => {
+                      const assignerDept = employeeMapFull.get(t.assignedBy)?.department || "—";
+                      const assigneeDept = employeeMapFull.get(t.pendingAssigneeId)?.department || "—";
+                      const isCeoAssignment = t.assignedByRole === "ceo";
+                      const otherEntry = (t.departmentApprovals || []).find(a => a.side !== t._myApprovalSide);
+                      const otherLabel = isCeoAssignment
+                        ? "✅ You're the only approver needed for this assignment"
+                        : otherEntry?.status === "approved"
+                          ? `✅ ${otherEntry.approverName} already approved — you're the last one needed`
+                          : `⏳ Also waiting on ${otherEntry?.approverName || "the other approver"}`;
+                      return (
+                        <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #FDE68A", borderRadius: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                            <button type="button" onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}
+                              style={{ background: "none", border: "none", padding: 0, fontSize: 10, fontWeight: 600, color: "#1B4F8A", cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>
+                              View Details →
+                            </button>
+                          </div>
+                          {t.description && (
+                            <div style={{ fontSize: 11, color: "#4B5563", marginBottom: 6, lineHeight: 1.4 }}>{t.description}</div>
+                          )}
+                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 4 }}>
+                            <strong style={{ color: "#374151" }}>{t.assignedByName || t.assignedBy}</strong>{isCeoAssignment ? " (CEO) has assigned this to" : ` (${assignerDept}) wants to assign this to`}{" "}
+                            <strong style={{ color: "#374151" }}>{t.pendingAssigneeName || t.pendingAssigneeId}</strong> ({assigneeDept})
+                          </div>
+                          {t.fixedDeadline && (
+                            <div style={{ fontSize: 11, color: "#92400E", marginBottom: 4 }}>
+                              📅 Reference target date: {new Date(t.fixedDeadline).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                            You're approving as {t._myApprovalSide === "sender" ? "the assigner's" : "the receiver's"} manager. {otherLabel}
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button disabled={deptApprovalBusy === t.taskId} onClick={() => handleDeptApproval(t.taskId, "approve")}
+                              style={{ flex: 1, padding: "6px 12px", border: "none", borderRadius: 6, background: "#16A34A", color: "#fff", fontSize: 11, fontWeight: 600, cursor: deptApprovalBusy === t.taskId ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: deptApprovalBusy === t.taskId ? 0.6 : 1 }}>
+                              Approve
+                            </button>
+                            <button disabled={deptApprovalBusy === t.taskId} onClick={() => handleDeptApproval(t.taskId, "reject")}
+                              style={{ flex: 1, padding: "6px 12px", border: "1px solid #DC2626", borderRadius: 6, background: "#fff", color: "#DC2626", fontSize: 11, fontWeight: 600, cursor: deptApprovalBusy === t.taskId ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: deptApprovalBusy === t.taskId ? 0.6 : 1 }}>
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {pendingDraftHours.length > 0 && (
+                <div style={{ padding: "10px 16px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                    📝 Drafts Needing Your Hours Estimate ({pendingDraftHours.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {pendingDraftHours.map(t => {
+                      const assigneeName = employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member";
+                      const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
+                      const isBusy = draftHoursBusyId === t.taskId;
+                      return (
+                        <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                          <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>for {assigneeName} — set their real estimated hours</div>
+                          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                            <div style={{ flex: 1, padding: "7px 6px", border: "1px solid #1B4F8A", borderRadius: 6, background: "#EBF2FA", color: "#1B4F8A", fontSize: 11, fontWeight: 600, textAlign: "center" }}>
+                              Timer — Start / Pause
+                            </div>
+                          </div>
+                          <div style={{ padding: "7px 10px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, color: "#6B7280", lineHeight: 1.4, marginBottom: 8 }}>
+                            {assigneeName} will start a timer when beginning work. Time worked is recorded automatically.
+                          </div>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                            <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3"
+                              value={draftHoursValMap[t.taskId] || ""}
+                              onChange={e => setDraftHoursValMap(m => ({ ...m, [t.taskId]: e.target.value.replace(/[^0-9]/g, "") }))} />
+                            <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }}
+                              value={draftHoursUnitMap[t.taskId] || "hours"}
+                              onChange={e => setDraftHoursUnitMap(m => ({ ...m, [t.taskId]: e.target.value }))}>
+                              <option value="minutes">Minutes</option>
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                            </select>
+                          </div>
+                          <button disabled={isBusy} onClick={() => handleSetDraftHours(t.taskId)}
+                            style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: isBusy ? 0.6 : 1 }}>
+                            {isBusy ? "Setting…" : "Set Hours & Activate Task"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {taskSection === "created" && myPendingCrossDeptTasks.length > 0 && (
+                <div style={{ padding: "10px 16px", background: "#F0F9FF", borderBottom: "1px solid #BAE6FD", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#0369A1", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                    Your Cross-Department Tasks — In Progress ({myPendingCrossDeptTasks.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {myPendingCrossDeptTasks.map(t => (
+                      <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BAE6FD", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{t.title}</div>
+                        {t.status === "pending_department_approval" ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <div style={{ fontSize: 11, color: "#6B7280" }}>Waiting on department approval before this reaches {t.pendingAssigneeName || "the assignee"}:</div>
+                            {(t.departmentApprovals || []).map((a, i) => (
+                              <div key={i} style={{ fontSize: 11, color: "#374151", paddingLeft: 4 }}>
+                                {a.status === "approved" ? "✅" : a.status === "rejected" ? "❌" : "⏳"} {a.approverName}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: "#6B7280" }}>
+                            Both HODs approved — waiting on {t.pendingAssigneeName || "the assignee"}'s department TL to set the real hours before they can see it.
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(() => {
+                const ongoingTlHoursSetTasks = myTlHoursSetTasks.filter(t => t.status !== "done");
+                return taskSection === "created" && role === "tl" && ongoingTlHoursSetTasks.length > 0 && (
+                  <div style={{ padding: "10px 16px", background: "#F0FDF4", borderBottom: "1px solid #BBF7D0", flexShrink: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                      Cross-Department Tasks You Set Hours For ({ongoingTlHoursSetTasks.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {ongoingTlHoursSetTasks.map(t => (
+                        <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BBF7D0", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                          <div style={{ fontSize: 11, color: "#6B7280" }}>
+                            for {employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member"} — assigned by {t.assignedByName || t.assignedBy} — status: {(STATUS[t.status] || STATUS.open).label}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* === Section tabs: Assigned / Created / Self Tasks === */}              {/* === Section tabs — goal view shows its own tabs, regular view shows Assigned/Created/Self === */}
               {isGoalView ? (
                 <div style={{
                   display: "flex", alignItems: "center", borderBottom: "1px solid #E5E7EB",
@@ -6750,6 +7024,7 @@ em-emoji-picker,
                       if (assignedToMe.find(x => x.taskId === t.taskId)) return false;
                       if (t.isSelfAssigned) return t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId));
                       if (t.assignedBy === employeeId) return true;
+                      if (t.tlHoursSetBy === employeeId) return true;
                       // Same reasoning as the assigned-to-me check above.
                       return hasDescendantCreatedByMe(t.taskId);
                       return false;
@@ -7002,6 +7277,8 @@ em-emoji-picker,
                                 {t.isRepeat && <span style={{ fontSize: 9, fontWeight: 700, color: "#1D4ED8", background: "#EFF6FF", padding: "1px 5px", borderRadius: 3 }}>🔁 Repeat</span>}
                                 {t.isThirdParty && <span style={{ fontSize: 9, fontWeight: 700, color: "#6D28D9", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>🔗 3rd Party</span>}
                                 {t.isGoal && <span style={{ fontSize: 9, fontWeight: 700, color: "#7E22CE", background: "#FDF4FF", padding: "1px 5px", borderRadius: 3 }}>🎯 Goal</span>}
+                                {t.departmentApprovals && <span title="This task went through cross-department approval" style={{ fontSize: 9, fontWeight: 700, color: "#B45309", background: "#FEF3C7", padding: "1px 5px", borderRadius: 3 }}>🔄 Cross-Dept</span>}
+
                                 {t.isSelfAssigned && <span style={{ fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", padding: "1px 5px", borderRadius: 3 }}>SELF</span>}
                                 {t.deadlineExtRequest?.status === "pending" && (isCEO || isTL) && (
                                   <span style={{ fontSize: 9, fontWeight: 700, color: "#DC2626", background: "#FEF2F2", padding: "2px 7px", borderRadius: 4, border: "1px solid #FECDD3", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
@@ -7767,7 +8044,11 @@ em-emoji-picker,
                       <svg width="9" height="9" viewBox="0 0 12 12" fill="none" style={{ opacity: 0.7, flexShrink: 0 }}><path d="M3 4.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     </span>
                   )}
-                  <div className="gv-chat-actions">
+                  {task.departmentApprovals && (
+                    <span title="This task went through cross-department approval" style={{ fontSize: 10, fontWeight: 700, color: "#B45309", background: "#FEF3C7", padding: "2px 8px", borderRadius: 99, border: "1px solid #FDE68A" }}>
+                      🔄 Cross-Dept
+                    </span>
+                  )}                  <div className="gv-chat-actions">
                     {/* Forward task + Add subtask buttons (replaced phone/video) */}
                     <button className="gv-chat-act-btn gv-img2-icon" title="Forward Task" type="button" onClick={() => handleAction("forward")}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 014-4h12" /></svg>
@@ -7972,6 +8253,77 @@ em-emoji-picker,
                         <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Awaiting approval</div>
                         <div style={{ fontSize: 11, color: "#6B7280" }}>
                           <strong style={{ color: "#374151" }}>{task.approverName || "Your approver"}</strong> must approve this self-assigned task before you can begin.
+                        </div>
+                      </div>
+                    )}
+
+                    {task.status === "pending_tl_hours" && !task.isSelfAssigned && (() => {
+                      const draftAssigneeId = (task.assigneeIds || [])[0];
+                      const draftAssigneeDept = employeeMapFull.get(draftAssigneeId)?.department || "";
+                      const myDept = employeeMapFull.get(employeeId)?.department || "";
+                      const iAmTheirTl = role === "tl" && draftAssigneeDept && myDept === draftAssigneeDept;
+                      if (iAmTheirTl) {
+                        const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
+                        const _lbl = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 };
+                        return (
+                          <div style={{ padding: "10px 16px", borderLeft: "3px solid #6B7280", background: "#F9FAFB" }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 8 }}>Set the real estimated hours before {employeeMapFull.get(draftAssigneeId)?.name || "your team member"} can see this task.</div>
+                            <label style={_lbl}>Time Tracking</label>
+                            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                              <div style={{ flex: 1, padding: "8px 6px", border: "1px solid #1B4F8A", borderRadius: 6, background: "#EBF2FA", color: "#1B4F8A", fontSize: 11, fontWeight: 600, textAlign: "center" }}>
+                                Timer — Start / Pause
+                              </div>
+                            </div>
+                            <div style={{ padding: "7px 10px", background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 5, fontSize: 11, color: "#6B7280", lineHeight: 1.5, marginBottom: 8 }}>
+                              {employeeMapFull.get(draftAssigneeId)?.name || "The assignee"} will start a timer when beginning work. Time worked is recorded automatically.
+                            </div>
+                            <label style={_lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(required — {employeeMapFull.get(draftAssigneeId)?.name || "assignee"} can negotiate)</span></label>
+                            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                              <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3" value={draftHoursVal} onChange={e => setDraftHoursVal(e.target.value.replace(/[^0-9]/g, ""))} />
+                              <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnit} onChange={e => setDraftHoursUnit(e.target.value)}>
+                                <option value="minutes">Minutes</option>
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                              </select>
+                            </div>
+                            <button disabled={draftHoursBusy} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftHoursBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftHoursBusy ? 0.6 : 1 }}>
+                              {draftHoursBusy ? "Setting…" : "Set Hours & Activate Task"}
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div style={{ padding: "10px 16px", borderLeft: "3px solid #9CA3AF", background: "#F9FAFB" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 2 }}>Waiting on estimated hours</div>
+                          <div style={{ fontSize: 11, color: "#6B7280" }}>{employeeMapFull.get(draftAssigneeId)?.name || "The assignee"}'s department TL still needs to set the real estimated hours before this task is active.</div>
+                        </div>
+                      );
+                    })()}
+                    {/* Cross-department task: live breakdown of both required approvals.
+                        Visible to the assigner (and anyone else with access to this task) —
+                        the pending assignee themselves can't see this at all, since they
+                        have no visibility into the task until both approvals land. */}
+                    {(task.status === "pending_department_approval" || task.status === "rejected") && task.departmentApprovals && (
+                      <div style={{ padding: "10px 16px", borderLeft: `3px solid ${task.status === "rejected" ? "#DC2626" : "#D97706"}`, background: task.status === "rejected" ? "#FEF2F2" : "#FFFBEB" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 6 }}>
+                          {task.status === "rejected"
+                            ? "Cross-department assignment was rejected — never went to " + (task.pendingAssigneeName || "the assignee") + "."
+                            : `Waiting on cross-department approval — ${task.pendingAssigneeName || "the assignee"} won't see this task until both approve.`}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {(task.departmentApprovals || []).map((a, i) => (
+                            <div key={i} style={{ fontSize: 11, color: "#374151", display: "flex", alignItems: "center", gap: 6 }}>
+                              <span>{a.status === "approved" ? "✅" : a.status === "rejected" ? "❌" : "⏳"}</span>
+                              <span>{a.approverName}</span>
+                              <span style={{ color: "#9CA3AF" }}>
+                                ({a.side === "sender" ? "assigner's manager" : "assignee's manager"}
+                                {a.source === "dept_tl" ? ", dept TL" : a.source === "primary_manager" ? ", Primary Manager" : ""})
+                              </span>
+                              {a.status === "rejected" && a.rejectionReason && (
+                                <span style={{ color: "#DC2626" }}>— "{a.rejectionReason}"</span>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
