@@ -8,6 +8,7 @@
  * Fields:
  *  • schedule   — per-day in/out times + isOff toggle (Mon–Sun)
  *  • maxTaskActionGapMinutes — max allowed gap from task creation to first timer start
+ *  • breaks — array of { name, start: "HH:MM", end: "HH:MM" }, applied every working day
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -17,7 +18,6 @@ import CoworkingShell from "../../../components/coworking/layout/CoworkingShell"
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
-// ─── constants ───────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
 const BRAND = "#1B4F8A";
 
@@ -37,9 +37,8 @@ const DEFAULT_SCHEDULE = {
   sunday:    { isOff: true,  inTime: "09:30", outTime: "18:30" },
 };
 
-const DEFAULT_GAP_MINUTES = 120; // 2 hours
+const DEFAULT_GAP_MINUTES = 120;
 
-// ─── tiny helpers ─────────────────────────────────────────────────────────────
 function fmtTime12(t) {
   if (!t) return "";
   const [h, m] = t.split(":").map(Number);
@@ -55,7 +54,15 @@ function gapDisplay(mins) {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────────
+function breakDuration(start, end) {
+  if (!start || !end) return "";
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  const mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins <= 0) return "⚠ end must be after start";
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins/60)}h ${mins%60 ? (mins%60)+"m" : ""}`.trim();
+}
+
 function SectionCard({ title, subtitle, children }) {
   return (
     <div style={{ background:"#fff", border:"1px solid #E5E7EB", borderRadius:12,
@@ -87,25 +94,23 @@ function TimeInput({ value, onChange, disabled }) {
   );
 }
 
-// ─── main page ────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { user, role, employeeId, loading } = useCoworkAuth();
   const router = useRouter();
 
   const [schedule, setSchedule]       = useState(DEFAULT_SCHEDULE);
   const [gapVal, setGapVal]           = useState("2");
-  const [gapUnit, setGapUnit]         = useState("hours"); // "minutes" | "hours"
+  const [gapUnit, setGapUnit]         = useState("hours");
+  const [breaks, setBreaks]           = useState([]);
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
   const [error, setError]             = useState("");
 
-  // Redirect non-CEO users
   useEffect(() => {
     if (!loading && user && role !== "ceo") router.replace("/coworking/tasks");
   }, [loading, user, role, router]);
 
-  // Load settings from Firestore
   useEffect(() => {
     if (!user || role !== "ceo") return;
     (async () => {
@@ -114,6 +119,7 @@ export default function SettingsPage() {
         if (snap.exists()) {
           const data = snap.data();
           if (data.schedule) setSchedule({ ...DEFAULT_SCHEDULE, ...data.schedule });
+          if (Array.isArray(data.breaks)) setBreaks(data.breaks);
           if (data.maxTaskActionGapMinutes) {
             const mins = Number(data.maxTaskActionGapMinutes);
             if (mins >= 60 && mins % 60 === 0) {
@@ -133,6 +139,19 @@ export default function SettingsPage() {
     setSaved(false);
   }, []);
 
+  const addBreak = () => {
+    setBreaks(prev => [...prev, { name: "", start: "13:00", end: "14:00" }]);
+    setSaved(false);
+  };
+  const updateBreak = (idx, field, value) => {
+    setBreaks(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+    setSaved(false);
+  };
+  const removeBreak = (idx) => {
+    setBreaks(prev => prev.filter((_, i) => i !== idx));
+    setSaved(false);
+  };
+
   const handleSave = async () => {
     setSaving(true); setError(""); setSaved(false);
     try {
@@ -141,13 +160,27 @@ export default function SettingsPage() {
         : Math.round(parseFloat(gapVal));
       if (!gapMins || gapMins <= 0) throw new Error("Please enter a valid max action gap.");
 
+      const cleanBreaks = breaks
+        .filter(b => b.name?.trim() && b.start && b.end)
+        .map(b => ({ name: b.name.trim(), start: b.start, end: b.end }));
+
+      for (const b of cleanBreaks) {
+        const [sh, sm] = b.start.split(":").map(Number);
+        const [eh, em] = b.end.split(":").map(Number);
+        if ((eh * 60 + em) <= (sh * 60 + sm)) {
+          throw new Error(`"${b.name}" break: end time must be after start time.`);
+        }
+      }
+
       await setDoc(doc(firebaseDb, "cowork_settings", "office"), {
         schedule,
         maxTaskActionGapMinutes: gapMins,
+        breaks: cleanBreaks,
         updatedAt: serverTimestamp(),
         updatedBy: employeeId,
       }, { merge: true });
 
+      setBreaks(cleanBreaks);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) { setError(e.message); }
@@ -156,12 +189,10 @@ export default function SettingsPage() {
 
   if (loading || pageLoading) {
     return (
-      
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-                      height:"100%", fontFamily:F, color:"#9CA3AF", fontSize:13 }}>
-          Loading settings…
-        </div>
-      
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                    height:"100%", fontFamily:F, color:"#9CA3AF", fontSize:13 }}>
+        Loading settings…
+      </div>
     );
   }
 
@@ -189,12 +220,12 @@ export default function SettingsPage() {
         .os-inp:focus { border-color:${BRAND} !important; box-shadow:0 0 0 2px rgba(27,79,138,0.12) !important; }
         .os-save-btn:hover:not(:disabled) { background:#163E6E !important; }
         .os-day-row:hover { background:#F8FAFC; }
+        .os-break-row:hover { background:#FFFBEB; }
       `}</style>
 
       <div style={{ height:"100%", overflowY:"auto", background:"#F5F6FA",
                     padding:"24px 28px", fontFamily:F }}>
 
-        {/* Page header */}
         <div style={{ marginBottom:24 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
             <div style={{ width:36, height:36, borderRadius:9, background:BRAND,
@@ -211,7 +242,7 @@ export default function SettingsPage() {
                 Office Settings
               </h1>
               <div style={{ fontSize:12, color:"#6B7280", marginTop:2 }}>
-                Configure working hours and task action policies
+                Configure working hours, breaks, and task action policies
               </div>
             </div>
           </div>
@@ -219,17 +250,13 @@ export default function SettingsPage() {
 
         <div>
 
-          {/* ── SECTION 1: Max Task Action Gap ── */}
           <SectionCard
             title="⏱ Max Allowed Action Gap"
             subtitle="Maximum time allowed from task assignment to first timer start. If an employee starts after this gap, the due time is anchored to assignment time + gap (not to start time)."
           >
             <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
               <input
-                type="number"
-                min="1"
-                max="9999"
-                value={gapVal}
+                type="number" min="1" max="9999" value={gapVal}
                 onChange={e => { setGapVal(e.target.value); setSaved(false); }}
                 className="os-inp"
                 style={{ width:90, padding:"8px 10px", border:"1px solid #D1D5DB",
@@ -254,7 +281,6 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {/* Example callout */}
             <div style={{ marginTop:14, padding:"12px 14px", background:"#FFFBEB",
                           border:"1px solid #FDE68A", borderRadius:8 }}>
               <div style={{ fontSize:11, fontWeight:700, color:"#92400E",
@@ -270,13 +296,91 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* ── SECTION 2: Weekly Schedule ── */}
+          {/* ── NEW SECTION: Breaks ── */}
+          <SectionCard
+            title="☕ Daily Breaks"
+            subtitle="Recurring breaks (lunch, tea, etc.) subtracted from every working day when calculating due dates. Applies the same every day."
+          >
+            {breaks.length === 0 && (
+              <div style={{ fontSize:12, color:"#9CA3AF", padding:"10px 0" }}>
+                No breaks defined yet. Working hours are treated as one continuous block.
+              </div>
+            )}
+
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+              {breaks.map((b, idx) => {
+                const dur = breakDuration(b.start, b.end);
+                const isInvalid = dur.startsWith("⚠");
+                return (
+                  <div key={idx} className="os-break-row"
+                       style={{ display:"grid", gridTemplateColumns:"1fr 110px 110px 90px 32px",
+                                gap:10, alignItems:"center", padding:"10px 10px",
+                                borderRadius:8, border:`1px solid ${isInvalid ? "#FECDD3" : "#F1F5F9"}`,
+                                background: isInvalid ? "#FEF2F2" : "#fff" }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. Lunch Break"
+                      value={b.name}
+                      onChange={e => updateBreak(idx, "name", e.target.value)}
+                      style={{ padding:"7px 10px", border:"1px solid #D1D5DB", borderRadius:7,
+                               fontSize:12.5, fontFamily:F, outline:"none", color:"#111827" }}
+                    />
+                    <TimeInput value={b.start} onChange={v => updateBreak(idx, "start", v)} />
+                    <TimeInput value={b.end} onChange={v => updateBreak(idx, "end", v)} />
+                    <div style={{ fontSize:11, fontWeight:600,
+                                  color: isInvalid ? "#DC2626" : "#6B7280", textAlign:"center" }}>
+                      {dur}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeBreak(idx)}
+                      title="Remove this break"
+                      style={{ width:28, height:28, border:"1px solid #FECDD3", borderRadius:7,
+                               background:"#FEF2F2", color:"#DC2626", cursor:"pointer",
+                               display:"flex", alignItems:"center", justifyContent:"center",
+                               fontSize:14, fontWeight:700 }}
+                    >×</button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={addBreak}
+              style={{ padding:"8px 16px", border:"1px dashed #BFDBFE", borderRadius:8,
+                       background:"#EBF2FA", color:BRAND, fontSize:12.5, fontWeight:600,
+                       cursor:"pointer", fontFamily:F }}
+            >
+              + Add Break
+            </button>
+
+            {breaks.length > 0 && (
+              <div style={{ marginTop:14, padding:"12px 14px", background:"#F0FDF4",
+                            border:"1px solid #BBF7D0", borderRadius:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#166534",
+                              marginBottom:6, textTransform:"uppercase", letterSpacing:"0.05em" }}>
+                  Active Breaks
+                </div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                  {breaks.filter(b => b.name && b.start && b.end).map((b, i) => (
+                    <span key={i} style={{
+                      fontSize:11, padding:"3px 9px", borderRadius:5,
+                      background:"#DCFCE7", color:"#166534",
+                      border:"1px solid #BBF7D0", fontWeight:500,
+                    }}>
+                      <strong>{b.name}</strong> {fmtTime12(b.start)} – {fmtTime12(b.end)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
           <SectionCard
             title="📅 Office Working Hours"
             subtitle={`${workingDays} working day${workingDays !== 1 ? "s" : ""} configured. Deadlines will automatically roll over to the next working period.`}
           >
-
-            {/* Day headers */}
             <div style={{ display:"grid", gridTemplateColumns:"100px 1fr 1fr 80px",
                           gap:10, alignItems:"center", marginBottom:10,
                           padding:"0 4px" }}>
@@ -302,7 +406,6 @@ export default function SettingsPage() {
                                 background: cfg.isOff ? "#FEF2F2" : "#fff",
                                 border:`1px solid ${cfg.isOff ? "#FECDD3" : "#F1F5F9"}` }}>
 
-                    {/* Day name */}
                     <div style={{ display:"flex", alignItems:"center", gap:7 }}>
                       <div style={{
                         width:32, height:32, borderRadius:8,
@@ -319,13 +422,9 @@ export default function SettingsPage() {
                       </span>
                     </div>
 
-                    {/* In time */}
                     <div>
-                      <TimeInput
-                        value={cfg.inTime}
-                        disabled={cfg.isOff}
-                        onChange={v => updateDay(dayKey, "inTime", v)}
-                      />
+                      <TimeInput value={cfg.inTime} disabled={cfg.isOff}
+                                 onChange={v => updateDay(dayKey, "inTime", v)} />
                       {!cfg.isOff && (
                         <div style={{ fontSize:10, color:"#94A3B8", marginTop:3 }}>
                           {fmtTime12(cfg.inTime)}
@@ -333,13 +432,9 @@ export default function SettingsPage() {
                       )}
                     </div>
 
-                    {/* Out time */}
                     <div>
-                      <TimeInput
-                        value={cfg.outTime}
-                        disabled={cfg.isOff}
-                        onChange={v => updateDay(dayKey, "outTime", v)}
-                      />
+                      <TimeInput value={cfg.outTime} disabled={cfg.isOff}
+                                 onChange={v => updateDay(dayKey, "outTime", v)} />
                       {!cfg.isOff && (
                         <div style={{ fontSize:10, color:"#94A3B8", marginTop:3 }}>
                           {fmtTime12(cfg.outTime)}
@@ -347,15 +442,11 @@ export default function SettingsPage() {
                       )}
                     </div>
 
-                    {/* Off toggle */}
                     <div style={{ display:"flex", flexDirection:"column",
                                   alignItems:"center", gap:3 }}>
                       <label className={`os-toggle${cfg.isOff ? " os-off" : ""}`}>
-                        <input
-                          type="checkbox"
-                          checked={!cfg.isOff}
-                          onChange={e => updateDay(dayKey, "isOff", !e.target.checked)}
-                        />
+                        <input type="checkbox" checked={!cfg.isOff}
+                               onChange={e => updateDay(dayKey, "isOff", !e.target.checked)} />
                         <span className="os-slider" />
                       </label>
                       <span style={{ fontSize:9, fontWeight:600,
@@ -369,7 +460,6 @@ export default function SettingsPage() {
               })}
             </div>
 
-            {/* Working hours summary */}
             <div style={{ marginTop:14, padding:"12px 14px", background:"#F0FDF4",
                           border:"1px solid #BBF7D0", borderRadius:8 }}>
               <div style={{ fontSize:11, fontWeight:700, color:"#166534",
@@ -402,30 +492,31 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* ── SECTION 3: Deadline Rollover Example ── */}
           <SectionCard
             title="🔁 Deadline Rollover Logic"
-            subtitle="How due dates are calculated when work time spans office hours."
+            subtitle="How due dates are calculated when work time spans office hours, breaks, holidays, and leave."
           >
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {[
                 {
-                  icon:"✅",
-                  bg:"#F0FDF4", border:"#BBF7D0",
+                  icon:"✅", bg:"#F0FDF4", border:"#BBF7D0",
                   title:"Within gap, within hours",
                   desc:"Task assigned 5:30 PM, start 6:00 PM (within 2h gap). Window = 5h. Office closes 6:30 PM → 30 min today + 4.5h next working day.",
                 },
                 {
-                  icon:"⚠️",
-                  bg:"#FFFBEB", border:"#FDE68A",
+                  icon:"⚠️", bg:"#FFFBEB", border:"#FDE68A",
                   title:"Past gap, anchor applied",
                   desc:"Task assigned 4:30 PM, start 7:00 PM (past 2h gap). Due date anchors from 6:30 PM (4:30 + 2h), not 7:00 PM.",
                 },
                 {
-                  icon:"🔄",
-                  bg:"#EBF2FA", border:"#BFDBFE",
-                  title:"Rolls over weekend / off day",
-                  desc:"Window running into Saturday off day → automatically continues from Monday 9:30 AM.",
+                  icon:"🔄", bg:"#EBF2FA", border:"#BFDBFE",
+                  title:"Rolls over weekend / holiday / leave",
+                  desc:"Window running into an off day, a company holiday, or the employee's approved leave → automatically continues from the next real working day, 9:30 AM.",
+                },
+                {
+                  icon:"☕", bg:"#FEF3C7", border:"#FCD34D",
+                  title:"Skips daily breaks",
+                  desc:"Task assigned 10:30 AM for 4h, Lunch 1–2 PM defined. Instead of 2:30 PM, due date lands at 3:30 PM — the lunch hour doesn't count as work time.",
                 },
               ].map((ex, i) => (
                 <div key={i} style={{ padding:"11px 14px", background:ex.bg,
@@ -439,7 +530,6 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* ── Save bar ── */}
           <div style={{ position:"sticky", bottom:0, padding:"14px 0",
                         background:"#F5F6FA", borderTop:"1px solid #E5E7EB",
                         display:"flex", alignItems:"center", gap:12 }}>
@@ -486,8 +576,6 @@ export default function SettingsPage() {
 
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
-
     </>
-    
   );
 }

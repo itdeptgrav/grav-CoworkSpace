@@ -1250,18 +1250,39 @@ export default function TasksPage() {
           console.log(`[anchor-check] P${_p1Priority} task anchored from P${_runningP1Priority} chain → ${new Date(_anchorMs).toISOString()}`);
         }
 
+        let _blockedDates = new Set();
+        try {
+          const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+          const _bdToken = await firebaseAuth.currentUser?.getIdToken();
+          const _bdFrom = new Date(taskCreatedAtMs).toISOString().slice(0, 10);
+          const _bdTo = new Date(taskCreatedAtMs + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const _bdBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+          const _bdRes = await fetch(
+            `${_bdBase}/cowork/scheduling/blocked-dates?employeeId=${employeeId}&from=${_bdFrom}&to=${_bdTo}`,
+            { headers: { Authorization: `Bearer ${_bdToken}` } }
+          );
+          const _bdData = await _bdRes.json();
+          _blockedDates = new Set(Object.keys(_bdData.blockedDates || {}));
+        } catch (_bdErr) {
+          console.error("[handleTimerStart] blocked-dates fetch failed, proceeding without holiday/leave awareness:", _bdErr.message);
+        }
+
         // If anchor found → compute dueDate from chain anchor + this task's window
         // If no higher running task → normal calcDueDate from now
         const dueDate = _anchorMs
           ? snapToOfficeHours(
             _anchorMs + _taskWindowSecs * 1000,
-            settings.schedule || null
+            settings.schedule || null,
+            _blockedDates,
+            settings.breaks || []
           )
           : calcDueDate(
             _taskWindowSecs,
             settings.schedule || null,
             settings.maxTaskActionGapMinutes || 120,
             taskCreatedAtMs,
+            _blockedDates,
+            settings.breaks || []
           );
 
         // Start timer THEN write dueDate so the hook and Firestore are in sync
@@ -2894,6 +2915,25 @@ export default function TasksPage() {
     const approvedSecs = Number(selectedTask.senderTimerWindowSecs) || 0;
     if (approvedSecs <= 0) return;
     setApprovingSenderTimer(true);
+
+    // ── Fetch holidays + this employee's approved leave ONCE, reused below ──
+    let _blockedDates = new Set();
+    try {
+      const { firebaseAuth } = await import("../../../lib/coworkFirebase");
+      const _bdToken = await firebaseAuth.currentUser?.getIdToken();
+      const _bdFrom = new Date().toISOString().slice(0, 10);
+      const _bdTo = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const _bdBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const _bdRes = await fetch(
+        `${_bdBase}/cowork/scheduling/blocked-dates?employeeId=${employeeId}&from=${_bdFrom}&to=${_bdTo}`,
+        { headers: { Authorization: `Bearer ${_bdToken}` } }
+      );
+      const _bdData = await _bdRes.json();
+      _blockedDates = new Set(Object.keys(_bdData.blockedDates || {}));
+    } catch (_bdErr) {
+      console.error("[senderTimer-blocked-dates]", _bdErr.message);
+    }
+
     // Optimistic update
     // Compute chain-aware dueDate — anchor from highest-priority predecessor's dueDate
     let _senderDue = new Date(Date.now() + approvedSecs * 1000).toISOString();
@@ -2903,7 +2943,8 @@ export default function TasksPage() {
         (await import("firebase/firestore")).doc(firebaseDb, "cowork_settings", "office")
       );
       const _defSched = _defSnap.exists() ? (_defSnap.data().schedule || null) : null;
-      _senderDue = _awsDefault(Date.now(), approvedSecs, _defSched);
+      const _defBreaks = _defSnap.exists() ? (_defSnap.data().breaks || []) : [];
+      _senderDue = _awsDefault(Date.now(), approvedSecs, _defSched, _blockedDates, _defBreaks);
     } catch (_defE) {
       console.error("[senderTimer-default]", _defE.message);
     }
@@ -2926,6 +2967,7 @@ export default function TasksPage() {
           (await import("firebase/firestore")).doc(firebaseDb, "cowork_settings", "office")
         );
         const _sched = _settingsSnap.exists() ? (_settingsSnap.data().schedule || null) : null;
+        const _brks = _settingsSnap.exists() ? (_settingsSnap.data().breaks || []) : [];
         let _anchor = null;
         for (const _ht of _higherTasks) {
           const _htW = Number(_ht.deadlineWindowSecs) || Number(_ht.senderTimerWindowSecs) || 0;
@@ -2933,11 +2975,11 @@ export default function TasksPage() {
             _anchor = new Date(_ht.dueDate).getTime();
           } else if (_htW > 0) {
             const _base = _anchor || Date.now();
-            _anchor = new Date(_aws(_base, _htW, _sched)).getTime();
+            _anchor = new Date(_aws(_base, _htW, _sched, _blockedDates, _brks)).getTime();
           }
         }
         if (_anchor) {
-          _senderDue = _aws(_anchor, approvedSecs, _sched);
+          _senderDue = _aws(_anchor, approvedSecs, _sched, _blockedDates, _brks);
         }
       }
     } catch (_e) {

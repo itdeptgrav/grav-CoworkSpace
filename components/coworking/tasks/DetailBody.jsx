@@ -8,6 +8,8 @@ import { ReportCard, ReportDateGroup } from "./ReportCard";
 import ThirdPartyTask from "./ThirdPartyTask";
 import GoalTask from "./GoalTask";
 import DeadlineBreakdown from "./DeadlineBreakdown";
+import DeadlineDecodePanel from "./DeadlineDecodePanel";
+import { useDutyStatus } from "../../../hooks/useDutyStatus";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { addWorkingSecs } from "../../../lib/officeDueDate";
@@ -67,6 +69,18 @@ const COMP_COLOR = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Row: label + value layout used throughout the info tab
+function AssigneeDutyDot({ employeeId }) {
+  const isOnline = useDutyStatus(employeeId);
+  const label = isOnline === null ? "…" : isOnline ? "Online" : "Offline";
+  const color = isOnline === null ? "#D1D5DB" : isOnline ? "#16A34A" : "#9CA3AF";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 600, color, marginLeft: 8 }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      {label}
+    </span>
+  );
+}
+
 function InfoRow({ label, children, noBorder }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 0, padding: "9px 0", borderBottom: noBorder ? "none" : "1px solid #F1F5F9" }}>
@@ -878,6 +892,7 @@ export default function DetailBody({
                   <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <GwAvatar name={a.name} size={20} url={a.pic} />
                     <span style={{ fontSize: 12, color: "#1F2937" }}>{a.name}</span>
+                    <AssigneeDutyDot employeeId={a.id} />
                   </div>
                 ))}
               </div>
@@ -1014,6 +1029,8 @@ export default function DetailBody({
                       </span>
                     </InfoRow>
                   )}
+
+                  {task.dueDate && <DeadlineDecodePanel task={task} />}
 
                   {/* ── Work Timeline: sessions, usage summary, extension history ── */}
                   <div style={{ padding: "8px 0" }}>
@@ -1630,7 +1647,3 @@ export default function DetailBody({
     </div>
   );
 }
-
-// Now let's do the modification in the view detail page ...
-// so as we have discussed the testcase/edgecase/situations that we have disscussed 
-
