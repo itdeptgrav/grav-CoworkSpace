@@ -170,6 +170,12 @@ export function useTaskTimer(employeeId, opts = {}) {
                         }
                         setActiveTaskId(activeId);
                         startTick(activeId, baseSecs);
+                    } else if (!activeId && activeRef.current) {
+                        // The task that WAS running just got deactivated by an outside
+                        // write (auto-pause on logout, another tab, etc.) — this is the
+                        // only place that finds out, since nothing LOCAL triggered it.
+                        setActiveTaskId(null);
+                        stopTick();
                     }
 
                 });

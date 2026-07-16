@@ -13,6 +13,8 @@ import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMe
 import dynamic from "next/dynamic";
 import { useFCMToken } from "../../../hooks/useFCMToken";
 import { usePushNotifications } from "../../../hooks/usePushNotifications";
+import DutyStatusToggle from "../shared/DutyStatusToggle";
+import { useDutyStatus } from "../../../hooks/useDutyStatus";
 
 // Dynamically import LiveKit (browser-only) for PiP room
 const LiveKitRoom = dynamic(() => import("@livekit/components-react").then(m => m.LiveKitRoom), { ssr: false });
@@ -1760,6 +1762,7 @@ function NavIcon({ name, size = 20 }) {
 }
 
 export default function CoworkingShell({ role, employeeName, employeeId, title, children }) {
+  const dutyIsOnline = useDutyStatus(employeeId);
   const pathname = usePathname();
   const router = useRouter();
   const { notifications, unread, unreadDm, markRead, markSectionRead } = useCoworkNotifications(employeeId || "");
@@ -2747,6 +2750,48 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           background: #F5F7FA;
           border-color: #D0D5DD;
         }
+
+        .cw-duty-btn {
+  width: auto; height: 36px; padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #E4E7EC;
+  background: #fff;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+  color: #344054;
+  transition: all 0.12s;
+}
+
+.cw-duty-btn {
+  height: auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  align-items: center;
+}
+.cw-duty-text-col {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.cw-duty-caption {
+  font-size: 10px;
+  color: #98A2B3;
+  font-weight: 500;
+  white-space: nowrap;
+}
+  .cw-topbar-online { background: #F0FDF4; border-bottom-color: #BBF7D0; transition: background 0.3s ease, border-color 0.3s ease; }
+.cw-topbar-offline { background: #F9FAFB; transition: background 0.3s ease, border-color 0.3s ease; }
+  .cw-duty-desc { font-size: 12px; color: #667085; line-height: 1.5; margin-bottom: 16px; }
+  .cw-duty-static-value { font-size: 18px; font-weight: 700; color: #667085; }
+.cw-duty-btn:hover { background: #F5F7FA; border-color: #D0D5DD; }
+.cw-duty-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: #9CA3AF; }
+.cw-duty-btn.is-online .cw-duty-dot { background: #16A34A; }
+.cw-duty-label { font-size: 12.5px; font-weight: 600; color: #344054; white-space: nowrap; }
+.cw-duty-since { font-size: 11px; color: #98A2B3; margin-top: 6px; }
+
+@media (max-width: 1024px) {
+  .cw-duty-btn { display: none; }
+}
         .cw-topbar-notif-dot {
           position: absolute;
           top: 6px; right: 6px;
@@ -3064,6 +3109,52 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           .cw-sidebar.open { left: 0; }
           .cw-topbar-hamburger { display: flex; }
         }
+          
+
+        .cw-duty-btn { width: auto; padding: 0 12px 0 10px; gap: 7px; border-radius: 20px; }
+.cw-duty-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cw-duty-label { font-size: 12.5px; font-weight: 600; color: #344054; white-space: nowrap; }
+
+.cw-duty-panel-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.3);
+  z-index: 499; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+}
+.cw-duty-panel-overlay.show { opacity: 1; pointer-events: auto; }
+.cw-duty-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 100vw;
+  background: #fff; border-left: 1px solid #E4E7EC; box-shadow: -8px 0 32px rgba(0,0,0,0.12);
+  z-index: 500; display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+}
+.cw-duty-panel.open { transform: translateX(0); }
+.cw-duty-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid #F2F4F7; }
+.cw-duty-panel-title { font-size: 15px; font-weight: 700; color: #1A1D21; }
+.cw-duty-panel-close { width: 30px; height: 30px; border-radius: 8px; border: none; background: transparent; font-size: 18px; color: #667085; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.cw-duty-panel-close:hover { background: #F5F7FA; }
+.cw-duty-panel-body { padding: 18px; overflow-y: auto; }
+
+.cw-duty-confirm-box { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 10px; background: #F9FAFB; border: 1px solid #F2F4F7; margin-bottom: 16px; }
+.cw-duty-dot-lg { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.cw-duty-confirm-title { font-size: 13.5px; font-weight: 600; color: #1A1D21; margin-bottom: 3px; }
+.cw-duty-confirm-sub { font-size: 12px; color: #667085; line-height: 1.5; }
+
+.cw-duty-confirm-actions { display: flex; gap: 10px; margin-bottom: 22px; }
+.cw-duty-btn-cancel, .cw-duty-btn-primary, .cw-duty-btn-danger { flex: 1; padding: 10px 14px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.cw-duty-btn-cancel { background: #F2F4F7; color: #344054; }
+.cw-duty-btn-cancel:hover { background: #E4E7EC; }
+.cw-duty-btn-primary { background: #16A34A; color: #fff; }
+.cw-duty-btn-primary:hover { background: #15803D; }
+.cw-duty-btn-danger { background: #DC2626; color: #fff; }
+.cw-duty-btn-danger:hover { background: #B91C1C; }
+.cw-duty-btn-cancel:disabled, .cw-duty-btn-primary:disabled, .cw-duty-btn-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.cw-duty-history-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #98A2B3; margin-bottom: 8px; }
+.cw-duty-history-empty { font-size: 12.5px; color: #98A2B3; padding: 8px 0; }
+.cw-duty-history-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #F2F4F7; }
+.cw-duty-history-tag { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.03em; }
+.cw-duty-history-tag.login { color: #15803D; background: #F0FDF4; }
+.cw-duty-history-tag.logout { color: #92400E; background: #FFFBEB; }
+.cw-duty-history-time { font-size: 11.5px; color: #667085; }
       `}</style>
 
       <div className="cw-shell">
@@ -3342,7 +3433,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
         {/* Main */}
         <div className="cw-main">
-          <header className="cw-topbar">
+          <header className={`cw-topbar${dutyIsOnline === true ? " cw-topbar-online" : dutyIsOnline === false ? " cw-topbar-offline" : ""}`}>
             <div className="cw-topbar-left">
               <button className="cw-topbar-hamburger" onClick={() => setMobileOpen(true)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
@@ -3352,9 +3443,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
             <div className="cw-topbar-right">
-
-
-
+              <DutyStatusToggle employeeId={employeeId} onStatusChange={(nowOnline) => { if (nowOnline) socket?.emit("workspace-set-online", employeeId); }} />
               {/* SOP button removed from topbar — accessible via sidebar only */}
 
               <div style={{ position: "relative" }}>
