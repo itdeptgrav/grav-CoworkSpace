@@ -1,19 +1,5 @@
 /**
  * components/coworking/tasks/DetailBody.jsx
- * 
- * // <components />
- <page className="js"></page>
- *
- * FORMAL, CLEAN redesign of the Details tab right panel.
- * Replaces the existing DetailBody function in page.js.
- * Drop-in: same props signature, same internal logic, no changes needed elsewhere.
- *
- * Design principles:
- * - Plain white background, no colored gradients or cartoon cards
- * - Data shown as clean label → value rows (like a form)
- * - Workflow actions shown as clear, simple buttons with short plain-English labels
- * - No decorative emojis in structural UI (only in user-supplied content)
- * - IBM Plex Sans, #1B4F8A brand color
  */
 "use client";
 import { useState, useEffect, useRef } from "react";
@@ -805,8 +791,6 @@ export default function DetailBody({
         .db-scroll::-webkit-scrollbar { width: 3px; }
         .db-scroll::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 2px; }
       `}</style>
-
-
 
       {/* ── REPORTS / GOAL / TIMELINE / SUBMISSIONS TAB ── */}
       {curTab === "reports" && (
@@ -1647,4 +1631,6 @@ export default function DetailBody({
   );
 }
 
-// changed in the page.js
+// Now let's do the modification in the view detail page ...
+// so as we have discussed the testcase/edgecase/situations that we have disscussed 
+

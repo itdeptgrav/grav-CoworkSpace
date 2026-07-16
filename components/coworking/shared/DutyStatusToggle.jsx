@@ -1,6 +1,63 @@
 "use client";
 import { useEffect, useState } from "react";
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+const TERMINAL_STATUSES = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
+
+function istDow(ms) { return new Date(ms + IST_OFFSET_MS).getUTCDay(); }
+function istMidnightUtcMs(ms) {
+  const ist = new Date(ms + IST_OFFSET_MS);
+  return Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - IST_OFFSET_MS;
+}
+function istTimeMs(ms, timeStr) {
+  const [h, m] = (timeStr || "09:30").split(":").map(Number);
+  return istMidnightUtcMs(ms) + (h * 60 + m) * 60 * 1000;
+}
+function istDateKey(ms) { return new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10); }
+
+/**
+ * Runs only on the FIRST login of the calendar day — guarded by
+ * `latenessAppliedDate`, checked before anything else. A 2nd/3rd login the
+ * same day short-circuits here and does nothing.
+ */
+async function applyLoginLatenessShift(employeeId, statusRef) {
+  const { firebaseDb } = await import("../../../lib/coworkFirebase");
+  const { doc, getDoc, updateDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+
+  const now = Date.now();
+  const todayKey = istDateKey(now);
+
+  const statusSnap = await getDoc(statusRef);
+  const alreadyAppliedDate = statusSnap.exists() ? statusSnap.data().latenessAppliedDate : null;
+  if (alreadyAppliedDate === todayKey) return;
+
+  await updateDoc(statusRef, { latenessAppliedDate: todayKey });
+
+  const officeSnap = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
+  const schedule = officeSnap.exists() ? officeSnap.data().schedule : null;
+  if (!schedule) return;
+
+  const cfg = schedule[DAY_KEYS[istDow(now)]];
+  if (!cfg || cfg.isOff) return;
+
+  const officeOpenMs = istTimeMs(now, cfg.inTime || "09:30");
+  const latenessMs = now - officeOpenMs;
+  if (latenessMs <= 0) return;
+
+  const snap = await getDocs(query(collection(firebaseDb, "cowork_tasks"), where("assigneeIds", "array-contains", employeeId)));
+  for (const d of snap.docs) {
+    const t = d.data();
+    if (!t.dueDate || TERMINAL_STATUSES.includes(t.status)) continue;
+    const dueMs = new Date(t.dueDate).getTime();
+    if (istDateKey(dueMs) !== todayKey) continue;
+    await updateDoc(d.ref, {
+      dueDate: new Date(dueMs + latenessMs).toISOString(),
+      lateLoginShiftMs: latenessMs,
+    });
+  }
+}
+
 async function setDutyStatus(employeeId, isOnline) {
   const { firebaseDb } = await import("../../../lib/coworkFirebase");
   const { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, increment } = await import("firebase/firestore");
@@ -24,6 +81,14 @@ async function setDutyStatus(employeeId, isOnline) {
   }
 
   await setDoc(ref, { employeeId, isOnline, since: serverTimestamp() }, { merge: true });
+
+  if (isOnline) {
+    try {
+      await applyLoginLatenessShift(employeeId, ref);
+    } catch (e) {
+      console.warn("[DutyStatusToggle] could not apply login-lateness shift:", e.message);
+    }
+  }
 
   try {
     if (dayKey && sessionHours > 0) {
@@ -143,7 +208,6 @@ export default function DutyStatusToggle({ employeeId, onStatusChange }) {
   })();
 
   const stateClass = isOnline === null ? "" : isOnline ? " is-online" : " is-offline";
-  const label = isOnline === null ? "…" : isOnline ? `Online · ${formatDuration(workedTodaySeconds)}` : "Offline";
 
   const statusDescription = isOnline
     ? "You're marked Online — today's working time is being tracked automatically from your login."
@@ -160,7 +224,7 @@ export default function DutyStatusToggle({ employeeId, onStatusChange }) {
     setBusy(true);
     try {
       const next = !isOnline;
-      await setDutyStatus(employeeId, next); // real failure only if THIS throws
+      await setDutyStatus(employeeId, next);
 
       if (next) {
         setResultIsError(false);
@@ -181,12 +245,8 @@ export default function DutyStatusToggle({ employeeId, onStatusChange }) {
         setResultMessage(`You're offline. Logout recorded at ${fmtTime(Date.now())}.${pauseNote}`);
       }
 
-      // Optional parent hook. Success is already shown above — this must
-      // NEVER be able to turn that success message into an error message.
-      try {
-        onStatusChange?.(next);
-      } catch (e) {
-        console.error("[DutyStatusToggle] onStatusChange callback threw — check CoworkingShell.js's wiring (likely a missing `socket` reference):", e.message);
+      try { onStatusChange?.(next); } catch (e) {
+        console.error("[DutyStatusToggle] onStatusChange callback threw:", e.message);
       }
     } catch (e) {
       console.error("[DutyStatusToggle] status update failed:", e);
@@ -247,7 +307,7 @@ export default function DutyStatusToggle({ employeeId, onStatusChange }) {
               <div className="cw-duty-confirm-sub">
                 {isOnline
                   ? "This logs your Logout time now and automatically pauses any task timer you currently have running."
-                  : "This logs your Login time now, starting today's tracked work session."}
+                  : "This logs your Login time now. If this is your first login today and you're arriving after office start, today's due tasks shift forward by that same gap."}
               </div>
               <div className="cw-duty-confirm-actions">
                 <button className="cw-duty-btn-cancel" onClick={() => setPanelOpen(false)} disabled={busy}>Cancel</button>

@@ -177,7 +177,6 @@ export function useTaskTimer(employeeId, opts = {}) {
                         setActiveTaskId(null);
                         stopTick();
                     }
-
                 });
             } catch (e) {
                 console.error("[TaskTimer] Load error:", e.message);
@@ -199,7 +198,6 @@ export function useTaskTimer(employeeId, opts = {}) {
             const newTotal = prevBase + addedSecs;
             const prevTitle = prev?.taskTitle || currentActive;
 
-            // Optimistic update for the stopped task
             const nextMap = new Map(sessionMapRef.current);
             nextMap.set(currentActive, { ...(prev || {}), totalSeconds: newTotal, isActive: false, lastStartTime: null, taskTitle: prevTitle });
             sessionMapRef.current = nextMap;
@@ -275,7 +273,6 @@ export function useTaskTimer(employeeId, opts = {}) {
             lastPauseReason,
         });
 
-
         setActiveTaskId(null);
         stopTick();
         if (autoReason === "deadline_reached") {
@@ -326,16 +323,13 @@ export function useTaskTimer(employeeId, opts = {}) {
  *   — displaySeconds is kept live via a 1-second ticker
  */
 export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()) {
-    // Raw sessions from Firestore per employee: Map<empId, Map<taskId, sessionData>>
     const [rawSessions, setRawSessions] = useState(new Map());
-    // Tick counter to force re-render every second when any session is active
     const [tick, setTick] = useState(0);
     const tickRef = useRef(null);
     const rawRef = useRef(new Map());
 
     rawRef.current = rawSessions;
 
-    // Start/stop the 1-second ticker based on whether any session is active
     useEffect(() => {
         const hasActive = [...rawRef.current.values()].some(empMap =>
             [...empMap.values()].some(s => s.isActive)
@@ -348,19 +342,15 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
         }
     });
 
-    // Cleanup ticker on unmount
     useEffect(() => {
         return () => {
             if (tickRef.current) clearInterval(tickRef.current);
         };
     }, []);
 
-    // Subscribe to each employee's timer sessions
     useEffect(() => {
         if (!employeeIds.length) return;
-
         const unsubMap = new Map();
-
         employeeIds.forEach(empId => {
             if (!empId || unsubMap.has(empId)) return;
             const colRef = collection(firebaseDb, "cowork_task_timers", empId, "sessions");
@@ -383,11 +373,9 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
         return () => {
             unsubMap.forEach(unsub => unsub());
         };
-        // Re-run only when the joined string of IDs changes (avoids array reference churn)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [employeeIds.join(",")]);
 
-    // Build activeTimers (currently running) AND allTimers (running + paused with time)
     const activeTimers = new Map();
     const allTimers = new Map();
 
@@ -412,7 +400,6 @@ export function useWatchEmployeeTimers(employeeIds = [], employeeMap = new Map()
                 activeTimers.set(taskId, entry);
                 allTimers.set(taskId, entry);
             } else if ((sess.totalSeconds || 0) > 0) {
-                // Paused but has logged time — include in allTimers with grey display
                 allTimers.set(taskId, {
                     employeeId: empId, employeeName: empName,
                     taskTitle: sess.taskTitle || taskId,
