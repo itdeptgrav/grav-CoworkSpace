@@ -149,6 +149,16 @@ async function setDutyMode(employeeId, targetMode, opts = {}) {
 
   await setDoc(ref, patch, { merge: true });
 
+  if (targetMode === "emergency") {
+    console.log("[emergency-pause] entering Emergency Mode — attempting to pause any running timer");
+    try {
+      const paused = await autoPauseRunningTimer(employeeId);
+      console.log(`[emergency-pause] paused ${paused.length} timer(s):`, paused.map(p => p.taskId));
+    } catch (e) {
+      console.warn("[DutyStatusToggle] could not auto-pause timer on emergency:", e.message);
+    }
+  }
+
   if (targetMode === "online") {
     try { await applyLoginLatenessShift(employeeId, ref); }
     catch (e) { console.warn("[DutyStatusToggle] lateness shift failed:", e.message); }

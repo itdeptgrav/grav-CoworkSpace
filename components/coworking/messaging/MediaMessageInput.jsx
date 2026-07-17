@@ -1,12 +1,15 @@
 /**
  * MediaMessageInput — WhatsApp-style input bar
- * + button → image/pdf picker | emoji button | text field | mic/send button
+ * + button → image/pdf picker | emoji button | text field | mic + send buttons
  * Recording mode: waveform animation + timer + pause/resume + send
  *
  * @mention support — typing "@" opens a popup of group members (filtered by what
  * comes after @). Selecting a member inserts "@FullName " into the textarea and
  * tracks their employeeId in `mentions` so the parent can notify them specifically.
  * Requires the `members` prop with [{ employeeId, name, profilePicUrl }].
+ *
+ * Drag & drop — drop files onto the bar, or let the parent page dispatch a
+ * `dm_drop_files` CustomEvent with { detail: { files: File[] } }.
  */
 "use client";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
@@ -45,6 +48,8 @@ export default function MediaMessageInput({
     const [emojiSearch, setEmojiSearch] = useState("");
     const [recent, setRecent] = useState([]);
     const [waveform, setWaveform] = useState(Array(40).fill(3));
+    const [dragOver, setDragOver] = useState(false);
+    const dragDepth = useRef(0);
 
     // @mention state
     const [mentionOpen, setMentionOpen] = useState(false);
@@ -61,6 +66,8 @@ export default function MediaMessageInput({
     const timerRef = useRef(null);
     const waveTimerRef = useRef(null);
     const emojiRef = useRef(null);
+    const emojiBtnRef = useRef(null);
+    const [emojiPos, setEmojiPos] = useState({ left: 0, bottom: 0 });
     const attMenuRef = useRef(null);
     const mentionRef = useRef(null);
     const analyserRef = useRef(null);
@@ -68,23 +75,42 @@ export default function MediaMessageInput({
     const audioCtxRef = useRef(null);
 
     // ── Listen for pasted image injected by parent page ──
-  useEffect(() => {
-    const handler = (e) => {
-      const att = e.detail;
-      if (!att?.url) return;
-      setAttachments(prev => [...prev, att]);
-    };
-    window.addEventListener("dm_paste_attachment", handler);
-    return () => window.removeEventListener("dm_paste_attachment", handler);
-  }, []);
+    useEffect(() => {
+        const handler = (e) => {
+            const att = e.detail;
+            if (!att?.url) return;
+            setAttachments(prev => [...prev, att]);
+        };
+        window.addEventListener("dm_paste_attachment", handler);
+        return () => window.removeEventListener("dm_paste_attachment", handler);
+    }, []);
 
     const canSend = (text.trim() || attachments.length > 0) && !uploading && !disabled;
 
     useEffect(() => { if (showEmoji) setRecent(getRecent()); }, [showEmoji]);
 
+    // Position the emoji picker with fixed coords — escapes ancestor overflow:hidden
+    useEffect(() => {
+        if (!showEmoji) return;
+        const place = () => {
+            const btn = emojiBtnRef.current;
+            if (!btn) return;
+            const r = btn.getBoundingClientRect();
+            const W = 340;
+            let left = r.left - 8;
+            if (left + W > window.innerWidth - 8) left = window.innerWidth - W - 8;
+            if (left < 8) left = 8;
+            setEmojiPos({ left, bottom: window.innerHeight - r.top + 8 });
+        };
+        place();
+        window.addEventListener("resize", place);
+        window.addEventListener("scroll", place, true);
+        return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+    }, [showEmoji]);
+
     useEffect(() => {
         const h = (e) => {
-            if (emojiRef.current && !emojiRef.current.contains(e.target)) setShowEmoji(false);
+            if (emojiRef.current && !emojiRef.current.contains(e.target) && !emojiBtnRef.current?.contains(e.target)) setShowEmoji(false);
             if (attMenuRef.current && !attMenuRef.current.contains(e.target)) setShowAttMenu(false);
             if (mentionRef.current && !mentionRef.current.contains(e.target) && textareaRef.current && !textareaRef.current.contains(e.target)) {
                 setMentionOpen(false);
@@ -214,7 +240,10 @@ export default function MediaMessageInput({
         setText("");
         setAttachments([]);
         setMentionedIds([]);
-        if (textareaRef.current) textareaRef.current.style.height = "auto";
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+            textareaRef.current.style.overflowY = "hidden";
+        }
     };
 
     const handleKeyDown = (e) => {
@@ -264,6 +293,56 @@ export default function MediaMessageInput({
             setTimeout(() => setError(""), 2500);
         }
         setUploading(false);
+    };
+
+    // ── Shared multi-file uploader (drop, external drop events) ──────────────
+    const uploadFiles = useCallback(async (files) => {
+        const list = Array.from(files || []).filter(Boolean);
+        if (!list.length) return;
+        setUploading(true);
+        const out = [];
+        for (const file of list) {
+            try {
+                if (file.type.startsWith("image/")) {
+                    const up = await uploadImage(file);
+                    out.push({ type: "image", url: up.url, fileId: up.fileId, name: file.name, width: up.width, height: up.height });
+                } else {
+                    const up = await uploadPDF(file);
+                    out.push({ type: "pdf", url: up.url, fileId: up.fileId, name: file.name, size: file.size });
+                }
+            } catch (err) {
+                setError(`Upload failed: ${file.name}`);
+                setTimeout(() => setError(""), 2500);
+            }
+        }
+        if (out.length) setAttachments(prev => [...prev, ...out]);
+        setUploading(false);
+    }, []);
+
+    // Let the parent page hand us dropped files from anywhere in the chat
+    useEffect(() => {
+        const handler = (e) => { if (e.detail?.files?.length) uploadFiles(e.detail.files); };
+        window.addEventListener("dm_drop_files", handler);
+        return () => window.removeEventListener("dm_drop_files", handler);
+    }, [uploadFiles]);
+
+    const onDragEnter = (e) => {
+        if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+        e.preventDefault(); dragDepth.current++; setDragOver(true);
+    };
+    const onDragOver = (e) => {
+        if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+    };
+    const onDragLeave = (e) => {
+        e.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDragOver(false);
+    };
+    const onDrop = (e) => {
+        if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+        e.preventDefault(); e.stopPropagation();
+        dragDepth.current = 0; setDragOver(false);
+        uploadFiles(e.dataTransfer.files);
     };
 
     const insertEmoji = (emoji) => {
@@ -353,13 +432,27 @@ export default function MediaMessageInput({
                 ta.focus();
                 ta.selectionStart = ta.selectionEnd = newCaret;
                 ta.style.height = "auto";
-                ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
+                ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+                ta.style.overflowY = ta.scrollHeight > 220 ? "auto" : "hidden";
             }
         }, 0);
     };
 
     return (
-        <div style={{ position: "relative", background: "#fff", borderTop: "1px solid #EEF2F8", zIndex: 20 }}>
+        <div
+            onDragEnter={onDragEnter}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            style={{ position: "relative", background: "#fff", borderTop: "1px solid #EEF2F8", zIndex: 20 }}
+        >
+            {dragOver && (
+                <div style={{ position: "absolute", inset: 0, zIndex: 400, background: "rgba(239,246,255,0.96)", border: "2px dashed #1a73e8", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, pointerEvents: "none", color: "#1a73e8", fontSize: 13, fontWeight: 700 }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                    Drop files to attach
+                </div>
+            )}
+
             {error && <div style={{ padding: "6px 16px", background: "#B03A2E", color: "#fff", fontSize: 12, fontWeight: 600 }}>{error}</div>}
 
             {attachments.length > 0 && (
@@ -377,19 +470,20 @@ export default function MediaMessageInput({
                 </div >
             )}
 
-            {uploading && <div style={{ padding: "4px 16px", fontSize: 11, color: "#00A884", display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid #2A3942", borderTopColor: "#00A884", borderRadius: "50%", animation: "cwSpin 0.7s linear infinite" }} />Uploading…</div>}
+            {uploading && <div style={{ padding: "4px 16px", fontSize: 11, color: "#1a73e8", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid rgba(26,115,232,0.25)", borderTopColor: "#1a73e8", borderRadius: "50%", animation: "cwSpin 0.7s linear infinite" }} />Uploading…</div>}
 
             {/* @mention popup */}
             {
                 mentionOpen && filteredMembers.length > 0 && (
                     <div ref={mentionRef} style={{
                         position: "absolute", bottom: "100%", left: 12, right: 12,
-                        maxWidth: 360, background: "#233138",
-                        borderRadius: 12, boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
+                        maxWidth: 360, background: "#FFFFFF",
+                        border: "1px solid #E2E8F0",
+                        borderRadius: 12, boxShadow: "0 -6px 24px rgba(15,23,42,0.13)",
                         zIndex: 250, overflow: "hidden",
                         fontFamily: "inherit",
                     }}>
-                        <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#8696A0", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                        <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "#94A3B8", textTransform: "uppercase", borderBottom: "1px solid #F1F5F9" }}>
                             {mentionQuery ? `Mention · "${mentionQuery}"` : "Mention a member"}
                         </div>
                         <div style={{ maxHeight: 240, overflowY: "auto" }}>
@@ -401,9 +495,9 @@ export default function MediaMessageInput({
                                     style={{
                                         display: "flex", alignItems: "center", gap: 10,
                                         width: "100%", padding: "8px 14px",
-                                        background: i === mentionHoverIdx ? "rgba(0,168,132,0.14)" : "none",
+                                        background: i === mentionHoverIdx ? "#EFF6FF" : "none",
                                         border: "none", cursor: "pointer",
-                                        color: "#E9EDEF", fontSize: 13, fontFamily: "inherit",
+                                        color: "#0F172A", fontSize: 13, fontFamily: "inherit",
                                         textAlign: "left", transition: "background 0.1s",
                                     }}
                                 >
@@ -418,11 +512,11 @@ export default function MediaMessageInput({
                                         }}>{initials(m.name)}</div>
                                     }
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontSize: 13, fontWeight: 500, color: "#E9EDEF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        <div style={{ fontSize: 13, fontWeight: 500, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                             {m.name || m.employeeId}
                                         </div>
                                         {m.employeeId && m.name && (
-                                            <div style={{ fontSize: 10, color: "#8696A0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            <div style={{ fontSize: 10, color: "#94A3B8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                 {m.employeeId}
                                             </div>
                                         )}
@@ -434,24 +528,25 @@ export default function MediaMessageInput({
                 )
             }
 
+            {/* Emoji picker — light theme, fixed position (escapes overflow:hidden) */}
             {
                 showEmoji && (
-                    <div ref={emojiRef} style={{ position: "absolute", bottom: "100%", left: 0, width: "min(340px, 100vw)", background: "#233138", borderRadius: "12px 12px 0 0", boxShadow: "0 -4px 24px rgba(0,0,0,0.4)", zIndex: 300, display: "flex", flexDirection: "column", maxHeight: 300 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 6px" }}>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8696A0" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
-                            <input autoFocus value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emoji…" style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "none", outline: "none", color: "#E9EDEF", fontSize: 12, padding: "5px 10px", borderRadius: 8, fontFamily: "inherit" }} />
-                            {emojiSearch && <button onClick={() => setEmojiSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#8696A0", fontSize: 13, padding: 0 }}>✕</button>}
+                    <div ref={emojiRef} style={{ position: "fixed", left: emojiPos.left, bottom: emojiPos.bottom, width: "min(340px, calc(100vw - 16px))", background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 14, boxShadow: "0 -8px 32px rgba(15,23,42,0.14), 0 2px 8px rgba(15,23,42,0.06)", zIndex: 9999, display: "flex", flexDirection: "column", maxHeight: 320, overflow: "hidden" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 8px", borderBottom: "1px solid #F1F5F9" }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+                            <input autoFocus value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emoji…" style={{ flex: 1, background: "#F8FAFC", border: "1px solid #E2E8F0", outline: "none", color: "#0F172A", fontSize: 12, padding: "6px 10px", borderRadius: 8, fontFamily: "inherit" }} />
+                            {emojiSearch && <button onClick={() => setEmojiSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 13, padding: 0 }}>✕</button>}
                         </div>
-                        {!emojiSearch && <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "0 8px" }}>
+                        {!emojiSearch && <div style={{ display: "flex", borderBottom: "1px solid #F1F5F9", padding: "0 8px", background: "#FAFBFC" }}>
                             {["🕐", ...EMOJI_CATS.map(c => c.icon)].map((icon, i) => (
-                                <button key={i} onClick={() => setEmojiTab(i === 0 ? -1 : i - 1)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: "6px 7px", borderBottom: `2px solid ${(i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? "#00A884" : "transparent"}`, opacity: (i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? 1 : 0.5, flexShrink: 0 }}>{icon}</button>
+                                <button key={i} onClick={() => setEmojiTab(i === 0 ? -1 : i - 1)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: "7px 7px 5px", borderBottom: `2px solid ${(i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? "#1a73e8" : "transparent"}`, opacity: (i === 0 ? emojiTab === -1 : emojiTab === i - 1) ? 1 : 0.45, flexShrink: 0 }}>{icon}</button>
                             ))}
                         </div>}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 1, padding: "6px 6px 8px", overflowY: "auto", flex: 1 }}>
-                            {displayEmojis.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#8696A0", fontSize: 12, padding: "16px 0" }}>{emojiSearch ? "No results" : "No recent emojis"}</div>}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 1, padding: "6px 6px 8px", overflowY: "auto", flex: 1, background: "#fff" }}>
+                            {displayEmojis.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#94A3B8", fontSize: 12, padding: "16px 0" }}>{emojiSearch ? "No results" : "No recent emojis"}</div>}
                             {displayEmojis.map((emoji, i) => (
-                                <button key={i} onClick={() => insertEmoji(emoji)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: "4px 2px", borderRadius: 6, lineHeight: 1 }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
+                                <button key={i} onClick={() => insertEmoji(emoji)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: "4px 2px", borderRadius: 6, lineHeight: 1, transition: "background 0.1s" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "#EFF6FF"}
                                     onMouseLeave={e => e.currentTarget.style.background = "none"}
                                 >{emoji}</button>
                             ))}
@@ -522,7 +617,7 @@ export default function MediaMessageInput({
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                         </button>
 
-                        <button onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#64748B"), color: showEmoji ? "#1a73e8" : "#64748B" }}>
+                        <button ref={emojiBtnRef} onClick={() => { setShowEmoji(p => !p); setShowAttMenu(false); }} disabled={disabled} style={{ ...iconBtn("#64748B"), color: showEmoji ? "#1a73e8" : "#64748B" }}>
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" strokeWidth="3" /><line x1="15" y1="9" x2="15.01" y2="9" strokeWidth="3" /></svg>
                         </button>
 
@@ -540,18 +635,49 @@ export default function MediaMessageInput({
                             placeholder={uploading ? "Uploading…" : placeholder}
                             rows={1}
                             disabled={disabled || uploading}
-                            style={{ flex: 1, background: "#F1F5F9", border: "1px solid #E2E8F0", outline: "none", color: "#0F172A", fontSize: 14, padding: "9px 14px", borderRadius: 22, resize: "none", fontFamily: "inherit", lineHeight: 1.5, maxHeight: 100, overflowY: "auto", boxSizing: "border-box", caretColor: "#1a73e8" }}
-                            onInput={e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }}
+                            className="mmi-textarea"
+                            style={{ flex: 1, background: "#F1F5F9", border: "1px solid #E2E8F0", outline: "none", color: "#0F172A", fontSize: 14, padding: "9px 14px", borderRadius: 22, resize: "none", fontFamily: "inherit", lineHeight: 1.5, minHeight: 40, maxHeight: 220, overflowY: "hidden", boxSizing: "border-box", caretColor: "#1a73e8" }}
+                            onInput={e => {
+                                e.target.style.height = "auto";
+                                const h = Math.min(e.target.scrollHeight, 220);
+                                e.target.style.height = h + "px";
+                                // Only show a scrollbar once we actually hit the ceiling
+                                e.target.style.overflowY = e.target.scrollHeight > 220 ? "auto" : "hidden";
+                            }}
                         />
 
-                        {canSend ? (
-                            <button onClick={handleSend} style={{ ...iconBtn("#fff"), background: "linear-gradient(135deg, #1a73e8, #4F46E5)", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0, boxShadow: "0 2px 8px rgba(26,115,232,0.3)" }}>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
-                            </button>
-                        ) : (
-                            <button onClick={startRecording} disabled={disabled || uploading} style={{ ...iconBtn("#fff"), background: "linear-gradient(135deg, #1a73e8, #4F46E5)", borderRadius: "50%", width: 42, height: 42, color: "#fff", flexShrink: 0, boxShadow: "0 2px 8px rgba(26,115,232,0.3)" }}>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                                    <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0014 0" /><path d="M12 19v3" />
+                        {/* Mic — always visible */}
+                        <button
+                            onClick={startRecording}
+                            disabled={disabled || uploading}
+                            style={iconBtn("#64748B")}
+                            title="Record voice note"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                <line x1="12" y1="19" x2="12" y2="23" />
+                                <line x1="8" y1="23" x2="16" y2="23" />
+                            </svg>
+                        </button>
+
+                        {/* Send — appears only when there's something to send */}
+                        {canSend && (
+                            <button
+                                onClick={handleSend}
+                                style={{
+                                    width: 40, height: 40, borderRadius: "50%",
+                                    background: "#1a73e8", color: "#fff",
+                                    border: "none", cursor: "pointer",
+                                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                    flexShrink: 0, padding: 0, marginLeft: 2,
+                                    boxShadow: "0 2px 8px rgba(26,115,232,0.32)",
+                                    animation: "mmi-send-pop 0.14s ease-out",
+                                }}
+                                title="Send"
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                                 </svg>
                             </button>
                         )}
@@ -559,7 +685,21 @@ export default function MediaMessageInput({
                 )
             }
 
-            <style>{`@keyframes cwSpin { to { transform: rotate(360deg); } }`}</style>
+            <style>{`
+                @keyframes cwSpin { to { transform: rotate(360deg); } }
+                @keyframes mmi-send-pop {
+                    from { transform: scale(0.5); opacity: 0; }
+                    to   { transform: scale(1);   opacity: 1; }
+                }
+                /* Kill the native resize grabber in every engine */
+                .mmi-textarea { resize: none !important; }
+                .mmi-textarea::-webkit-resizer { display: none !important; }
+                /* Slim scrollbar, only visible once the 220px ceiling is hit */
+                .mmi-textarea::-webkit-scrollbar { width: 4px; }
+                .mmi-textarea::-webkit-scrollbar-track { background: transparent; }
+                .mmi-textarea::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
+                .mmi-textarea { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
+            `}</style>
         </div >
     );
 }

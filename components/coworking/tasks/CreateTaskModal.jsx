@@ -361,6 +361,19 @@ export default function CreateTaskModal({
   const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
   const toggleDept = (dept) => setSelectedDepts(prev => prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]);
   const visibleEmployees = selectedDepts.length === 0 ? employees : employees.filter(e => selectedDepts.includes(e.department));
+  // Subtasks only: pins two kinds of shortcuts to the front of the picker —
+  // (1) yourself, so you can assign a subtask to yourself in one click,
+  // (2) the PARENT task's existing assignee(s). `employees` deliberately
+  // excludes the current user everywhere else in this modal, so "self" is
+  // built separately here rather than un-excluding it globally.
+  const selfAsAssignee = { employeeId: currentEmployeeId, name: currentEmployeeName || "You", role: currentRole, __isSelf: true };
+  const parentAssigneeIds = parentTask?.assigneeIds || [];
+  const parentAssignees = employees.filter(e => parentAssigneeIds.includes(e.employeeId));
+  const otherEmployees = employees.filter(e => !parentAssigneeIds.includes(e.employeeId));
+  const orderedEmployees = [selfAsAssignee, ...parentAssignees, ...otherEmployees];
+  const subtaskVisibleEmployees = selectedDepts.length === 0
+    ? orderedEmployees
+    : orderedEmployees.filter(e => e.__isSelf || selectedDepts.includes(e.department));
   const assignedToTL = selectedIds.some(id => employees.find(e => e.employeeId === id)?.role === "tl");
   const needsApproval = currentRole === "employee" && assignedToTL;
 
@@ -708,6 +721,11 @@ export default function CreateTaskModal({
                 <span style={{ width: 20, height: 20, borderRadius: "50%", background: sel ? "#1B4F8A" : "#E5E7EB", color: sel ? "#fff" : "#6B7280", fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{emp.name?.[0]?.toUpperCase()}</span>
                 <span style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{empDisplayName(emp)}</span>
                 {emp.role === "tl" && <span style={{ fontSize: 8, fontWeight: 700, background: "#064E3B", color: "#fff", borderRadius: 3, padding: "1px 4px" }}>TL</span>}
+                {emp.__isSelf ? (
+                  <span style={{ fontSize: 8, fontWeight: 700, background: "#1B4F8A", color: "#fff", borderRadius: 3, padding: "1px 4px" }}>YOU</span>
+                ) : parentTask?.assigneeIds?.includes(emp.employeeId) && (
+                  <span style={{ fontSize: 8, fontWeight: 700, background: "#7C3AED", color: "#fff", borderRadius: 3, padding: "1px 4px" }}>PARENT</span>
+                )}
                 {sel && <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}><path d="M2 6l3 3 5-5" stroke="#1B4F8A" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
               </button>
             );
@@ -875,7 +893,7 @@ export default function CreateTaskModal({
               </div>
             </div>
           )}
-          <AssigneePicker selectedIds={activeRow.assigneeIds} onToggle={(empId) => toggleRowAssignee(activeRowIndex, empId)} />
+          <AssigneePicker selectedIds={activeRow.assigneeIds} onToggle={(empId) => toggleRowAssignee(activeRowIndex, empId)} rowVisibleEmployees={subtaskVisibleEmployees} />
           <input ref={rowImageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleRowImagePick(e, activeRowIndex)} />
           <input ref={rowPdfInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip" multiple style={{ display: "none" }} onChange={e => handleRowPdfPick(e, activeRowIndex)} />
           <AttachmentSection atts={activeRow.attachments || []} onImagePick={e => handleRowImagePick(e, activeRowIndex)} onPdfPick={e => handleRowPdfPick(e, activeRowIndex)} onRemove={(attIdx) => removeRowAttachment(activeRowIndex, attIdx)} uploading={rowUploading[activeRowIndex] || false} imgRef={rowImageInputRef} pdfRef={rowPdfInputRef} />

@@ -6,6 +6,10 @@
  *  1. Formal / professional UI — flat message bubbles, no dot grid, clean shadows
  *  2. Reply fix — replyTo now persisted in Firestore so it renders after send
  *  3. Nested Chat (Sub-Chat) — right-slider panel with list / create / view sub-chat threads
+ *  4. CollapsibleText — long messages collapse to a fixed height with one Read more toggle,
+ *     and preserve pasted whitespace/indentation (white-space: pre-wrap)
+ *  5. Drag & drop — drop files anywhere on the open chat, or onto a sidebar row
+ *     to switch conversation and upload there
  */
 import { useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -154,31 +158,58 @@ function DocCard({ att, isMe, onDl }) {
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
-function CtxMenu({ items, isMe, onClose }) {
+function CtxMenu({ items, isMe, onClose, anchor }) {
   const ref = useRef(null);
-  const [flip, setFlip] = useState(false);
-  // FIX: menu always opened UPWARD; for messages near the top of the scroll
-  // container it extended past the container's top edge and got clipped
-  // (z-index cannot escape an ancestor's overflow clipping). Measure before
-  // paint and flip downward when there is no room above.
+  const [pos, setPos] = useState(null);
+
+  // Anchor to the POINTER, not the bubble. A tall bubble's top AND bottom can
+  // both be off-screen, so bottom:100% (or a flip to top:100%) is useless —
+  // position:fixed at the click point is always visible. Measure before paint,
+  // then clamp inside the viewport.
   useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    let anc = el.parentElement;
-    while (anc && anc !== document.body) {
-      const oy = getComputedStyle(anc).overflowY;
-      if (oy === "auto" || oy === "scroll") break;
-      anc = anc.parentElement;
-    }
-    const boundTop = anc && anc !== document.body ? anc.getBoundingClientRect().top : 0;
-    if (el.getBoundingClientRect().top < boundTop + 4) setFlip(true);
-  }, []);
+    const el = ref.current;
+    if (!el || !anchor) return;
+    const { width: w, height: h } = el.getBoundingClientRect();
+    const M = 8;
+    let left = isMe ? anchor.x - w : anchor.x;
+    let top = anchor.y;
+    if (left + w > window.innerWidth - M) left = window.innerWidth - w - M;
+    if (left < M) left = M;
+    if (top + h > window.innerHeight - M) top = anchor.y - h;  // open upward
+    if (top < M) top = M;
+    setPos({ left, top });
+  }, [anchor, isMe]);
+
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const esc = (e) => { if (e.key === "Escape") onClose(); };
     const t = setTimeout(() => document.addEventListener("mousedown", handler), 10);
-    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+    document.addEventListener("keydown", esc);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
+    };
   }, [onClose]);
+
   return (
-    <div ref={ref} style={{ position: "absolute", [isMe ? "right" : "left"]: 0, bottom: "calc(100% + 6px)", zIndex: 9999, background: "#fff", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06)", border: "1px solid #E5E7EB", minWidth: 172, overflow: "hidden", padding: "3px 0" }}>
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        left: pos ? pos.left : -9999,
+        top: pos ? pos.top : -9999,
+        visibility: pos ? "visible" : "hidden",
+        zIndex: 9999,
+        background: "#fff", borderRadius: 10,
+        boxShadow: "0 6px 24px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06)",
+        border: "1px solid #E5E7EB", minWidth: 172, overflow: "hidden", padding: "3px 0",
+      }}
+    >
       {items.map(item => (
         <button key={item.label} onMouseDown={e => { e.preventDefault(); e.stopPropagation(); item.action(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px", border: "none", background: "transparent", color: item.red ? "#EF4444" : "#1F2937", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }} onMouseEnter={e => e.currentTarget.style.background = "#F9FAFB"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
           <span style={{ fontSize: 14, width: 18, textAlign: "center", flexShrink: 0 }}>{item.icon}</span>
@@ -198,13 +229,105 @@ const REQ_STATUS_COLORS = {
 const REQ_PRI_COLOR = { urgent: "#DC2626", high: "#D97706", medium: "#6366F1", low: "#6B7280" };
 const REQ_PRI_BG = { urgent: "#FEF2F2", high: "#FEF3C7", medium: "#EEF2FF", low: "#F9FAFB" };
 
+// ─── Collapsible long text ────────────────────────────────────────────────────
+// Collapses tall messages to COLLAPSE_PX with a single Read more / Show less toggle.
+// ALSO the single place that preserves pasted whitespace: LinkedText's own docs say
+// the parent must set whiteSpace: "pre-wrap" — this is that parent.
+// ─── Progressive collapsible text ─────────────────────────────────────────────
+// Reveals the message in fixed-height steps: first render shows STEP_PX, each
+// "Read more" reveals one more step, until fully shown → "Show less" resets.
+//
+// Height is measured on a hidden MIRROR node, never on the clamped node itself:
+// reading scrollHeight off a box that has maxHeight + overflow:hidden while a
+// ResizeObserver watches it causes the measure to fight the clamp and never settle.
+// Step height is DERIVED, not fixed: a huge message would otherwise need 100
+// clicks. We cap the number of reveals at MAX_STEPS and grow the step to fit.
+const BASE_STEP_PX = 240;
+const MAX_STEPS = 5;
+function CollapsibleText({ text, isMe }) {
+  const mirrorRef = useRef(null);
+  const [fullH, setFullH] = useState(0);
+  const [steps, setSteps] = useState(1);
+
+  useLayoutEffect(() => {
+    const el = mirrorRef.current;
+    if (!el) return;
+    const measure = () => setFullH(el.scrollHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (document.fonts?.ready) document.fonts.ready.then(measure).catch(() => { });
+    return () => ro.disconnect();
+  }, [text]);
+
+  useEffect(() => { setSteps(1); }, [text]);
+
+  // Never more than MAX_STEPS reveals — a 24,000px paste gets 5 big steps,
+  // not 100 tiny ones.
+  const rawSteps = fullH > 0 ? Math.ceil(fullH / BASE_STEP_PX) : 1;
+  const totalSteps = Math.min(rawSteps, MAX_STEPS);
+  const stepPx = totalSteps > 0 ? Math.ceil(fullH / totalSteps) : BASE_STEP_PX;
+
+  const isClamped = fullH > BASE_STEP_PX && steps < totalSteps;
+  const isExpanded = fullH > BASE_STEP_PX && steps >= totalSteps;
+
+  const accent = isMe ? "#fff" : "#1a73e8";
+  const remaining = Math.max(0, totalSteps - steps);
+
+  return (
+    <div>
+      {/* Hidden mirror — same width, unclamped. Measured, never shown. */}
+      <div
+        ref={mirrorRef}
+        aria-hidden="true"
+        style={{
+          position: "absolute", top: -99999, left: 0,
+          width: "100%", height: "auto",
+          visibility: "hidden", pointerEvents: "none",
+          whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+          fontSize: "inherit", lineHeight: "inherit", fontFamily: "inherit",
+        }}
+      >
+        {text}
+      </div>
+
+      {/* Visible, clamped copy */}
+      <div
+        style={{
+          maxHeight: isClamped ? steps * stepPx : "none",
+          overflow: "hidden",
+          position: "relative",
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+          transition: "max-height 0.18s ease",
+        }}
+      >
+        <LinkedText text={text} isMe={isMe} />
+        {isClamped && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44, pointerEvents: "none", background: isMe ? "linear-gradient(to bottom, rgba(26,115,232,0), #1a73e8)" : "linear-gradient(to bottom, rgba(255,255,255,0), #FFFFFF)" }} />
+        )}
+      </div>
+
+      {(isClamped || isExpanded) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setSteps(s => (isClamped ? s + 1 : 1)); }}
+          style={{ marginTop: 5, padding: "3px 10px", borderRadius: 6, border: `1px solid ${isMe ? "rgba(255,255,255,0.35)" : "#DBEAFE"}`, background: isMe ? "rgba(255,255,255,0.12)" : "#EFF6FF", color: accent, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          {isClamped ? (steps === 1 ? "Read more" : `Read more · ${remaining} left`) : "Show less"}
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSummary = null, onCancel = null, onEdit = null, onCopied, onReply = null, onDeleteMsg = null, onEditMsg = null, currentUserId = null, onJumpToReply = null, highlight = false }) {
   const status = msg.status || (msg.sending ? "sending" : "sent");
   const rowId = `dm-msg-${msg.messageId || msg.id || ""}`;
   const rowCls = highlight ? "dm-jump-hl" : undefined;
   const [copyFlash, setCopyFlash] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState(null);   // null | { x, y }
   const lastTapRef = useRef(0);
 
   const handleCopy = () => {
@@ -216,7 +339,14 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
     });
   };
 
-  const openCtx = (e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu(true); };
+  const openCtx = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    // Capture the pointer position — works for mouse, touch, and right-click
+    const t = e.touches?.[0] || e.changedTouches?.[0];
+    const x = t ? t.clientX : e.clientX;
+    const y = t ? t.clientY : e.clientY;
+    setCtxMenu({ x: x ?? window.innerWidth / 2, y: y ?? window.innerHeight / 2 });
+  };
   const handleDoubleTap = (e) => {
     const now = Date.now();
     if (now - lastTapRef.current < 350) openCtx(e);
@@ -300,20 +430,20 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
             : <div style={{ width: 28, height: 28, borderRadius: "50%", background: avBg(msg.senderName || ""), display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9.5, fontWeight: 700 }}>{getInit(msg.senderName || "")}</div>
         )}
       </div>
-      <div className="dm-bub-col" style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+      <div className="dm-bub-col" style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", minWidth: 0 }}>
         {showAvatar && !isMe && (
           <span style={{ fontSize: 10.5, color: "#64748B", fontWeight: 600, marginBottom: 3, paddingLeft: 3 }}>{msg.senderName}</span>
         )}
-        <div className="dm-bubble-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "flex-start", flexDirection: isMe ? "row-reverse" : "row", gap: 4 }}>
+        <div className="dm-bubble-wrap" style={{ position: "relative", display: "inline-flex", alignItems: "flex-start", flexDirection: isMe ? "row-reverse" : "row", gap: 4, minWidth: 0, maxWidth: "100%" }}>
           {ctxMenu && (
-            <CtxMenu isMe={isMe}
+            <CtxMenu isMe={isMe} anchor={ctxMenu}
               items={[
-                { icon: "↩", label: "Reply", action: () => { setCtxMenu(false); onReply?.(msg); } },
-                ...(msg.text ? [{ icon: "⎘", label: "Copy Text", action: () => { setCtxMenu(false); handleCopy(); } }] : []),
-                ...(isSender && msg.text ? [{ icon: "✎", label: "Edit Message", action: () => { setCtxMenu(false); onEditMsg?.(msg); } }] : []),
-                ...(isSender ? [{ icon: "🗑", label: "Delete", action: () => { setCtxMenu(false); onDeleteMsg?.(msg); }, red: true }] : []),
+                { icon: "↩", label: "Reply", action: () => { setCtxMenu(null); onReply?.(msg); } },
+                ...(msg.text ? [{ icon: "⎘", label: "Copy Text", action: () => { setCtxMenu(null); handleCopy(); } }] : []),
+                ...(isSender && msg.text ? [{ icon: "✎", label: "Edit Message", action: () => { setCtxMenu(null); onEditMsg?.(msg); } }] : []),
+                ...(isSender ? [{ icon: "🗑", label: "Delete", action: () => { setCtxMenu(null); onDeleteMsg?.(msg); }, red: true }] : []),
               ]}
-              onClose={() => setCtxMenu(false)}
+              onClose={() => setCtxMenu(null)}
             />
           )}
 
@@ -331,6 +461,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
               boxShadow: isMe ? "0 1px 3px rgba(26,115,232,0.2)" : "0 1px 3px rgba(15,23,42,0.05)",
               fontSize: 13.5, lineHeight: 1.55, opacity: msg.sending ? .65 : 1,
               wordBreak: "break-word", cursor: "default",
+              minWidth: 0, maxWidth: "100%",
             }}>
 
             {/* Reply quote — FIX: renders msg.replyTo if present */}
@@ -354,8 +485,7 @@ function Bubble({ msg, isMe, showAvatar, onImg, onDl, isHost = false, onViewSumm
               </div>
             )}
 
-            {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
-
+            {msg.text && <div style={{ position: "relative" }}><CollapsibleText text={msg.text} isMe={isMe} /></div>}
             {msg.attachments?.map((a, i) => (
               <div key={i} style={{ marginTop: msg.text ? 5 : 0 }}>
                 {a.type === "image" && <img src={a.url} alt="" onClick={() => onImg(a.url)} style={{ maxWidth: 210, maxHeight: 158, borderRadius: 8, cursor: "zoom-in", display: "block", marginTop: 2 }} />}
@@ -446,19 +576,29 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
   const [editingMsg, setEditingMsg] = useState(null);
   const [editText, setEditText] = useState("");
   const [pasteUploading, setPasteUploading] = useState(false);
+  const [scDragOver, setScDragOver] = useState(false);
+  const scDragDepth = useRef(0);
   const endRef = useRef(null);
   const editInputRef = useRef(null);
 
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  const onScDragEnter = (e) => { if (!hasFiles(e)) return; e.preventDefault(); scDragDepth.current++; setScDragOver(true); };
+  const onScDragOver = (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+  const onScDragLeave = (e) => { e.preventDefault(); scDragDepth.current = Math.max(0, scDragDepth.current - 1); if (scDragDepth.current === 0) setScDragOver(false); };
+  const onScDrop = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    scDragDepth.current = 0; setScDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) window.dispatchEvent(new CustomEvent("dm_drop_files", { detail: { files } }));
+  };
+
   const dlFile = async (url) => {
     if (!url) return;
-    // Derive a real filename from the URL, fallback to timestamp
     const name = (() => {
       try { const p = new URL(url).pathname.split("/").pop(); return p && p.includes(".") ? decodeURIComponent(p) : "file_" + Date.now(); }
       catch { return "file_" + Date.now(); }
     })();
-    // FIX: browsers ignore the `download` attribute on cross-origin URLs, so a plain
-    // <a download> just navigates to Cloudinary. For Cloudinary, inject fl_attachment
-    // so it responds with Content-Disposition: attachment → real download.
     if (url.includes("res.cloudinary.com") && url.includes("/upload/") && !url.includes("fl_attachment")) {
       const a = document.createElement("a");
       a.href = url.replace("/upload/", "/upload/fl_attachment/");
@@ -466,7 +606,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       return;
     }
-    // Non-Cloudinary hosts: fetch → blob → object URL (download attr works on blob:)
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -478,7 +617,7 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
       setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
     } catch (e) {
       console.error("dlFile:", e);
-      window.open(url, "_blank"); // last resort — at least show the file
+      window.open(url, "_blank");
     }
   };
 
@@ -493,7 +632,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
       setMsgs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setMsgsLoading(false);
       setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
-      // Mark sub-chat as read for current user
       updateDoc(
         doc(firebaseDb, "cowork_direct_messages", cid, "sub_chats", subChat.id),
         { [`unread.${employeeId}`]: 0 }
@@ -504,24 +642,11 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  // ── Reply ────────────────────────────────────────────────────────────────
-  // Jump to the original message when a reply quote is clicked.
-  // Scope: only the loaded window (last 100 msgs) — no pagination in this component.
-  const jumpToMessage = (targetMsgId) => {
-    if (!targetMsgId) return;
-    const el = document.getElementById(`gc-msg-${targetMsgId}`);
-    if (!el) { console.warn("[jumpToMessage] original not in the loaded 100 messages:", targetMsgId); return; }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setJumpHighlightId(targetMsgId);
-    setTimeout(() => setJumpHighlightId(cur => (cur === targetMsgId ? null : cur)), 1900);
-  };
-
   const handleReply = (msg) => {
     setReplyTo({ messageId: msg.messageId || msg.id, senderName: msg.senderName || "Unknown", text: (msg.text || "").slice(0, 120) });
     setEditingMsg(null);
   };
 
-  // ── Edit ─────────────────────────────────────────────────────────────────
   const handleOpenEdit = (msg) => {
     if (msg.senderId !== employeeId) return;
     setEditingMsg(msg); setEditText(msg.text || ""); setReplyTo(null);
@@ -539,7 +664,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
     } catch (e) { console.error("sc edit:", e); }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDeleteMsg = async (msg) => {
     if (!msg || msg.senderId !== employeeId) return;
     const msgId = msg.messageId || msg.id; if (!msgId) return;
@@ -551,7 +675,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
     } catch (e) { console.error("sc delete:", e); }
   };
 
-  // ── Paste image ───────────────────────────────────────────────────────────
   const handlePaste = async (e) => {
     const imageItem = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith("image/"));
     if (!imageItem) return;
@@ -584,7 +707,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
         lastMessage: preview, updatedAt: serverTimestamp(),
         ...(otherPersonId ? { [`unread.${otherPersonId}`]: increment(1) } : {}),
       });
-      // Push notification to the other person
       if (otherPersonId) {
         apiFetch("/direct-message/notify", {
           method: "POST",
@@ -594,7 +716,7 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
     } catch (e) { console.error("sc send:", e); }
   };
 
-  // Build list with date separators (use tsToMs for robust timestamp parsing)
+  // Build list with date separators
   const withSep = [];
   let lastDate = null;
   msgs.forEach((msg, i) => {
@@ -609,8 +731,22 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
   });
 
   return (
-    <>
+    <div
+      style={{ display: "contents" }}
+      onDragEnter={onScDragEnter}
+      onDragOver={onScDragOver}
+      onDragLeave={onScDragLeave}
+      onDrop={onScDrop}
+    >
       {scLightbox && <Lightbox url={scLightbox} onClose={() => setScLightbox(null)} onDl={() => dlFile(scLightbox)} />}
+
+      {scDragOver && (
+        <div style={{ position: "absolute", inset: 8, zIndex: 500, borderRadius: 14, border: "2.5px dashed #1a73e8", background: "rgba(239,246,255,0.9)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, pointerEvents: "none" }}>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a73e8" }}>Drop files to send</div>
+          <div style={{ fontSize: 12, color: "#64748B" }}>in “{subChat.name}”</div>
+        </div>
+      )}
 
       {/* ── Sub-chat header ── */}
       <div className="sc-head">
@@ -667,17 +803,13 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
       </div>
 
       {/* ── Input ── */}
-
-      {/* ── Input ── */}
       <div className="dm-input" onPaste={handlePaste}>
-        {/* Paste uploading indicator */}
         {pasteUploading && (
           <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 0 6px", fontSize: 11, color: "#1558b0", fontWeight: 600 }}>
             <div style={{ width: 11, height: 11, borderRadius: "50%", border: "2px solid rgba(26,115,232,0.25)", borderTopColor: "#1a73e8", animation: "dm-spin 0.7s linear infinite", flexShrink: 0 }} />
             Uploading image…
           </div>
         )}
-        {/* Reply preview strip */}
         {replyTo && !editingMsg && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px", background: "#F0F7FF", borderBottom: "1px solid #DBEAFE", borderLeft: "3px solid #2563EB" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -687,7 +819,6 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
             <button onClick={() => setReplyTo(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", fontSize: 15, padding: 2 }}>✕</button>
           </div>
         )}
-        {/* Edit bar */}
         {editingMsg ? (
           <div style={{ padding: "8px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
@@ -715,8 +846,7 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
           <MediaMessageInput onSend={handleSend} placeholder={`Message in "${subChat.name}"…`} />
         )}
       </div>
-
-    </>
+    </div>
   );
 }
 
@@ -724,23 +854,18 @@ function SubChatFullView({ subChat, cid, employeeId, employeeName, otherPersonId
 //  NESTED CHAT PANEL  (right slider — only LIST + CREATE; View fires onViewSubChat)
 // ─────────────────────────────────────────────────────────────────────────────
 function NestedChatPanel({ open, onClose, cid, employeeId, employeeName, onViewSubChat, subChatsData, scLoading }) {
-  // view: "list" | "create"
   const [view, setView] = useState("list");
   const subChats = subChatsData || [];
 
-  // create form
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState("");
 
-  // ── Load messages for active sub-chat ──────────────────────────────────
-  // ── Reset on close ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) { setView("list"); setNewName(""); setNewDesc(""); setCreateErr(""); }
   }, [open]);
 
-  // ── Create sub-chat + auto system message + open it ─────────────────────
   const handleCreate = async () => {
     if (!newName.trim()) { setCreateErr("Name is required"); return; }
     setCreating(true); setCreateErr("");
@@ -748,21 +873,18 @@ function NestedChatPanel({ open, onClose, cid, employeeId, employeeName, onViewS
     const name = newName.trim();
     const desc = newDesc.trim();
     try {
-      // 1. Create sub-chat doc
       await setDoc(doc(firebaseDb, "cowork_direct_messages", cid, "sub_chats", scId), {
         subChatId: scId, name, description: desc,
         createdBy: employeeId, createdByName: employeeName,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         lastMessage: "", messageCount: 0,
       });
-      // 2. Auto system message
       const sysMsgId = crypto.randomUUID();
       await setDoc(
         doc(firebaseDb, "cowork_direct_messages", cid, "sub_chats", scId, "messages", sysMsgId),
         { messageId: sysMsgId, senderId: "system", senderName: "System", text: `This sub-chat was created for discussion of "${name}".`, isSystem: true, messageType: "system", createdAt: serverTimestamp() }
       );
       setNewName(""); setNewDesc("");
-      // 3. Open immediately in full view
       onViewSubChat({ id: scId, subChatId: scId, name, description: desc });
     } catch (e) { console.error(e); setCreateErr("Failed to create. Try again."); setCreating(false); }
   };
@@ -771,14 +893,19 @@ function NestedChatPanel({ open, onClose, cid, employeeId, employeeName, onViewS
 
   return (
     <div className="nc-panel">
-      {/* ── Panel header ── */}
       <div className="nc-head">
         {view === "create" ? (
           <>
-            <div className="nc-head-title" style={{ flex: 1 }}>New Sub-Chat</div>
-            <button className="nc-icon-btn" onClick={() => { setView("list"); setCreateErr(""); setNewName(""); setNewDesc(""); }}>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            {/* Back arrow — returns to the list, NOT an X (an X next to the
+                panel's own X read as two identical close buttons) */}
+            <button
+              className="nc-back-arrow"
+              onClick={() => { setView("list"); setCreateErr(""); setNewName(""); setNewDesc(""); }}
+              title="Back to Sub-Chats"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7" /></svg>
             </button>
+            <div className="nc-head-title" style={{ flex: 1 }}>New Sub-Chat</div>
           </>
         ) : (
           <>
@@ -792,12 +919,12 @@ function NestedChatPanel({ open, onClose, cid, employeeId, employeeName, onViewS
             </button>
           </>
         )}
-        <button className="nc-icon-btn" onClick={onClose} title="Close panel" style={{ marginLeft: view !== "create" ? 6 : 0 }}>
+        {/* The ONLY X — always closes the panel, in both views */}
+        <button className="nc-icon-btn" onClick={onClose} title="Close panel" style={{ marginLeft: 6 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
       </div>
 
-      {/* ── LIST view ── */}
       {view === "list" && (
         <div className="nc-body">
           {scLoading ? (
@@ -840,7 +967,6 @@ function NestedChatPanel({ open, onClose, cid, employeeId, employeeName, onViewS
         </div>
       )}
 
-      {/* ── CREATE view ── */}
       {view === "create" && (
         <div className="nc-body nc-create-body">
           {createErr && (
@@ -923,6 +1049,12 @@ export default function DirectMessagesPage() {
   const [subChatsLoading, setSubChatsLoading] = useState(false);
   const [subChatUnread, setSubChatUnread] = useState(0);
 
+  // ── Drag & drop ───────────────────────────────────────────────────────────
+  const [chatDragOver, setChatDragOver] = useState(false);
+  const [dragRowId, setDragRowId] = useState(null);
+  const chatDragDepth = useRef(0);
+  const pendingDropRef = useRef(null);
+
   // ── Paste / copy toast ────────────────────────────────────────────────────
   const [pasteUploading, setPasteUploading] = useState(false);
   const [copyToast, setCopyToast] = useState(false);
@@ -990,7 +1122,7 @@ export default function DirectMessagesPage() {
     return () => unsub();
   }, [user, employeeId]);
 
-  // ── Real-time messages ── limitToLast(300) so newest always visible ────────
+  // ── Real-time messages ────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedPerson || !employeeId) return;
     const cid = convId(employeeId, selectedPerson.employeeId);
@@ -999,7 +1131,6 @@ export default function DirectMessagesPage() {
     setHasMoreMsgs(false);
     oldestDocRef.current = null;
 
-    // limitToLast: always get NEWEST 300, not the oldest 100
     const q = query(
       collection(firebaseDb, "cowork_direct_messages", cid, "messages"),
       orderBy("createdAt", "asc"),
@@ -1045,12 +1176,6 @@ export default function DirectMessagesPage() {
   }, [selectedPerson, employeeId]);
 
   // ── Load older messages on scroll-up ─────────────────────────────────────
-  // HOW SCROLL ANCHORING WORKS:
-  // 1. Before setMessages: save { scrollHeight, scrollTop } into scrollAnchorRef
-  // 2. useLayoutEffect fires synchronously after React commits DOM, before browser paints
-  // 3. At that exact moment: scrollTop = savedScrollTop + (newScrollHeight - savedScrollHeight)
-  // This is the only reliable way — rAF and MutationObserver both fire too late.
-
   const handleLoadMore = useCallback(async () => {
     if (!selectedPerson || !employeeId || !hasMoreMsgs || loadingMore || !oldestDocRef.current) return;
     const cid = convId(employeeId, selectedPerson.employeeId);
@@ -1073,7 +1198,6 @@ export default function DirectMessagesPage() {
           _older: true,
         }));
 
-        // ── STEP 1: Snapshot BEFORE React re-renders ──────────────────────
         if (container) {
           scrollAnchorRef.current = {
             scrollHeight: container.scrollHeight,
@@ -1087,7 +1211,6 @@ export default function DirectMessagesPage() {
           return [...newOnes, ...prev].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         });
         setHasMoreMsgs(snap.docs.length >= 100);
-        // ── STEP 2: useLayoutEffect below restores scroll position ────────
       } else {
         setHasMoreMsgs(false);
       }
@@ -1095,22 +1218,18 @@ export default function DirectMessagesPage() {
     finally { setLoadingMore(false); }
   }, [selectedPerson, employeeId, hasMoreMsgs, loadingMore]);
 
-  // ── STEP 2: Restore scroll synchronously after DOM commit, before paint ──
-  // useLayoutEffect runs AFTER React updates the DOM but BEFORE the browser paints.
-  // This is the only hook that runs at the right time to prevent visible jump.
+  // ── Restore scroll synchronously after DOM commit, before paint ──────────
   useLayoutEffect(() => {
     const anchor = scrollAnchorRef.current;
     const container = msgsContainerRef.current;
     if (!anchor || !container) return;
-    // Compute how much height was added at the top and shift scrollTop by that amount
     const addedHeight = container.scrollHeight - anchor.scrollHeight;
     if (addedHeight > 0) {
       container.scrollTop = anchor.scrollTop + addedHeight;
     }
-    scrollAnchorRef.current = null; // clear so normal message updates aren't affected
+    scrollAnchorRef.current = null;
   }, [messages]);
 
-  // Scroll listener — triggers load-more when scrolled within 80px of top
   useEffect(() => {
     const container = msgsContainerRef.current;
     if (!container) return;
@@ -1119,10 +1238,9 @@ export default function DirectMessagesPage() {
     return () => container.removeEventListener("scroll", onScroll);
   }, [hasMoreMsgs, loadingMore, handleLoadMore]);
 
-  // Smart scroll-to-bottom: only on person change OR if already near bottom
   const prevPersonRef = useRef(null);
   useEffect(() => {
-    if (scrollAnchorRef.current) return; // don't scroll-to-bottom during load-more
+    if (scrollAnchorRef.current) return;
     const isNewPerson = prevPersonRef.current !== selectedPerson?.employeeId;
     prevPersonRef.current = selectedPerson?.employeeId || null;
     const container = msgsContainerRef.current;
@@ -1152,7 +1270,7 @@ export default function DirectMessagesPage() {
     return () => document.removeEventListener("focusin", onFocus);
   }, []);
 
-  // ── Jump to original message when a reply preview is clicked (WhatsApp-style) ──
+  // ── Jump to original message when a reply preview is clicked ─────────────
   const flashMessage = useCallback((mid) => {
     setJumpHighlightId(mid);
     setTimeout(() => setJumpHighlightId(cur => (cur === mid ? null : cur)), 1900);
@@ -1258,7 +1376,6 @@ export default function DirectMessagesPage() {
   // ── Send ──────────────────────────────────────────────────────────────────
   const handleSend = async (text, attachments, messageType) => {
     if (!selectedPerson || !employeeId) return;
-    // ↓ FIX: capture replyTo before clearing, then include in message
     const currentReplyTo = replyTo || null;
     setReplyTo(null);
 
@@ -1271,7 +1388,7 @@ export default function DirectMessagesPage() {
       senderId: employeeId, senderName: employeeName,
       text: text || "", attachments: attachments || [],
       messageType: rt, type: rt,
-      replyTo: currentReplyTo,           // ← included in optimistic msg
+      replyTo: currentReplyTo,
       readBy: [employeeId], status: "sending",
       temp: true, sending: true, error: false,
       createdAt: new Date().toISOString(),
@@ -1293,7 +1410,7 @@ export default function DirectMessagesPage() {
         senderId: employeeId, senderName: employeeName,
         text: text || "", attachments: cleanAtts,
         messageType: rt, type: rt,
-        replyTo: currentReplyTo,          // ← persisted to Firestore (reply fix)
+        replyTo: currentReplyTo,
         readBy: [employeeId], status: "sent",
         createdAt: serverTimestamp(),
       });
@@ -1317,10 +1434,6 @@ export default function DirectMessagesPage() {
       await updateDoc(doc(firebaseDb, "cowork_direct_messages", cid, "messages", msgId), {
         isDeleted: true, text: "", attachments: [], deletedAt: serverTimestamp(),
       });
-      // FIX: if the deleted message was the conversation's LATEST, the sidebar
-      // preview (conv.lastMessage) still shows its old text — update it too.
-      // Dot-notation touches ONLY text/messageType; sentAt/updatedAt untouched,
-      // so the conversation list does NOT reorder (WhatsApp behavior).
       const realMsgs = messages.filter(m => !m.temp && !m.error);
       const lastReal = realMsgs[realMsgs.length - 1];
       if (lastReal && (lastReal.messageId || lastReal.id) === msgId) {
@@ -1346,11 +1459,13 @@ export default function DirectMessagesPage() {
     } catch (e) { console.error("editMsg:", e); }
   };
 
-
   const handleReply = (msg) => { setReplyTo({ messageId: msg.messageId || msg.id, senderName: msg.senderName || "Unknown", text: (msg.text || "").slice(0, 120) }); setEditingMsg(null); };
   const handleOpenEdit = (msg) => { if (msg.senderId !== employeeId) return; setEditingMsg(msg); setEditText(msg.text || ""); setReplyTo(null); setTimeout(() => editInputRef.current?.focus(), 50); };
 
   // ── Paste image ───────────────────────────────────────────────────────────
+  // NOTE: only image items are intercepted. Plain text (code, indented blocks)
+  // falls through to the browser's native paste, so whitespace is preserved
+  // end-to-end — the rendering side is handled by CollapsibleText's pre-wrap.
   const handlePaste = async (e) => {
     if (!selectedPerson || !employeeId) return;
     const imageItem = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith("image/"));
@@ -1383,16 +1498,52 @@ export default function DirectMessagesPage() {
     setUnread(prev => { const n = { ...prev }; delete n[cid]; return n; });
   };
 
+  // ── Drag & drop handlers ──────────────────────────────────────────────────
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+
+  const onChatDragEnter = (e) => { if (!hasFiles(e)) return; e.preventDefault(); chatDragDepth.current++; setChatDragOver(true); };
+  const onChatDragOver = (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+  const onChatDragLeave = (e) => { e.preventDefault(); chatDragDepth.current = Math.max(0, chatDragDepth.current - 1); if (chatDragDepth.current === 0) setChatDragOver(false); };
+  const onChatDrop = (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    chatDragDepth.current = 0; setChatDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) window.dispatchEvent(new CustomEvent("dm_drop_files", { detail: { files } }));
+  };
+
+  const onRowDragOver = (e, id) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragRowId(id); };
+  const onRowDragLeave = () => setDragRowId(null);
+  const onRowDrop = (e, person) => {
+    if (!hasFiles(e) || !person) return;
+    e.preventDefault(); e.stopPropagation();
+    setDragRowId(null);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+    if (selectedPerson?.employeeId === person.employeeId && !activeSubChat) {
+      window.dispatchEvent(new CustomEvent("dm_drop_files", { detail: { files } }));
+      return;
+    }
+    pendingDropRef.current = files;
+    setActiveSubChat(null);
+    selectPerson(person);
+  };
+
+  // Once the target chat mounts, release the queued files
+  useEffect(() => {
+    if (!pendingDropRef.current || !selectedPerson || activeSubChat) return;
+    const files = pendingDropRef.current;
+    pendingDropRef.current = null;
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent("dm_drop_files", { detail: { files } })), 300);
+    return () => clearTimeout(t);
+  }, [selectedPerson, activeSubChat]);
+
   const dlFile = async (url) => {
     if (!url) return;
-    // Derive a real filename from the URL, fallback to timestamp
     const name = (() => {
       try { const p = new URL(url).pathname.split("/").pop(); return p && p.includes(".") ? decodeURIComponent(p) : "file_" + Date.now(); }
       catch { return "file_" + Date.now(); }
     })();
-    // FIX: browsers ignore the `download` attribute on cross-origin URLs, so a plain
-    // <a download> just navigates to Cloudinary. For Cloudinary, inject fl_attachment
-    // so it responds with Content-Disposition: attachment → real download.
     if (url.includes("res.cloudinary.com") && url.includes("/upload/") && !url.includes("fl_attachment")) {
       const a = document.createElement("a");
       a.href = url.replace("/upload/", "/upload/fl_attachment/");
@@ -1400,7 +1551,6 @@ export default function DirectMessagesPage() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       return;
     }
-    // Non-Cloudinary hosts: fetch → blob → object URL (download attr works on blob:)
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1412,7 +1562,7 @@ export default function DirectMessagesPage() {
       setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
     } catch (e) {
       console.error("dlFile:", e);
-      window.open(url, "_blank"); // last resort — at least show the file
+      window.open(url, "_blank");
     }
   };
 
@@ -1448,7 +1598,6 @@ export default function DirectMessagesPage() {
   });
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
 
-  // ── Sorted flat list of messages (no separators yet — added during render) ─
   const sortedMessages = messages
     .filter(m => !m._sep)
     .map((msg, i) => ({
@@ -1574,7 +1723,15 @@ export default function DirectMessagesPage() {
                     const n = unread[conv.id] || 0;
                     const isAct = selectedPerson?.employeeId === oid;
                     return (
-                      <div key={conv.id} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(other)} role="button">
+                      <div
+                        key={conv.id}
+                        className={`dm-row${isAct ? " act" : ""}${dragRowId === conv.id ? " dm-row-drop" : ""}`}
+                        onClick={() => selectPerson(other)}
+                        onDragOver={(e) => onRowDragOver(e, conv.id)}
+                        onDragLeave={onRowDragLeave}
+                        onDrop={(e) => onRowDrop(e, other)}
+                        role="button"
+                      >
                         <div style={{ position: "relative", flexShrink: 0 }}>
                           <Av name={name} size={42} url={other?.profilePicUrl || ""} />
                           {n > 0 && <div className="dm-av-dot" />}
@@ -1602,7 +1759,15 @@ export default function DirectMessagesPage() {
                     const rc = roleChip(emp.role);
                     const isAct = selectedPerson?.employeeId === emp.employeeId;
                     return (
-                      <div key={emp.employeeId} className={`dm-row${isAct ? " act" : ""}`} onClick={() => selectPerson(emp)} role="button">
+                      <div
+                        key={emp.employeeId}
+                        className={`dm-row${isAct ? " act" : ""}${dragRowId === emp.employeeId ? " dm-row-drop" : ""}`}
+                        onClick={() => selectPerson(emp)}
+                        onDragOver={(e) => onRowDragOver(e, emp.employeeId)}
+                        onDragLeave={onRowDragLeave}
+                        onDrop={(e) => onRowDrop(e, emp)}
+                        role="button"
+                      >
                         <Av name={emp.name || emp.employeeId} size={38} url={emp.profilePicUrl || ""} />
                         <div className="dm-row-info">
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1620,7 +1785,21 @@ export default function DirectMessagesPage() {
         </div>
 
         {/* ════════════════════ CHAT PANEL ════════════════════ */}
-        <div className={`dm-chat${!mobileChatOpen ? " mob-gone-chat" : ""}`}>
+        <div
+          className={`dm-chat${!mobileChatOpen ? " mob-gone-chat" : ""}`}
+          onDragEnter={selectedPerson && !activeSubChat ? onChatDragEnter : undefined}
+          onDragOver={selectedPerson && !activeSubChat ? onChatDragOver : undefined}
+          onDragLeave={selectedPerson && !activeSubChat ? onChatDragLeave : undefined}
+          onDrop={selectedPerson && !activeSubChat ? onChatDrop : undefined}
+        >
+          {chatDragOver && selectedPerson && !activeSubChat && (
+            <div style={{ position: "absolute", inset: 8, zIndex: 500, borderRadius: 14, border: "2.5px dashed #1a73e8", background: "rgba(239,246,255,0.9)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, pointerEvents: "none" }}>
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1a73e8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1a73e8" }}>Drop files to send</div>
+              <div style={{ fontSize: 12, color: "#64748B" }}>Images and documents · multiple supported</div>
+            </div>
+          )}
+
           {!selectedPerson ? (
             <div className="dm-no-sel">
               <div className="dm-no-sel-icon">
@@ -1675,7 +1854,6 @@ export default function DirectMessagesPage() {
                 </button>
 
                 {/* ─── NESTED CHAT BUTTON ─── */}
-                {/* ─── NESTED CHAT BUTTON ─── */}
                 <button
                   className={`dm-head-btn dm-head-nested${nestedOpen ? " active" : ""}`}
                   onClick={() => setNestedOpen(p => !p)}
@@ -1713,7 +1891,6 @@ export default function DirectMessagesPage() {
 
               {/* ── Messages ── */}
               <div className="dm-msgs" ref={msgsContainerRef}>
-                {/* Load older messages button */}
                 {hasMoreMsgs && (
                   <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 4px" }}>
                     <button
@@ -1725,80 +1902,75 @@ export default function DirectMessagesPage() {
                     </button>
                   </div>
                 )}
-                {msgsLoading && messages.length === 0 ? <div className="dm-center"><GwSpinner size={24} /></div>
-                  : sortedMessages.length === 0 ? (
-                    <div className="dm-chat-empty">
-                      <Av name={selectedPerson.name || "?"} size={48} url={selectedPerson.profilePicUrl || ""} />
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
-                      <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
-                    </div>
-                  ) : (() => {
-                    // Combine messages + request cards by timestamp, then inject date separators
-                    const reqItems = threadRequests.map(r => ({
-                      _isReq: true, id: r.id, req: r,
-                      _ts: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
-                    }));
-                    const combined = [...sortedMessages, ...reqItems].sort((a, b) => a._ts - b._ts);
+                {msgsLoading ? <div className="dm-center" style={{ flex: 1, alignItems: "center" }}><GwSpinner size={26} /></div> : sortedMessages.length === 0 ? (
+                  <div className="dm-chat-empty">
+                    <Av name={selectedPerson.name || "?"} size={48} url={selectedPerson.profilePicUrl || ""} />
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginTop: 4 }}>{selectedPerson.name}</div>
+                    <div style={{ fontSize: 12, color: "#94A3B8" }}>No messages yet — say hello!</div>
+                  </div>
+                ) : (() => {
+                  const reqItems = threadRequests.map(r => ({
+                    _isReq: true, id: r.id, req: r,
+                    _ts: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
+                  }));
+                  const combined = [...sortedMessages, ...reqItems].sort((a, b) => a._ts - b._ts);
 
-                    // Inject date separators after sorting (so they are always in correct position)
-                    const withDateSeps = [];
-                    let lastDate = null;
-                    const today = new Date();
-                    const yesterday = new Date(Date.now() - 86400000);
-                    combined.forEach((item, ci) => {
-                      const ms = item._ts;
-                      const d = ms ? new Date(ms) : null;
-                      let ds = null;
-                      if (d) {
-                        if (d.toDateString() === today.toDateString()) ds = "Today";
-                        else if (d.toDateString() === yesterday.toDateString()) ds = "Yesterday";
-                        else ds = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-                      }
-                      if (ds && ds !== lastDate) {
-                        withDateSeps.push({ _sep: true, label: ds, _sepKey: ds + ci });
-                        lastDate = ds;
-                      }
-                      // Fix showAvatar after re-sort (compare against previous non-sep, non-req item)
-                      if (!item._isReq) {
-                        const prevMsg = withDateSeps.filter(x => !x._sep && !x._isReq).slice(-1)[0];
-                        withDateSeps.push({ ...item, showAvatar: !prevMsg || prevMsg.senderId !== item.senderId });
-                      } else {
-                        withDateSeps.push(item);
-                      }
-                    });
+                  const withDateSeps = [];
+                  let lastDate = null;
+                  const today = new Date();
+                  const yesterday = new Date(Date.now() - 86400000);
+                  combined.forEach((item, ci) => {
+                    const ms = item._ts;
+                    const d = ms ? new Date(ms) : null;
+                    let ds = null;
+                    if (d) {
+                      if (d.toDateString() === today.toDateString()) ds = "Today";
+                      else if (d.toDateString() === yesterday.toDateString()) ds = "Yesterday";
+                      else ds = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+                    }
+                    if (ds && ds !== lastDate) {
+                      withDateSeps.push({ _sep: true, label: ds, _sepKey: ds + ci });
+                      lastDate = ds;
+                    }
+                    if (!item._isReq) {
+                      const prevMsg = withDateSeps.filter(x => !x._sep && !x._isReq).slice(-1)[0];
+                      withDateSeps.push({ ...item, showAvatar: !prevMsg || prevMsg.senderId !== item.senderId });
+                    } else {
+                      withDateSeps.push(item);
+                    }
+                  });
 
-                    return withDateSeps.map((item, i) => {
-                      if (item._sep) return <div key={item._sepKey || ("sep" + i)} className="dm-datesep"><span className="dm-datesep-label">{item.label}</span></div>;
-                      if (item._isReq) return <div key={item.id} style={{ padding: "0 4px", marginBottom: 6 }}><ThreadRequestCard req={item.req} employeeId={employeeId} /></div>;
-                      return (
-                        <Bubble
-                          key={item.messageId || item.id || i}
-                          msg={{ ...item, senderPicUrl: item.isMe ? "" : (selectedPerson?.profilePicUrl || "") }}
-                          isMe={item.isMe}
-                          showAvatar={item.showAvatar}
-                          onImg={setLightbox}
-                          onDl={dlFile}
-                          isHost={isCeoOrTl}
-                          onViewSummary={handleViewSummary}
-                          onCancel={handleCancelMeet}
-                          onEdit={setEditModal}
-                          onCopied={showCopyToast}
-                          currentUserId={employeeId}
-                          onReply={handleReply}
-                          onDeleteMsg={handleDeleteMsg}
-                          onEditMsg={handleOpenEdit}
-                          onJumpToReply={jumpToMessage}
-                          highlight={jumpHighlightId === (item.messageId || item.id)}
-                        />
-                      );
-                    });
-                  })()}
+                  return withDateSeps.map((item, i) => {
+                    if (item._sep) return <div key={item._sepKey || ("sep" + i)} className="dm-datesep"><span className="dm-datesep-label">{item.label}</span></div>;
+                    if (item._isReq) return <div key={item.id} style={{ padding: "0 4px", marginBottom: 6 }}><ThreadRequestCard req={item.req} employeeId={employeeId} /></div>;
+                    return (
+                      <Bubble
+                        key={item.messageId || item.id || i}
+                        msg={{ ...item, senderPicUrl: item.isMe ? "" : (selectedPerson?.profilePicUrl || "") }}
+                        isMe={item.isMe}
+                        showAvatar={item.showAvatar}
+                        onImg={setLightbox}
+                        onDl={dlFile}
+                        isHost={isCeoOrTl}
+                        onViewSummary={handleViewSummary}
+                        onCancel={handleCancelMeet}
+                        onEdit={setEditModal}
+                        onCopied={showCopyToast}
+                        currentUserId={employeeId}
+                        onReply={handleReply}
+                        onDeleteMsg={handleDeleteMsg}
+                        onEditMsg={handleOpenEdit}
+                        onJumpToReply={jumpToMessage}
+                        highlight={jumpHighlightId === (item.messageId || item.id)}
+                      />
+                    );
+                  });
+                })()}
                 <div ref={endRef} />
               </div>
 
               {/* ── Input area ── */}
               <div className="dm-input" onPaste={handlePaste}>
-                {/* Reply preview */}
                 {replyTo && !editingMsg && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 14px", background: "#F0F7FF", borderBottom: "1px solid #DBEAFE", borderLeft: "3px solid #2563EB" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -1808,7 +1980,6 @@ export default function DirectMessagesPage() {
                     <button onClick={() => setReplyTo(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", fontSize: 15, padding: 2 }}>✕</button>
                   </div>
                 )}
-                {/* Edit bar */}
                 {editingMsg ? (
                   <div style={{ padding: "8px 12px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
@@ -1984,9 +2155,26 @@ const CSS = `
 .dm-list::-webkit-scrollbar { width: 3px; }
 .dm-list::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 2px; }
 
-.dm-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; border-left: 2.5px solid transparent; transition: background 0.1s; user-select: none; }
+.dm-row { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; border-left: 2.5px solid transparent; transition: background 0.1s; user-select: none; }
 .dm-row:hover { background: #F8FAFC; }
 .dm-row.act { background: #EFF6FF; border-left-color: #1a73e8; }
+
+/* Drag-over drop target */
+.dm-row-drop {
+  background: #DBEAFE !important;
+  border-left-color: #1a73e8 !important;
+  outline: 2px dashed #1a73e8;
+  outline-offset: -3px;
+}
+.dm-row-drop::after {
+  content: "Drop to send here";
+  position: absolute; right: 12px;
+  font-size: 9.5px; font-weight: 800; color: #1a73e8;
+  background: #fff; padding: 2px 6px; border-radius: 5px;
+  border: 1px solid #BFDBFE; pointer-events: none;
+}
+.dm-row-drop * { pointer-events: none; }
+
 .dm-row-info { flex: 1; min-width: 0; }
 .dm-row-name { font-size: 13px; font-weight: 600; color: #0F172A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-row-prev { font-size: 11px; color: #94A3B8; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2033,12 +2221,6 @@ const CSS = `
 .dm-bubble-wrap .dm-copy-btn { opacity: 0; transition: opacity 0.12s; }
 .dm-bubble-wrap:hover .dm-copy-btn { opacity: 1 !important; }
 @media (hover: none) { .dm-copy-btn { opacity: 1 !important; } }
-@keyframes dm-jump-flash {
-  0% { background: rgba(37,99,235,0.16); box-shadow: 0 0 0 4px rgba(37,99,235,0.10); }
-  60% { background: rgba(37,99,235,0.10); }
-  100% { background: transparent; box-shadow: none; }
-}
-.dm-jump-hl { animation: dm-jump-flash 1.9s ease-out; border-radius: 12px; }
 
 @keyframes dm-jump-flash {
   0% { background: rgba(37,99,235,0.16); box-shadow: 0 0 0 4px rgba(37,99,235,0.10); }
@@ -2046,11 +2228,10 @@ const CSS = `
   100% { background: transparent; box-shadow: none; }
 }
 .dm-jump-hl { animation: dm-jump-flash 1.9s ease-out; border-radius: 12px; }
-
 
 /* Header action buttons */
-.dm-head-call { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid #DCFCE7; background: #F0FDF4; color: #16A34A; cursor: pointer; flex-shrink: 0; transition: background 0.12s; }
-.dm-head-call:hover { background: #DCFCE7; }
+/* Audio call — hidden for now (re-enable by restoring display:flex) */
+.dm-head-call { display: none !important; }
 
 .dm-head-btn { display: flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; flex-shrink: 0; transition: all 0.12s; white-space: nowrap; }
 .dm-head-req  { border: 1px solid #E9D5FF; background: #FAF5FF; color: #7C3AED; }
@@ -2073,7 +2254,7 @@ const CSS = `
 
 .dm-datesep { display: flex; align-items: center; gap: 8px; margin: 10px 0 7px; }
 .dm-datesep::before, .dm-datesep::after { content: ""; flex: 1; height: 1px; background: #E8EDF4; }
-.dm-datesep-label { font-size: 10px; font-weight: 700; color: "#94A3B8"; padding: 2px 10px; background: #EAEEF4; border-radius: 20px; white-space: nowrap; letter-spacing: 0.03em; color: #64748B; }
+.dm-datesep-label { font-size: 10px; font-weight: 700; padding: 2px 10px; background: #EAEEF4; border-radius: 20px; white-space: nowrap; letter-spacing: 0.03em; color: #64748B; }
 .dm-chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 40px; }
 
 .dm-input { flex-shrink: 0; border-top: 1px solid #EEF2F8; background: #fff; padding: 8px 14px 10px; }
@@ -2128,6 +2309,25 @@ const CSS = `
 }
 .nc-icon-btn:hover { background: #F1F5F9; }
 
+/* Back arrow in create view — visually distinct from the panel's close X */
+.nc-back-arrow {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 7px;
+  border: 1px solid #BFDBFE; background: #EFF6FF;
+  color: #1a73e8; cursor: pointer; flex-shrink: 0;
+  transition: background 0.12s;
+}
+.nc-back-arrow:hover { background: #DBEAFE; }
+
+/* Back arrow in create view — visually distinct from the panel's close X */
+.nc-back-arrow {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 7px;
+  border: 1px solid #BFDBFE; background: #EFF6FF;
+  color: #1a73e8; cursor: pointer; flex-shrink: 0;
+  transition: background 0.12s;
+}
+.nc-back-arrow:hover { background: #DBEAFE; }
 .nc-body {
   flex: 1; overflow-y: auto; display: flex; flex-direction: column;
   gap: 10px; padding: 12px;
@@ -2180,7 +2380,7 @@ const CSS = `
 .nc-view-btn:hover { background: #DBEAFE; }
 
 .nc-field { display: flex; flex-direction: column; gap: 5px; }
-.nc-label { font-size: 11px; font-weight: 700; color: "#64748B"; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; }
+.nc-label { font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; }
 .nc-input {
   width: 100%; padding: 8px 11px; border: 1.5px solid #E2E8F0; border-radius: 7px;
   font-size: 13px; font-family: inherit; outline: none; color: #0F172A;
