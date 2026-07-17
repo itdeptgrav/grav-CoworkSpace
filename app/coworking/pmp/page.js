@@ -372,7 +372,7 @@ export default function PMPDashboard() {
                         loading={loading}
                     />
 
-                    <CompCarda
+                    <CompCard
                         label="C2 This Quarter"
                         value={loading ? null : c2SopPts > 0 ? `${fmt(c2SopPts)} pts` : "—"}
                         sub={loading ? "..." : c2SopPts > 0 ? "" : "no goals past deadline"}
@@ -440,9 +440,9 @@ export default function PMPDashboard() {
 
                             <div style={{ fontSize: 11, color: C.textMut, marginTop: 6 }}>
                                 {loading ? <Skeleton h={12} w="70%" /> : (
-                                    d?.pace?.numerator !== undefined
-                                        ? `${fmt(d.pace.numerator, 1)} pts achieved out of ${fmt(d.pace.denominator, 1)} pts achievable today`
-                                        : "Waiting for first task completion"
+                                    d?.pace?.breakdown?.length > 0
+                                        ? d.pace.breakdown.map(b => `${b.label} ${fmt(b.value, 1)}%`).join(" + ") + ` − C3 ${fmt(d.pace.c3Net, 1)}%`
+                                        : "Waiting for first task or goal this quarter"
                                 )}
                             </div>
 
@@ -456,16 +456,18 @@ export default function PMPDashboard() {
 
                         {/* Right */}
                         <div style={{ textAlign: "right", minWidth: 140 }}>
-                            <div>
-                                <div style={{ fontSize: 9, color: C.textLabel }}>Achieved</div>
-                                <div style={{ fontSize: 17, fontWeight: 600, color: C.textSec }}>
-                                    {loading ? "—" : `${fmt(d?.pace?.numerator, 1)} pts`}
+                            {(d?.pace?.breakdown || []).map(b => (
+                                <div key={b.label} style={{ marginBottom: 7 }}>
+                                    <div style={{ fontSize: 9, color: C.textLabel }}>{b.label}</div>
+                                    <div style={{ fontSize: 17, fontWeight: 600, color: C.textSec }}>
+                                        {loading ? "—" : `${fmt(b.value, 1)}%`}
+                                    </div>
                                 </div>
-                            </div>
-                            <div style={{ marginTop: 7 }}>
-                                <div style={{ fontSize: 9, color: C.textLabel }}>of achievable</div>
+                            ))}
+                            <div>
+                                <div style={{ fontSize: 9, color: C.textLabel }}>C3 (conduct)</div>
                                 <div style={{ fontSize: 17, fontWeight: 600, color: C.textSec }}>
-                                    {loading ? "—" : `${fmt(d?.pace?.denominator, 1)} pts`}
+                                    {loading ? "—" : `${fmt(d?.pace?.c3Net, 1)}%`}
                                 </div>
                             </div>
                             {!loading && gap?.gap > 0 && (
@@ -474,7 +476,7 @@ export default function PMPDashboard() {
                                         fontSize: 11, fontWeight: 600, padding: "3px 10px",
                                         borderRadius: 4, background: C.amberTint, color: C.amber
                                     }}>
-                                        {fmt(gap.gap, 1)} pts to {gap.nextRating}
+                                        {fmt(gap.gap, 1)}% to {gap.nextRating}
                                     </span>
                                 </div>
                             )}
@@ -745,7 +747,7 @@ export default function PMPDashboard() {
                         </div>
                         <div style={{ fontSize: 17, fontWeight: 600, color: C.textMut }}>
                             0.0
-                        </div>
+                            ``              </div>
                         <div style={{ fontSize: 9, color: C.textHint, marginTop: 2 }}>
                             0.0 pts (annual avg)
                         </div>

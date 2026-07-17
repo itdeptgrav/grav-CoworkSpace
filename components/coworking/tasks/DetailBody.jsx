@@ -1387,6 +1387,16 @@ export default function DetailBody({
                       const _extApproved = task.deadlineExtRequest?.status === "approved" && !_deadlinePassed;
                       const _zone = _deadlinePassed ? 3 : _extApproved ? 2 : _pct < 70 ? 2 : 3;
 
+                      // Seed the request form with today's date + current time
+                      // instead of leaving date blank / time hardcoded to 23:59
+                      const _openExtForm = () => {
+                        const now = new Date();
+                        if (!ef.extReqDate) ef.setExtReqDate?.(now.toISOString().split("T")[0]);
+                        if (!ef.extReqTime || ef.extReqTime === "23:59") {
+                          ef.setExtReqTime?.(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`);
+                        }
+                        ef.setShowExtReqForm?.(true);
+                      };
                       if (_zone === 1) return (
                         <div title="Extension available after 50% of task time has elapsed">
                           <ActionBtn variant="outline" disabled>
@@ -1402,17 +1412,28 @@ export default function DetailBody({
                       );
 
                       if (_zone === 2) return (
-                        <ActionBtn variant="outline"
-                          onClick={() => ef.setShowExtReqForm?.(true)}>
-                          Request Deadline Extension
-                        </ActionBtn>
+                        <div>
+                          <ActionBtn variant="outline"
+                            onClick={_openExtForm}>
+                            Request Deadline Extension
+                          </ActionBtn>
+                          <div style={{
+                            fontSize: 10, color: "#16A34A",
+                            fontWeight: 600, marginTop: 4,
+                            padding: "4px 8px", background: "#F0FDF4",
+                            borderRadius: 4, border: "1px solid #BBF7D0",
+                            textAlign: "center"
+                          }}>
+                            ✓ No deduction if you request now · {_pct.toFixed(0)}% elapsed (cuts apply after 70%)
+                          </div>
+                        </div>
                       );
 
                       // Zone 3 — penalty warning
                       return (
                         <div>
                           <button
-                            onClick={() => ef.setShowExtReqForm?.(true)}
+                            onClick={_openExtForm}
                             style={{
                               width: "100%", padding: "9px 14px",
                               background: "#FFFBEB",
