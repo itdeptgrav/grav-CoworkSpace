@@ -2844,6 +2844,80 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
           font-family: inherit;
           font-weight: 500;
         }
+
+        .cw-duty-btn.is-emergency .cw-duty-dot { background: #D97706; }
+.cw-duty-live-box.is-emergency { background: #FFFBEB; border-color: #FDE68A; }
+.cw-duty-btn-emergency {
+  width: 100%; margin-top: 8px; padding: 9px 14px; border-radius: 8px;
+  border: 1px solid #FDE68A; background: #FFFBEB; color: #92400E;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.cw-duty-btn-emergency:hover { background: #FEF3C7; }
+.cw-duty-btn-emergency-confirm {
+  flex: 1; padding: 10px 14px; border-radius: 8px; border: none;
+  background: #D97706; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.cw-duty-btn-emergency-confirm:hover { background: #B45309; }
+.cw-duty-btn-emergency-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.cw-duty-reason-input {
+  width: 100%; padding: 8px 10px; border: 1px solid #FDE68A; border-radius: 8px;
+  font-size: 12.5px; font-family: inherit; resize: vertical; outline: none;
+  margin-bottom: 14px; box-sizing: border-box;
+}
+.cw-duty-history-tag.emergency { color: #92400E; background: #FFFBEB; }
+
+.cw-topbar-emergency { background: #FFFBEB; border-bottom-color: #FDE68A; transition: background 0.3s ease, border-color 0.3s ease; }
+
+
+
+.cw-duty-btn.is-emergency .cw-duty-dot { background: #B45309; }
+.cw-duty-live-box.is-emergency { background: #FAF9F7; border-color: #E7E0D4; }
+
+.cw-duty-section-label { font-size: 11px; font-weight: 700; color: #667085; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+.cw-duty-reason-display { font-size: 12.5px; color: #475467; background: #F9FAFB; border: 1px solid #E4E7EC; border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; line-height: 1.5; }
+
+.cw-duty-mode-grid { display: flex; gap: 8px; margin-bottom: 20px; }
+.cw-duty-mode-btn {
+  flex: 1; padding: 9px 12px; border-radius: 6px;
+  border: 1px solid #E4E7EC; background: #fff; color: #344054;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.cw-duty-mode-btn:hover { background: #F5F7FA; border-color: #D0D5DD; }
+.cw-duty-mode-btn-primary { border-color: #B4C6E7; background: #F5F8FD; color: #1B4F8A; }
+.cw-duty-mode-btn-primary:hover { background: #EAF0FA; }
+.cw-duty-mode-btn-warn { border-color: #E7D9B8; color: #7C5A1E; }
+.cw-duty-mode-btn-warn:hover { background: #FBF7EE; }
+
+.cw-duty-confirm-sub { font-size: 12px; color: #667085; line-height: 1.5; margin-bottom: 16px; }
+.cw-duty-confirm-actions { display: flex; gap: 10px; margin-bottom: 22px; }
+.cw-duty-btn-cancel, .cw-duty-btn-primary { flex: 1; padding: 9px 14px; border-radius: 6px; border: none; font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.cw-duty-btn-cancel { background: #F2F4F7; color: #344054; }
+.cw-duty-btn-cancel:hover { background: #E4E7EC; }
+.cw-duty-btn-primary { background: #1B4F8A; color: #fff; }
+.cw-duty-btn-primary:hover { background: #163E6E; }
+.cw-duty-btn-cancel:disabled, .cw-duty-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.cw-duty-reason-input {
+  width: 100%; padding: 8px 10px; border: 1px solid #E4E7EC; border-radius: 6px;
+  font-size: 12.5px; font-family: inherit; resize: vertical; outline: none;
+  margin-bottom: 14px; box-sizing: border-box; color: #344054;
+}
+.cw-duty-reason-input:focus { border-color: #1B4F8A; }
+.cw-duty-btn-warn-confirm {
+  flex: 1; padding: 9px 14px; border-radius: 6px; border: none;
+  background: #92650F; color: #fff; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.cw-duty-btn-warn-confirm:hover { background: #7C5510; }
+.cw-duty-btn-warn-confirm:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.cw-duty-history-tag.emergency { color: #7C5A1E; background: #FBF7EE; }
+
+.cw-topbar-emergency { background: #FAF9F7; border-bottom-color: #E7E0D4; transition: background 0.3s ease, border-color 0.3s ease; }
+
+
         .cw-notif-popup-mark:hover { text-decoration: underline; }
         .cw-notif-popup-list {
           flex: 1;

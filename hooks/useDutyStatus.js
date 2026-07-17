@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 
 export function useDutyStatus(employeeId) {
-  const [isOnline, setIsOnline] = useState(null); // null = loading
-  
+  const [mode, setMode] = useState(null); // null = loading, "online" | "offline" | "emergency"
 
   useEffect(() => {
     if (!employeeId) return;
@@ -13,12 +12,16 @@ export function useDutyStatus(employeeId) {
       const { doc, onSnapshot } = await import("firebase/firestore");
       unsub = onSnapshot(
         doc(firebaseDb, "cowork_duty_status", employeeId),
-        (snap) => setIsOnline(snap.exists() ? !!snap.data().isOnline : false),
+        (snap) => {
+          if (!snap.exists()) { setMode("offline"); return; }
+          const d = snap.data();
+          setMode(d.mode || (d.isOnline ? "online" : "offline"));
+        },
         (e) => console.error("[useDutyStatus] snapshot:", e.message)
       );
     })();
     return () => unsub();
   }, [employeeId]);
 
-  return isOnline;
+  return mode;
 }
