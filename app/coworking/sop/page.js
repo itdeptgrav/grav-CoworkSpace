@@ -211,12 +211,12 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
   const [openDesc, setOpenDesc] = useState(null);
 
   // ── Timer SOP Settings ───────────────────────────────────────────────
-  // ── Timer SOP Settings ───────────────────────────────────────────────
-  const [timerSopEnabled, setTimerSopEnabled] = useState(true);
   const [timerMinDailyHrs, setTimerMinDailyHrs] = useState("8"); const [timerDeficitThresholdHrs, setTimerDeficitThresholdHrs] = useState("1");
   const [timerDeficitPoints, setTimerDeficitPoints] = useState("0.5");
   const [timerOvertimeThresholdHrs, setTimerOvertimeThresholdHrs] = useState("1");
   const [timerOvertimePoints, setTimerOvertimePoints] = useState("0.5");
+  const [timerMinDailyPct, setTimerMinDailyPct] = useState("");
+  const [timerSopEnabled, setTimerSopEnabled] = useState(true);
 
   // ── Role Band Configuration state ─────────────────────────────────────────
   const BAND_NAMES = ["execution-led", "balanced", "outcome-led"];
@@ -269,12 +269,13 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
           setC1RejectDesc(d.c1RejectDesc || "");
           setC2GlobalMaxPointsDesc(d.c2GlobalMaxPointsDesc || "");
           // Timer SOP
-          // Timer SOP
-          setTimerSopEnabled(d.timerSopEnabled !== false);
           setTimerMinDailyHrs(d.timerMinDailyHrs != null ? String(d.timerMinDailyHrs) : "8"); setTimerDeficitThresholdHrs(d.timerDeficitThresholdHrs != null ? String(d.timerDeficitThresholdHrs) : "1");
           setTimerDeficitPoints(d.timerDeficitPoints != null ? String(d.timerDeficitPoints) : "0.5");
           setTimerOvertimeThresholdHrs(d.timerOvertimeThresholdHrs != null ? String(d.timerOvertimeThresholdHrs) : "1");
           setTimerOvertimePoints(d.timerOvertimePoints != null ? String(d.timerOvertimePoints) : "0.5");
+          setTimerMinDailyPct(d.timerMinDailyPct != null ? String(d.timerMinDailyPct) : "");
+          setTimerSopEnabled(d.timerSopEnabled !== false);
+
         }
       })
       .catch(console.error)
@@ -336,12 +337,14 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
         updatedByName: employeeName,
         updatedAt: new Date().toISOString(),
         // ── Timer SOP ──
-        timerSopEnabled,
         timerMinDailyHrs: parseFloat(timerMinDailyHrs) || 8, timerDeficitThresholdHrs: parseFloat(timerDeficitThresholdHrs) || 1,
         timerDeficitPoints: parseFloat(timerDeficitPoints) || 0.5,
         timerOvertimeThresholdHrs: parseFloat(timerOvertimeThresholdHrs) || 1,
         timerOvertimePoints: parseFloat(timerOvertimePoints) || 0.5,
+        timerMinDailyPct: parseFloat(timerMinDailyPct) || 0,
+        timerSopEnabled,
       });
+
       // Sync to MongoDB
       const token = await firebaseAuth.currentUser?.getIdToken();
       await fetch(`${BASE}/cowork/sop/settings/sync`, {
@@ -600,7 +603,16 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                     </div>
                   </div>
                   <button
-                    onClick={() => setTimerSopEnabled(v => !v)}
+                    onClick={async () => {
+                      const next = !timerSopEnabled;
+                      setTimerSopEnabled(next);
+                      try {
+                        await setDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"), { timerSopEnabled: next }, { merge: true });
+                      } catch (e) {
+                        console.error("[timerSopEnabled]", e.message);
+                        setTimerSopEnabled(!next);
+                      }
+                    }}
                     title={timerSopEnabled ? "On — points are being cut/added for everyone. Click to pause." : "Paused — no points are being cut or added for anyone. Click to turn back on."}
                     style={{
                       flexShrink: 0, width: 44, height: 24, borderRadius: 99, border: "none", cursor: "pointer",
@@ -622,18 +634,37 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                 <div style={{ padding: "14px", background: "#F0FDFA", display: "flex", flexDirection: "column", gap: 14, opacity: timerSopEnabled ? 1 : 0.5 }}>
 
                   {/* Daily Minimum */}
-                  <div>
+                  <div style={{ opacity: parseFloat(timerMinDailyPct) > 0 ? 0.45 : 1 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, color: "#0D9488", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                      Daily Minimum Required Hours
+                      Daily Minimum Required Hours{parseFloat(timerMinDailyPct) > 0 ? " — unused while % is set" : ""}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <input type="number" min="0" step="0.5" value={timerMinDailyHrs}
                         onChange={e => setTimerMinDailyHrs(e.target.value)}
+                        disabled={parseFloat(timerMinDailyPct) > 0}
                         style={{ ...iStyle, width: 80 }} placeholder="8" />
                       <span style={{ fontSize: 11, color: "#374151" }}>hours/day minimum</span>
                     </div>
                     <div style={{ fontSize: 10, color: "#6B7280", marginTop: 4 }}>
-                      If employee works less than this per day, deficit accumulates.
+                      {parseFloat(timerMinDailyPct) > 0
+                        ? "Fallback only — ignored while % below is above 0."
+                        : "If employee works less than this per day, deficit accumulates."}
+                    </div>
+                  </div>
+
+                  {/* Daily Minimum — % override */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#0D9488", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                      Daily Minimum — % of Expected Hours
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input type="number" min="0" max="100" step="1" value={timerMinDailyPct}
+                        onChange={e => setTimerMinDailyPct(e.target.value)}
+                        style={{ ...iStyle, width: 80 }} placeholder="e.g. 70" />
+                      <span style={{ fontSize: 11, color: "#374151" }}>% of that day's office hours, minus breaks</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#6B7280", marginTop: 4 }}>
+                      Above 0, this REPLACES the hours field above — required hours become this % of each day's actual scheduled span, shorter on a half-day. Leave at 0 to keep using flat hours.
                     </div>
                   </div>
 
@@ -793,19 +824,11 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
 }
 
 // ── SOP Form ──────────────────────────────────────────────────────────────────
-const SEVERITY_OPTIONS = [
-  { value: "minor", label: "Minor", hint: "First occurrence. No operational impact." },
-  { value: "moderate", label: "Moderate", hint: "Repeated breach. Direct operational impact." },
-  { value: "serious", label: "Serious", hint: "Deliberate, sustained, or significant harm." },
-  { value: "falsification", label: "Falsification", hint: "Per incident. On top of retroactive deductions." },
-  { value: "idle_pool", label: "Idle Pool", hint: "Per hour accumulated in quarterly idle pool." },
-];
-
 function SopForm({ editing, role, myDept, employeeId, employeeName, folders, allDepts, onClose, onSaved }) {
   const [name, setName] = useState(editing?.name || "");
-  const [severity, setSeverity] = useState(editing?.severity || "");
   const [points, setPoints] = useState(editing?.points || "");
-  const [desc, setDesc] = useState(editing?.description || ""); const [dept, setDept] = useState(editing?.department || (role === "tl" ? myDept : ""));
+  const [desc, setDesc] = useState(editing?.description || "");
+  const [dept, setDept] = useState(editing?.department || (role === "tl" ? myDept : ""));
   const [folderId, setFolderId] = useState(editing?.folderId || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -837,11 +860,11 @@ function SopForm({ editing, role, myDept, employeeId, employeeName, folders, all
   };
 
   const save = async () => {
-    if (!name.trim() || !severity || !points || !desc.trim() || !dept) return setErr("All fields are required.");
+    if (!name.trim() || !points || !desc.trim() || !dept) return setErr("All fields are required.");
     if (isNaN(points) || Number(points) < 0.5) return setErr("Points must be at least 0.5.");
     setErr(""); setBusy(true);
     try {
-      const body = { name: name.trim(), severity, points: Number(points), description: desc.trim(), department: dept, folderId: folderId || null };
+      const body = { name: name.trim(), points: Number(points), description: desc.trim(), department: dept, folderId: folderId || null };
       if (editing) await updateSop(editing._id, body);
       else await createSop(body);
       onSaved(); onClose();
@@ -874,24 +897,12 @@ function SopForm({ editing, role, myDept, employeeId, employeeName, folders, all
               onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
           </FieldLabel>
 
-          <FieldLabel label="Severity *">
-            <select value={severity} onChange={e => setSeverity(e.target.value)} style={{ ...iStyle, cursor: "pointer" }}>
-              <option value="">Select severity…</option>
-              {SEVERITY_OPTIONS.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-            {severity && (
-              <div style={{ marginTop: 6, fontSize: 11, color: C.textSub }}>
-                {SEVERITY_OPTIONS.find(s => s.value === severity)?.hint}
-              </div>
-            )}
+          <FieldLabel label="Deduction Points *">
+            <input type="number" value={points} onChange={e => setPoints(e.target.value)} placeholder="e.g. 1.0" step="0.5" min="0.5" style={iStyle}
+              onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
           </FieldLabel>
 
-          <FieldLabel label="Deduction % *">
-            <input type="number" value={points} onChange={e => setPoints(e.target.value)} placeholder="e.g. 1.0%" step="0.5" min="0.5" style={iStyle}
-              onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
-          </FieldLabel>          <FieldLabel label="Department *">
+          <FieldLabel label="Department *">
             {role === "tl"
               ? <input value={myDept} disabled style={{ ...iStyle, background: C.surface, color: C.textSub }} />
               : <select value={dept} onChange={e => { setDept(e.target.value); setFolderId(""); setShowNewFolder(false); setNewFolderName(""); setFolderCreated(false); }} style={{ ...iStyle, cursor: "pointer" }}>
@@ -1195,11 +1206,11 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
                       <select value={selSop?._id || ""} onChange={e => setSelSop(folderSops.find(s => s._id === e.target.value) || null)} style={{ ...iStyle, fontSize: 12 }}
                         onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border}>
                         <option value="">Select SOP…</option>
-                        {folderSops.map(s => <option key={s._id} value={s._id}>{s.name} ({s.points}%)</option>)}
+                        {folderSops.map(s => <option key={s._id} value={s._id}>{s.name} ({s.points} pts)</option>)}
                       </select>
                     </div>
                   )}
-                  {selSop && <div style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>−{selSop.points}% · {selSop.description}</div>}
+                  {selSop && <div style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>−{selSop.points} pts · {selSop.description}</div>}
                   <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Additional note (optional)…" rows={2} style={{ ...iStyle, resize: "none", fontSize: 12 }}
                     onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
                   <div style={{ display: "flex", gap: 8 }}>
@@ -1461,8 +1472,8 @@ function TodayWorkBreakdown({ employeeId }) {
       </div>
     );
   }
-  if (cfg?.timerSopEnabled === false) return null; // paused by admin — hide the whole card, nothing to show
   if (!minHrs && !defThresh && !otThresh) return null; // genuinely not configured — nothing to show
+
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
   const met = minHrs > 0 && workedHrs >= minHrs;
 
@@ -1490,8 +1501,7 @@ function TodayWorkBreakdown({ employeeId }) {
       </div>
 
       {/* ── 1. Big progress: worked vs required ── */}
-
-      {/* ── 1. Big progress: worked vs required ── */}      <div style={{ padding: "14px 14px 10px" }}>
+      <div style={{ padding: "14px 14px 10px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
           <span style={S.label}>Today's Target</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: met ? "#16A34A" : "#1F2937" }}>
@@ -1532,18 +1542,19 @@ function TodayWorkBreakdown({ employeeId }) {
       </div>
 
       {/* ── 2. The two counters ── */}
-      <div style={{ display: "flex", borderTop: "1px solid #F1F5F9" }}>        {defThresh > 0 && defPts > 0 && (
-        <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9" }}>
-          <div style={{ ...S.label, color: "#DC2626", marginBottom: 5 }}>Deficit Counter</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#DC2626", fontFamily: "monospace" }}>
-            {fmtHrs(defAccum)} <span style={{ color: "#9CA3AF", fontSize: 11, fontWeight: 500 }}>/ {fmtHrs(defThresh)}</span>
+      <div style={{ display: "flex", borderTop: "1px solid #F1F5F9" }}>
+        {defThresh > 0 && defPts > 0 && (
+          <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9" }}>
+            <div style={{ ...S.label, color: "#DC2626", marginBottom: 5 }}>Deficit Counter</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#DC2626", fontFamily: "monospace" }}>
+              {fmtHrs(defAccum)} <span style={{ color: "#9CA3AF", fontSize: 11, fontWeight: 500 }}>/ {fmtHrs(defThresh)}</span>
+            </div>
+            <div style={{ marginTop: 6, height: 6, background: "#FEE2E2", borderRadius: 99 }}>
+              <div style={{ height: "100%", width: `${defPct}%`, background: "#DC2626", borderRadius: 99 }} />
+            </div>
+            <div style={{ ...S.sub, marginTop: 5 }}>Full = <strong style={{ color: "#DC2626" }}>−{defPts} pts</strong> cut, counter restarts</div>
           </div>
-          <div style={{ marginTop: 6, height: 6, background: "#FEE2E2", borderRadius: 99 }}>
-            <div style={{ height: "100%", width: `${defPct}%`, background: "#DC2626", borderRadius: 99 }} />
-          </div>
-          <div style={{ ...S.sub, marginTop: 5 }}>Full = <strong style={{ color: "#DC2626" }}>−{defPts} pts</strong> cut, counter restarts</div>
-        </div>
-      )}
+        )}
         {otThresh > 0 && otPts > 0 && (
           <div style={{ flex: 1, padding: "10px 14px" }}>
             <div style={{ ...S.label, color: "#16A34A", marginBottom: 5 }}>Overtime Counter</div>
@@ -1772,7 +1783,6 @@ function OwnHistory({ employeeId }) {
   const filtNet = +(filtGained - filtDeducted).toFixed(2);
   const isFiltered = bandFilter !== "All" || !!dateFrom || !!dateTo;
 
-
   return (
     <>
       <div>
@@ -1800,8 +1810,8 @@ function OwnHistory({ employeeId }) {
                   {isClean ? "No violations on record." : isPositive ? "Rewards exceed violations — keep it up." : "Violations are accumulating."}
                 </div>
               </div>
-              {sopPoints.map((y, i) => (
-                <div key={`${y.year}-${i}`} style={{ borderLeft: `1px solid ${bdColor}`, paddingLeft: 16 }}>
+              {sopPoints.map(y => (
+                <div key={y.year} style={{ borderLeft: `1px solid ${bdColor}`, paddingLeft: 16 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: labelColor, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{y.year}</div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: y.totalDeducted > 0 ? C.red : y.totalDeducted < 0 ? "#15803D" : C.textMuted }}>
                     {y.totalDeducted > 0 ? `−${y.totalDeducted.toFixed(1)}` : y.totalDeducted < 0 ? `+${(-y.totalDeducted).toFixed(1)}` : "0.0"}<span style={{ fontSize: 13, fontWeight: 700 }}> / 100</span>
@@ -1857,7 +1867,7 @@ function OwnHistory({ employeeId }) {
         )}
 
         {/* ── Per-year history ── */}
-        {sopPoints.map((yp, yi) => {
+        {sopPoints.map(yp => {
           const allB = [...(yp.bleaches || [])].filter(b => {
             if (bandFilter !== "All" && (b.type || "") !== bandFilter) return false;
             if (dateFrom && b.date < dateFrom) return false;
@@ -1868,8 +1878,7 @@ function OwnHistory({ employeeId }) {
           const dates = Object.keys(grp).sort((a, b) => b.localeCompare(a));
           if (dates.length === 0) return null;
           return (
-            <div key={`${yp.year}-${yi}`} style={{ marginBottom: 24 }}>
-
+            <div key={yp.year} style={{ marginBottom: 24 }}>
               {/* Year header */}
               <div style={{ fontSize: 11, fontWeight: 600, color: C.textSub, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
                 {yp.year} &nbsp;·&nbsp; {yp.totalDeducted > 0 ? `−${yp.totalDeducted.toFixed(1)} pts penalty` : yp.totalDeducted < 0 ? `+${(-yp.totalDeducted).toFixed(1)} pts earned` : "0 pts net"}
@@ -1953,35 +1962,34 @@ function OwnHistory({ employeeId }) {
           );
         })}
       </div>
-      {
-        recheckModal && (
-          <>
-            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 1001 }} onClick={() => setRecheckModal(null)} />
-            <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(380px,90vw)", background: C.white, borderRadius: 8, boxShadow: "0 8px 32px rgba(0,0,0,0.14)", zIndex: 1002, fontFamily: "inherit", overflow: "hidden" }}>
-              <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Request Recheck</div>
-                <button onClick={() => setRecheckModal(null)} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+
+      {recheckModal && (
+        <>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 1001 }} onClick={() => setRecheckModal(null)} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(380px,90vw)", background: C.white, borderRadius: 8, boxShadow: "0 8px 32px rgba(0,0,0,0.14)", zIndex: 1002, fontFamily: "inherit", overflow: "hidden" }}>
+            <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Request Recheck</div>
+              <button onClick={() => setRecheckModal(null)} style={{ width: 24, height: 24, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+            <div style={{ padding: "16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 10 }}>
+                Requesting recheck for: <span style={{ color: C.red }}>{recheckModal.sopName}</span>
+              </div>
+              {recheckErr && <Alert red style={{ marginBottom: 8 }}>{recheckErr}</Alert>}
+              <textarea value={recheckNote} onChange={e => setRecheckNote(e.target.value)} placeholder="Explain why this deduction is incorrect…" rows={3} style={{ ...iStyle, resize: "none", marginBottom: 10 }}
+                onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setRecheckModal(null)} style={{ flex: 1, padding: "8px", border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.text, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                <button onClick={submitRecheck} disabled={recheckBusy} style={{ flex: 2, padding: "8px", border: "none", borderRadius: 6, background: recheckBusy ? "#93C5FD" : C.primary, color: C.white, fontSize: 12, fontWeight: 600, cursor: recheckBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                  {recheckBusy ? "Submitting…" : "Submit Request"}
                 </button>
               </div>
-              <div style={{ padding: "16px" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 10 }}>
-                  Requesting recheck for: <span style={{ color: C.red }}>{recheckModal.sopName}</span>
-                </div>
-                {recheckErr && <Alert red style={{ marginBottom: 8 }}>{recheckErr}</Alert>}
-                <textarea value={recheckNote} onChange={e => setRecheckNote(e.target.value)} placeholder="Explain why this deduction is incorrect…" rows={3} style={{ ...iStyle, resize: "none", marginBottom: 10 }}
-                  onFocus={e => e.target.style.borderColor = C.primary} onBlur={e => e.target.style.borderColor = C.border} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setRecheckModal(null)} style={{ flex: 1, padding: "8px", border: `1px solid ${C.border}`, borderRadius: 6, background: C.white, color: C.text, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-                  <button onClick={submitRecheck} disabled={recheckBusy} style={{ flex: 2, padding: "8px", border: "none", borderRadius: 6, background: recheckBusy ? "#93C5FD" : C.primary, color: C.white, fontSize: 12, fontWeight: 600, cursor: recheckBusy ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
-                    {recheckBusy ? "Submitting…" : "Submit Request"}
-                  </button>
-                </div>
-              </div>
             </div>
-          </>
-        )
-      }
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -2733,7 +2741,7 @@ export default function SopPage() {
                                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
                                             <div style={{ fontSize: 13, fontWeight: 600, color: C.text, flex: 1 }}>{sop.name}</div>
                                             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                              <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points}%</span>
+                                              <span style={{ fontWeight: 700, color: C.red, background: C.redLight, border: `1px solid ${C.redBorder}`, padding: "2px 7px", borderRadius: 4, fontSize: 11 }}>{sop.points} pts</span>
                                               <StatusBadge status={sop.status} />
                                             </div>
                                           </div>

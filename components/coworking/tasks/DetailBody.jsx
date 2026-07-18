@@ -595,8 +595,7 @@ export default function DetailBody({
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, handleTimerStart, handleTimerPause,
-}) {
+  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, }) {
   const df = deadlineFlow || {};
   const ef = extFlow || {};
 
@@ -1118,7 +1117,7 @@ export default function DetailBody({
                     </div>
                     <button
                       disabled={isTimerExceeded}
-                      onClick={() => isRunningThis ? handleTimerPause?.(task.taskId, task.title) : handleTimerStart?.(task.taskId, task.title)}
+                      onClick={() => isRunningThis ? timerPause?.(task.taskId, task.title) : timerStart?.(task.taskId, task.title)}
                       style={{
                         padding: "7px 14px", borderRadius: 6, border: "none", cursor: isTimerExceeded ? "not-allowed" : "pointer",
                         fontFamily: F, fontSize: 11, fontWeight: 600, transition: "all 0.15s",

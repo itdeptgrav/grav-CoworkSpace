@@ -62,6 +62,19 @@ async function saveSession(employeeId, taskId, data) {
     }
 }
 
+async function logTimerEvent(employeeId, type, taskId, taskTitle, reason = null) {
+    try {
+        const { addDoc, collection: col, serverTimestamp } = await import("firebase/firestore");
+        await addDoc(col(firebaseDb, "cowork_timer_events", employeeId, "logs"), {
+            type, taskId, taskTitle: taskTitle || taskId,
+            reason: reason || null,
+            at: serverTimestamp(),
+        });
+    } catch (e) {
+        console.error("[TaskTimer] event log error:", e.message);
+    }
+}
+
 // ── Main hook (for the assignee themselves) ───────────────────────────────────
 //
 // Optional `opts`:
@@ -209,6 +222,7 @@ export function useTaskTimer(employeeId, opts = {}) {
                 lastStartTime: null,
                 taskTitle: prevTitle,
             });
+            logTimerEvent(employeeId, "pause", currentActive, prevTitle, "switched_task");
 
             showToast(
                 `⏸ "${prevTitle}" paused (${formatTime(newTotal)}) → "${taskTitle}" started`,
@@ -234,6 +248,7 @@ export function useTaskTimer(employeeId, opts = {}) {
 
         setActiveTaskId(taskId);
         startTick(taskId, baseSecs);
+        logTimerEvent(employeeId, "start", taskId, taskTitle);
 
         if (!currentActive || currentActive === taskId) {
             showToast(`▶ "${taskTitle}" started${baseSecs > 0 ? ` (resuming from ${formatTime(baseSecs)})` : ""}`, "start");
@@ -272,6 +287,7 @@ export function useTaskTimer(employeeId, opts = {}) {
             taskTitle,
             lastPauseReason,
         });
+        logTimerEvent(employeeId, "pause", taskId, taskTitle, lastPauseReason);
 
         setActiveTaskId(null);
         stopTick();
