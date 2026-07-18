@@ -629,6 +629,11 @@ export default function DetailBody({
   const isFixedDeadlinePassed = !task.hasTimer && task.fixedDeadline && new Date(task.fixedDeadline) < new Date() && ["in_progress", "confirmed"].includes(task.status);
   const timerBlocked = timerActiveTaskId && timerActiveTaskId !== task.taskId;
 
+  // A task that has real subtasks is a container, same as an explicit
+  // isFolder task — no submission, no deadline extension, no timer controls
+  // at THIS level. All of that belongs to the subtasks, not the parent.
+  const treatAsFolder = task.isFolder || (task.subtaskIds || []).length > 0;
+
   // Wall-clock based remaining/over — reflects approved extensions immediately
   // When timer hasn't started yet (workedSecs=0, not running), show full budget
   // not wall-clock dueDate which may differ from window due to cascade timing gaps.
@@ -1098,7 +1103,7 @@ export default function DetailBody({
 
 
           {/* ── SECTION: TIMER CONTROL (assignee, in progress) ── */}
-          {isAssignee && isConfirmed && isStarted && !task.isFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
+          {isAssignee && isConfirmed && isStarted && !treatAsFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
             !hasForwardedChild && (
               <>
                 <Section title="Timer" />
@@ -1139,7 +1144,7 @@ export default function DetailBody({
             )}
 
           {/* ── SECTION: WORKFLOW ACTIONS ── */}
-          {!task.isFolder && (
+          {!treatAsFolder && (
             <>
               <Section title="Actions" />
               <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>

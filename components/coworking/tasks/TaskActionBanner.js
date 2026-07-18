@@ -275,6 +275,14 @@ export default function TaskActionBanner({
     };
   }
 
+  // A container task (real Folder, or any task with subtasks) never shows
+  // ANY banner — timer, submit, extension, all of it. This has to sit HERE,
+  // before the timer special-render below returns early and skips right
+  // past a check placed anywhere later in this function — which is exactly
+  // why the previous attempt at this didn't work.
+  const treatAsFolder = task.isFolder || (task.subtaskIds || []).length > 0;
+  if (treatAsFolder) return null;
+
   if (!banner) return null;
 
   // ── Special render: Timer task banner ────────────────────────────────────
@@ -447,6 +455,10 @@ export default function TaskActionBanner({
     </div>
   ) : null;
 
+ // A container task (real Folder, or any task with subtasks) never shows
+  // a play/pause banner, submit prompt, extension banner, or anything else
+  // here — same rule as the Actions section in DetailBody.jsx. All of that
+  // belongs to its subtasks now, not the parent.
   if (!banner) return extBanner;
 
   return (
