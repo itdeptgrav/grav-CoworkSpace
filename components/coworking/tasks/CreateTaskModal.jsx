@@ -57,12 +57,19 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
   return (
     <div>
       <label style={_lbl}>Time Tracking</label>
-      <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10, alignItems: "flex-end" }}>
         {[{ val: true, label: "Timer — Start / Pause" }, { val: false, label: "Deadline — Fixed Date" }].map(opt => (
-          <button key={String(opt.val)} type="button" onClick={() => onSet("hasTimer", opt.val)}
-            style={{ flex: 1, padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
-            {opt.label}
-          </button>
+          <div key={String(opt.val)} style={{ flex: 1 }}>
+            {opt.val === false && (
+              <div style={{ padding: "4px 6px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 5, fontSize: 9, color: "#92400E", marginBottom: 4, lineHeight: 1.3, textAlign: "center" }}>
+                ℹ️ Cross-department tasks only
+              </div>
+            )}
+            <button type="button" onClick={() => onSet("hasTimer", opt.val)}
+              style={{ width: "100%", padding: "8px 6px", border: `1px solid ${hasTimer === opt.val ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 6, background: hasTimer === opt.val ? "#EBF2FA" : "#fff", color: hasTimer === opt.val ? "#1B4F8A" : "#6B7280", fontSize: 11, fontWeight: hasTimer === opt.val ? 600 : 400, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s", textAlign: "center" }}>
+              {opt.label}
+            </button>
+          </div>
         ))}
       </div>
       {hasTimer && (
