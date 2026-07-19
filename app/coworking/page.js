@@ -6,6 +6,7 @@ import { useMeetings, useGroups } from "../../hooks/useCoworkData";
 import { getCoworkSocket } from "../../lib/coworkSocket";
 import { GwSpinner, GwConfirm } from "../../components/coworking/shared/CoworkShared";
 import EditDeadlineModal from "../../components/coworking/tasks/EditDeadlineModal";
+import TeamStatusWidget from "../../components/coworking/shared/TeamStatusWidget";
 import { deleteTask } from "../../lib/mediaUploadApi";
 import { firebaseAuth, firebaseDb } from "../../lib/coworkFirebase";
 import { useCoworkNotifications } from "../../hooks/useCoworkNotifications";
@@ -1081,6 +1082,10 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
+
+              {(role === "ceo" || role === "tl") && (
+                <TeamStatusWidget currentEmployeeId={employeeId} />
+              )}
 
               {/* Task table — still inside wf-top-left */}                  {/* LEFT: My Tasks table */}
               <div className="wf-card" style={{ display: "flex", flexDirection: "column", overflow: "hidden", flex: "0 0 auto" }}>

@@ -8,6 +8,11 @@ import GlobalCallReceiver from "../../components/coworking/messaging/GlobalCallR
 import { GwSpinner } from "../../components/coworking/shared/CoworkShared";
 import TopLoadingBar from "../../components/coworking/shared/TopLoadingBar";
 
+
+
+import WelcomeCelebration from "../../components/coworking/WelcomeCelebration";
+
+
 function PageLoadingFallback() {
     return (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "400px" }}>
@@ -44,6 +49,7 @@ export default function CoworkingLayout({ children }) {
     return (
         <>
             <TopLoadingBar />
+            <WelcomeCelebration />
             {employeeId && (
                 <GlobalCallReceiver employeeId={employeeId} employeeName={employeeName || ""} />
             )}

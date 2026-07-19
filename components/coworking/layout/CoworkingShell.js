@@ -13,8 +13,8 @@ import { subscribePip, clearPipMeeting, getPipMeeting } from "../../../lib/pipMe
 import dynamic from "next/dynamic";
 import { useFCMToken } from "../../../hooks/useFCMToken";
 import { usePushNotifications } from "../../../hooks/usePushNotifications";
-import DutyStatusToggle from "../shared/DutyStatusToggle";
 import { useDutyStatus } from "../../../hooks/useDutyStatus";
+import DutyStatusToggle from "../shared/DutyStatusToggle";
 
 // Dynamically import LiveKit (browser-only) for PiP room
 const LiveKitRoom = dynamic(() => import("@livekit/components-react").then(m => m.LiveKitRoom), { ssr: false });
@@ -2035,6 +2035,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [notifOpen, setNotifOpen] = useState(false);
   const [reqPanelOpen, setReqPanelOpen] = useState(false);
   const [activeChatReqId, setActiveChatReqId] = useState(null);
+  const dutyMode = useDutyStatus(employeeId);
   // ── Own profile picture — live Firestore listener ────────────────────────
   useEffect(() => {
     if (!employeeId) return;
@@ -3229,6 +3230,16 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 .cw-duty-history-tag.login { color: #15803D; background: #F0FDF4; }
 .cw-duty-history-tag.logout { color: #92400E; background: #FFFBEB; }
 .cw-duty-history-time { font-size: 11.5px; color: #667085; }
+
+.cw-duty-emreq-row { padding: 8px 0; border-bottom: 1px solid #F2F4F7; }
+.cw-duty-emreq-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.cw-duty-emreq-status { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.03em; }
+.cw-duty-emreq-pending { color: #92400E; background: #FFFBEB; }
+.cw-duty-emreq-approved { color: #15803D; background: #F0FDF4; }
+.cw-duty-emreq-rejected { color: #991B1B; background: #FEF2F2; }
+.cw-duty-emreq-reason { font-size: 11.5px; color: #667085; }
+
+
       `}</style>
 
       <div className="cw-shell">
@@ -3495,7 +3506,18 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="cw-user-name">{employeeName}</div>
-                <div className="cw-user-role">{roleLabel}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <div className="cw-user-role">{roleLabel}</div>
+                  {dutyMode && (
+                    <>
+                      <span style={{ color: "#D0D5DD", fontSize: 10 }}>·</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: dutyMode === "online" ? "#16A34A" : dutyMode === "emergency" ? "#B45309" : "#98A2B3" }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />
+                        {dutyMode === "online" ? "Online" : dutyMode === "emergency" ? "Emergency" : "Offline"}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             <button className="cw-signout-btn" onClick={handleSignOut}>

@@ -6,6 +6,7 @@ import { firebaseAuth, firebaseDb } from "../../../lib/coworkFirebase";
 import { collection, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
 import {
   fetchSops, createSop, updateSop, deleteSop,
+  fetchAllSopCategories,
   approveSop, rejectSop, applyBleach, fetchBleachHistory,
   fetchFolders, createFolder, deleteFolder,
   requestRecheck, reviewRecheck, fetchRecheckList,
@@ -824,6 +825,71 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
 }
 
 // ── SOP Form ──────────────────────────────────────────────────────────────────
+function AllSopsPanel({ data, loading, err, onClose }) {
+  const categories = [
+    { key: "c1", label: "C1 — Task Score", color: "#2563EB" },
+    { key: "c2", label: "C2 — Goal Score", color: "#059669" },
+    { key: "c3", label: "C3 — Conduct", color: "#DC2626" },
+    { key: "c4", label: "C4 — Attendance", color: "#7C3AED" },
+  ];
+
+  return (
+    <>
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 999 }} onClick={onClose} />
+      <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(560px,100vw)", background: "#fff", borderLeft: "1px solid #E5E7EB", boxShadow: "-4px 0 20px rgba(0,0,0,0.08)", zIndex: 1000, display: "flex", flexDirection: "column", fontFamily: "inherit" }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>All SOPs</div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>Every rule that can cut or add points, grouped by category</div>
+          </div>
+          <button onClick={onClose} style={{ width: 26, height: 26, borderRadius: 5, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#6B7280" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+          {loading && <div style={{ fontSize: 12, color: "#9CA3AF" }}>Loading…</div>}
+          {err && <div style={{ padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 12, color: "#991B1B", marginBottom: 12 }}>{err}</div>}
+
+          {!loading && !err && data && categories.map(cat => {
+            const items = data[cat.key] || [];
+            return (
+              <div key={cat.key} style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: cat.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8, paddingBottom: 6, borderBottom: `2px solid ${cat.color}` }}>
+                  {cat.label} <span style={{ fontWeight: 500, color: "#9CA3AF" }}>({items.length})</span>
+                </div>
+                {items.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#9CA3AF", fontStyle: "italic" }}>No rules configured for this category yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {items.map((item, i) => (
+                      <div key={i} style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 6, background: "#F9FAFB" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{item.name}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: item.bleachType === "debit" ? "#16A34A" : cat.color, whiteSpace: "nowrap" }}>
+                            {item.bleachType === "debit" ? "+" : "−"}{item.points} pts
+                          </div>
+                        </div>
+                        {item.description && <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4, lineHeight: 1.5 }}>{item.description}</div>}
+                        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                          {item.severity && <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#EEF2FF", color: "#4338CA", textTransform: "capitalize" }}>{item.severity.replace("_", " ")}</span>}
+                          {item.department && <span style={{ fontSize: 9, color: "#9CA3AF" }}>{item.department}</span>}
+                          {item.folder && item.folder !== "Uncategorized" && <span style={{ fontSize: 9, color: "#9CA3AF" }}>{item.folder}</span>}
+                          {item.source === "system" && <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#F3F4F6", color: "#6B7280" }}>System rule</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function SopForm({ editing, role, myDept, employeeId, employeeName, folders, allDepts, onClose, onSaved }) {
   const [name, setName] = useState(editing?.name || "");
   const [points, setPoints] = useState(editing?.points || "");
@@ -1297,6 +1363,9 @@ function TodayWorkBreakdown({ employeeId }) {
   const { role: myRole } = useCoworkAuth();
   const [logs, setLogs] = useState(null);
   const [officeSchedule, setOfficeSchedule] = useState(null);
+  const [breaks, setBreaks] = useState([]);
+  const [firstStartMsToday, setFirstStartMsToday] = useState(null);
+  const [liveSession, setLiveSession] = useState(null);
   const [cfg, setCfg] = useState(null);
   const [accum, setAccum] = useState(null);
   const [showRules, setShowRules] = useState(false);
@@ -1330,10 +1399,13 @@ function TodayWorkBreakdown({ employeeId }) {
 
   const loadAll = () => {
     if (!employeeId) return;
-    // Load office schedule
+    // Load office schedule + breaks (same doc, same read)
     getDoc(doc(firebaseDb, "cowork_settings", "office"))
-      .then(snap => { setOfficeSchedule(snap.exists() ? (snap.data().schedule || null) : null); })
-      .catch(e => { console.error("[TodayWorkBreakdown] office schedule fetch failed:", e.message); setOfficeSchedule(null); });
+      .then(snap => {
+        setOfficeSchedule(snap.exists() ? (snap.data().schedule || null) : null);
+        setBreaks(snap.exists() ? (snap.data().breaks || []) : []);
+      })
+      .catch(e => { console.error("[TodayWorkBreakdown] office schedule fetch failed:", e.message); setOfficeSchedule(null); setBreaks([]); });
     // Load SOP config
     getDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"))
       .then(snap => { setCfg(snap.exists() ? snap.data() : {}); })
@@ -1350,7 +1422,10 @@ function TodayWorkBreakdown({ employeeId }) {
       } catch (e) { console.warn("[dashboard] accum fetch:", e.message); }
     })();
 
-    // Load today's work commits
+    // Load today's work commits — REAL per-task deltas, not raw secondsWorked.
+    // secondsWorked on each commit is cumulative for that task, not an
+    // increment since the last commit for it — same bug already fixed
+    // server-side in timerSop.service.js, fixed here the same way.
     (async () => {
       try {
         const { collection, getDocs } = await import("firebase/firestore");
@@ -1361,21 +1436,85 @@ function TodayWorkBreakdown({ employeeId }) {
         const todayEndUTC = todayStartUTC + 24 * 60 * 60 * 1000;
 
         const snap = await getDocs(collection(firebaseDb, "cowork_work_commits", employeeId, "logs"));
-        const dayLogs = [];
+        const parsed = [];
         snap.docs.forEach(d => {
           const data = d.data();
           const stoppedMs = data.stoppedAt?.seconds
             ? data.stoppedAt.seconds * 1000
             : data.stoppedAt ? new Date(data.stoppedAt).getTime() : null;
           if (!stoppedMs) return;
-          const workedSecs = Number(data.secondsWorked) || 0;
-          if (workedSecs <= 0) return;
-          const startMs = stoppedMs - workedSecs * 1000;
-          if (startMs > todayEndUTC || stoppedMs < todayStartUTC) return;
-          dayLogs.push({ startMs: Math.max(startMs, todayStartUTC), endMs: Math.min(stoppedMs, todayEndUTC) });
+          const cumulativeSecs = Number(data.secondsWorked) || 0;
+          if (cumulativeSecs <= 0) return;
+          parsed.push({ taskId: data.taskId || "_no_task", stoppedMs, cumulativeSecs });
+        });
+
+        const byTask = new Map();
+        parsed.forEach(p => {
+          if (!byTask.has(p.taskId)) byTask.set(p.taskId, []);
+          byTask.get(p.taskId).push(p);
+        });
+
+        const dayLogs = [];
+        byTask.forEach(entries => {
+          entries.sort((a, b) => a.stoppedMs - b.stoppedMs);
+          let prevCumulative = 0;
+          entries.forEach(e => {
+            let realSecs;
+            if (e.cumulativeSecs > prevCumulative) realSecs = e.cumulativeSecs - prevCumulative;
+            else if (e.cumulativeSecs < prevCumulative) realSecs = e.cumulativeSecs;
+            else realSecs = 0;
+            prevCumulative = e.cumulativeSecs;
+            if (realSecs <= 0) return;
+
+            const startMs = e.stoppedMs - realSecs * 1000;
+            if (startMs > todayEndUTC || e.stoppedMs < todayStartUTC) return;
+            dayLogs.push({ startMs: Math.max(startMs, todayStartUTC), endMs: Math.min(e.stoppedMs, todayEndUTC) });
+          });
         });
         setLogs(dayLogs);
       } catch (e) { setLogs([]); }
+    })();
+
+    // Load today's first "start" event — opens the personalized window,
+    // same source (cowork_timer_events) the backend reads for this.
+    (async () => {
+      try {
+        const { collection, getDocs } = await import("firebase/firestore");
+        const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+        const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+        const todayStr = nowIST.toISOString().split("T")[0];
+        const todayStartUTC = new Date(todayStr + "T00:00:00+05:30").getTime();
+        const todayEndUTC = todayStartUTC + 24 * 60 * 60 * 1000;
+
+        const snap = await getDocs(collection(firebaseDb, "cowork_timer_events", employeeId, "logs"));
+        let earliest = null;
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.type !== "start") return;
+          const atMs = data.at?.seconds ? data.at.seconds * 1000 : data.at ? new Date(data.at).getTime() : null;
+          if (!atMs || atMs < todayStartUTC || atMs >= todayEndUTC) return;
+          if (earliest == null || atMs < earliest) earliest = atMs;
+        });
+        setFirstStartMsToday(earliest);
+      } catch (e) { setFirstStartMsToday(null); }
+    })();
+
+    // Load the currently-active live session, if any. Committed work-commits
+    // only cover time through the LAST pause — if a task has been running
+    // continuously since before that (or since before this feature existed),
+    // none of it exists yet in commits or the event log. Without this,
+    // "today worked" stays stuck at 0 the entire time someone is mid-task.
+    (async () => {
+      try {
+        const { collection, getDocs } = await import("firebase/firestore");
+        const snap = await getDocs(collection(firebaseDb, "cowork_task_timers", employeeId, "sessions"));
+        let active = null;
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.isActive && data.lastStartTime) active = data;
+        });
+        setLiveSession(active);
+      } catch (e) { setLiveSession(null); }
     })();
   };
 
@@ -1383,8 +1522,18 @@ function TodayWorkBreakdown({ employeeId }) {
 
   const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
-  // Total worked today — this is the ONLY number points are based on.
-  const totalMs = (logs || []).reduce((sum, { startMs, endMs }) => sum + Math.max(0, endMs - startMs), 0);
+  // Total worked today — committed segments plus whatever's been running
+  // since the last pause but not committed yet. Without this, totalMs stays
+  // 0 the entire time someone is actively mid-task and hasn't paused since.
+  const todayStartUTCForLive = (() => {
+    const IST = 5.5 * 60 * 60 * 1000;
+    const todayStr = new Date(Date.now() + IST).toISOString().split("T")[0];
+    return new Date(todayStr + "T00:00:00+05:30").getTime();
+  })();
+  const liveElapsedMs = liveSession?.lastStartTime
+    ? Math.max(0, Date.now() - Math.max(liveSession.lastStartTime, todayStartUTCForLive))
+    : 0;
+  const totalMs = (logs || []).reduce((sum, { startMs, endMs }) => sum + Math.max(0, endMs - startMs), 0) + liveElapsedMs;
 
   // IST-safe date helpers — do NOT use new Date().getDay()/.setHours() here.
   // Those read the BROWSER's local system timezone. On any device not set
@@ -1420,8 +1569,56 @@ function TodayWorkBreakdown({ employeeId }) {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
   const fmtHrs = h => h >= 1 ? `${(+h.toFixed(2))}h` : `${Math.round(h * 60)}min`;
+  const fmtClock = ms => {
+    const d = new Date(ms + 5.5 * 60 * 60 * 1000);
+    const h = d.getUTCHours(), m = d.getUTCMinutes();
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+  };
 
-  const minHrs = parseFloat(cfg?.timerMinDailyHrs) || 0;
+  const dailyMinPct = parseFloat(cfg?.timerMinDailyPct) || 0;
+  const todayDateStr = istDateStr(Date.now());
+  const todayDayCfg = officeSchedule?.[DAY_KEYS[istDow(Date.now())]] || null;
+
+  // Event log is the real source once it exists. If it has nothing for
+  // today — a session still running from before this logging existed —
+  // fall back to that live session's own start, so "no login yet" doesn't
+  // show while someone is visibly, actively working right now.
+  const effectiveFirstStartMsToday = firstStartMsToday != null
+    ? firstStartMsToday
+    : (liveSession?.lastStartTime && liveSession.lastStartTime >= todayStartUTCForLive ? liveSession.lastStartTime : null);
+
+  const officeStartMsToday = todayDayCfg ? Date.parse(`${todayDateStr}T${todayDayCfg.inTime}:00+05:30`) : null;
+  const officeEndMsToday = todayDayCfg ? Date.parse(`${todayDateStr}T${todayDayCfg.outTime}:00+05:30`) : null;
+  const windowStartMsToday = (officeStartMsToday != null)
+    ? (effectiveFirstStartMsToday != null ? Math.max(officeStartMsToday, Math.min(effectiveFirstStartMsToday, officeEndMsToday)) : officeStartMsToday)
+    : null;
+
+  const breakMsInWindowToday = (() => {
+    if (windowStartMsToday == null || !breaks?.length) return 0;
+    let ms = 0;
+    breaks.forEach(b => {
+      const bStart = Date.parse(`${todayDateStr}T${b.start}:00+05:30`);
+      const bEnd = Date.parse(`${todayDateStr}T${b.end}:00+05:30`);
+      if (bEnd <= bStart) return;
+      const ovStart = Math.max(windowStartMsToday, bStart), ovEnd = Math.min(officeEndMsToday, bEnd);
+      if (ovEnd > ovStart) ms += (ovEnd - ovStart);
+    });
+    return ms;
+  })();
+  const expectedHrsToday = windowStartMsToday != null
+    ? Math.max(0, (officeEndMsToday - windowStartMsToday) / 3600000 - breakMsInWindowToday / 3600000)
+    : 0;
+
+  const minHrs = dailyMinPct > 0 ? (dailyMinPct / 100) * expectedHrsToday : (parseFloat(cfg?.timerMinDailyHrs) || 0);
+
+  const targetBreakdown = dailyMinPct > 0 && todayDayCfg ? (
+    effectiveFirstStartMsToday != null
+      ? `${dailyMinPct}% of your window today — ${fmtClock(windowStartMsToday)} login to ${fmtClock(officeEndMsToday)} close (${fmtHrs((officeEndMsToday - windowStartMsToday) / 3600000)})${breakMsInWindowToday > 0 ? `, minus ${fmtHrs(breakMsInWindowToday / 3600000)} break` : ""} = ${fmtHrs(expectedHrsToday)} × ${dailyMinPct}% = ${fmtHrs(minHrs)}`
+      : `${dailyMinPct}% of a full office day (no login yet today) — will personalize to your actual start time once you begin your first task.`
+  ) : null;
+
   const defThresh = parseFloat(cfg?.timerDeficitThresholdHrs) || 0;
   const defPts = parseFloat(cfg?.timerDeficitPoints) || 0;
   const otThresh = parseFloat(cfg?.timerOvertimeThresholdHrs) || 0;
@@ -1472,7 +1669,7 @@ function TodayWorkBreakdown({ employeeId }) {
       </div>
     );
   }
-  if (!minHrs && !defThresh && !otThresh) return null; // genuinely not configured — nothing to show
+  if (!minHrs && !dailyMinPct && !defThresh && !otThresh) return null; // genuinely not configured — nothing to show
 
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
   const met = minHrs > 0 && workedHrs >= minHrs;
@@ -1508,9 +1705,16 @@ function TodayWorkBreakdown({ employeeId }) {
             {fmtMs(totalMs)} <span style={{ color: "#9CA3AF", fontWeight: 500 }}>of</span> {fmtHrs(minHrs)}
           </span>
         </div>
+
         <div style={{ height: 10, background: "#F1F5F9", borderRadius: 99, overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${donePct}%`, background: met ? "#16A34A" : "#F59E0B", borderRadius: 99, transition: "width 0.3s" }} />
         </div>
+
+        {targetBreakdown && !isOffToday && (
+          <div style={{ marginTop: 6, fontSize: 10, color: "#6B7280", lineHeight: 1.5 }}>
+            🧮 {targetBreakdown}
+          </div>
+        )}
 
         {/* Status line — one plain sentence saying exactly where you stand */}
         {isOffToday ? (
@@ -1577,7 +1781,9 @@ function TodayWorkBreakdown({ employeeId }) {
         </button>
         {showRules && (
           <div style={{ padding: "4px 14px 12px", fontSize: 11, color: "#4B5563", lineHeight: 1.8, background: "#FAFAFA" }}>
-            1. Your daily target is <strong>{fmtHrs(minHrs)}</strong> of timer work (set by admin).<br />
+            1. Your daily target is {dailyMinPct > 0
+              ? <>{dailyMinPct}% <strong>of your available hours</strong> that day — your online-to-close window, minus breaks. Set by admin.</>
+              : <><strong>{fmtHrs(minHrs)}</strong> of timer work (set by admin).</>}<br />
             2. Day ends, worked <strong>less than target</strong> → the missing time is added to your <strong style={{ color: "#DC2626" }}>Deficit Counter</strong>.<br />
             3. Time worked <strong>after office closing hour</strong> (and any work on weekly-off days) is added to your <strong style={{ color: "#16A34A" }}>Overtime Counter</strong>. Both can happen on the same day.<br />
             4. Deficit Counter reaches {fmtHrs(defThresh)} → <strong style={{ color: "#DC2626" }}>−{defPts} pts</strong>. Overtime Counter reaches {fmtHrs(otThresh)} → <strong style={{ color: "#16A34A" }}>+{otPts} pts</strong>. Both show in your history below with the reason.<br />
@@ -1640,11 +1846,12 @@ function TimerSopRulesPanel({ employeeId }) {
 
   if (!cfg) return null;
   const minHrs = parseFloat(cfg.timerMinDailyHrs) || 0;
+  const dailyMinPct = parseFloat(cfg.timerMinDailyPct) || 0;
   const defThresh = parseFloat(cfg.timerDeficitThresholdHrs) || 0;
   const defPts = parseFloat(cfg.timerDeficitPoints) || 0;
   const otThresh = parseFloat(cfg.timerOvertimeThresholdHrs) || 0;
   const otPts = parseFloat(cfg.timerOvertimePoints) || 0;
-  if (!minHrs && !defThresh && !otThresh) return null;
+  if (!minHrs && !dailyMinPct && !defThresh && !otThresh) return null;
 
   const defAccum = parseFloat(accum?.timerDeficitAccumHrs) || 0;
   const otAccum = parseFloat(accum?.timerOvertimeAccumHrs) || 0;
@@ -1667,13 +1874,13 @@ function TimerSopRulesPanel({ employeeId }) {
       </div>
       <div style={{ display: "flex", gap: 0, background: "#fff" }}>
         {/* Daily Minimum */}
-        {minHrs > 0 && (
+        {(minHrs > 0 || dailyMinPct > 0) && (
           <div style={{ flex: 1, padding: "10px 14px", borderRight: "1px solid #F1F5F9" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
               Daily Minimum
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#0D9488" }}>{fmtHrs(minHrs)}</div>
-            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>required per day</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#0D9488" }}>{dailyMinPct > 0 ? `${dailyMinPct}%` : fmtHrs(minHrs)}</div>
+            <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>{dailyMinPct > 0 ? "of your available hours each day" : "required per day"}</div>
           </div>
         )}
         {/* Deficit Rule */}
@@ -2429,7 +2636,10 @@ export default function SopPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingSop, setEditingSop] = useState(null);
   const [bleachOpen, setBleachOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [allSopsOpen, setAllSopsOpen] = useState(false);
+  const [allSopsData, setAllSopsData] = useState(null);
+  const [allSopsLoading, setAllSopsLoading] = useState(false);
+  const [allSopsErr, setAllSopsErr] = useState(""); const [settingsOpen, setSettingsOpen] = useState(false);
   const [perfOpen, setPerfOpen] = useState(false);
   const [perfThreshold, setPerfThreshold] = useState(50);
 
@@ -2605,6 +2815,19 @@ export default function SopPage() {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>
               Managers
             </Btn>
+            <Btn outline onClick={async () => {
+              setAllSopsOpen(true);
+              setAllSopsLoading(true);
+              setAllSopsErr("");
+              try {
+                const data = await fetchAllSopCategories();
+                setAllSopsData(data);
+              } catch (e) {
+                setAllSopsErr(e.message || "Failed to load.");
+              } finally {
+                setAllSopsLoading(false);
+              }
+            }}>All SOPs</Btn>
             {(role === "ceo" || role === "tl") && (
               <Btn red onClick={() => setBleachOpen(true)}>SOP Breach</Btn>
             )}
@@ -2843,14 +3066,22 @@ export default function SopPage() {
         />
       )}
 
-      {bleachOpen && (
-        <BleachPanel
-          role={role} employees={bleachableEmps}
-          approvedSops={approvedSops} folders={folders}
-          employeeId={employeeId} employeeName={employeeName}
-          recheckList={recheckList}
-          onClose={() => setBleachOpen(false)}
+      {allSopsOpen && (
+        <AllSopsPanel
+          data={allSopsData}
+          loading={allSopsLoading}
+          err={allSopsErr}
+          onClose={() => setAllSopsOpen(false)}
         />
+      )}
+
+      {bleachOpen && (<BleachPanel
+        role={role} employees={bleachableEmps}
+        approvedSops={approvedSops} folders={folders}
+        employeeId={employeeId} employeeName={employeeName}
+        recheckList={recheckList}
+        onClose={() => setBleachOpen(false)}
+      />
       )}
 
       {mgrOpen && (

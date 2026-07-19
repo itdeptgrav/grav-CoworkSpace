@@ -8,10 +8,11 @@ import { firebaseDb } from "../../../lib/coworkFirebase";
 import { collection, doc, setDoc, updateDoc, serverTimestamp, increment, getDocs, query, where, orderBy, getDoc } from "firebase/firestore";
 
 
-const emptySubtask = () => ({
-  title: "",
-  description: "",
+const emptySubtask = (parentTask = null) => ({
+  title: parentTask?.title || "",
+  description: parentTask?.description || "",
   notes: "",
+  requirements: Array.isArray(parentTask?.requirements) ? [...parentTask.requirements] : [],
   assigneeIds: [],
   hasTimer: true,
   deadline: "",
@@ -58,7 +59,7 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
     <div>
       <label style={_lbl}>Time Tracking</label>
       <div style={{ display: "flex", gap: 6, marginBottom: hasTimer ? 0 : 10, alignItems: "flex-end" }}>
-        {[{ val: true, label: "Timer — Start / Pause" }, { val: false, label: "Deadline — Fixed Date" }].map(opt => (
+        {[{ val: true, label: "Own Department" }, { val: false, label: "Other Department" }].map(opt => (
           <div key={String(opt.val)} style={{ flex: 1 }}>
             {opt.val === false && (
               <div style={{ padding: "4px 6px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 5, fontSize: 9, color: "#92400E", marginBottom: 4, lineHeight: 1.3, textAlign: "center" }}>
@@ -315,7 +316,34 @@ export default function CreateTaskModal({
   const setGC = (k, v) => setGoalConfig(prev => ({ ...prev, [k]: v }));
 
   // ── Multi-mode state ──
-  const [subtaskRows, setSubtaskRows] = useState([emptySubtask()]);
+  const [subtaskRows, setSubtaskRows] = useState([emptySubtask(parentTask)]);
+  const [resolvedParentTask, setResolvedParentTask] = useState(parentTask);
+
+  useEffect(() => {
+    setResolvedParentTask(parentTask);
+    if (!parentTask?.taskId) return;
+    // The list/tree this "Add Subtask" click came from may only carry a
+    // lightweight summary — title, status, assignees — not the full
+    // description/notes. Fetch the real document so pre-fill isn't silently
+    // empty just because of which button was clicked to get here.
+    getDoc(doc(firebaseDb, "cowork_tasks", parentTask.taskId))
+      .then(snap => { if (snap.exists()) setResolvedParentTask({ taskId: parentTask.taskId, ...snap.data() }); })
+      .catch(() => { });
+  }, [parentTask?.taskId]);
+
+  // Backfill once the full parent task resolves — only fields still blank,
+  // never overwriting something the person already started typing meanwhile.
+  // Each field fills independently — nothing gets merged into another.
+  useEffect(() => {
+    if (!resolvedParentTask) return;
+    setSubtaskRows(prev => prev.map(row => {
+      const patch = {};
+      if (!row.title && resolvedParentTask.title) patch.title = resolvedParentTask.title;
+      if (!row.description && resolvedParentTask.description) patch.description = resolvedParentTask.description;
+      if ((!row.requirements || row.requirements.length === 0) && Array.isArray(resolvedParentTask.requirements) && resolvedParentTask.requirements.length > 0) patch.requirements = [...resolvedParentTask.requirements];
+      return Object.keys(patch).length ? { ...row, ...patch } : row;
+    }));
+  }, [resolvedParentTask]);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
   const [rowUploading, setRowUploading] = useState([false]);
   const rowImageInputRef = useRef(null);
@@ -333,7 +361,7 @@ export default function CreateTaskModal({
   };
 
   const addSubtaskRow = () => {
-    setSubtaskRows(prev => [...prev, emptySubtask()]);
+    setSubtaskRows(prev => [...prev, emptySubtask(resolvedParentTask)]);
     setRowUploading(prev => [...prev, false]);
     setActiveRowIndex(subtaskRows.length);
   };

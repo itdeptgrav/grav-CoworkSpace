@@ -1349,30 +1349,22 @@ export default function DetailBody({
                     Re-submit for Review
                   </ActionBtn>
                 )}
-                {/* ── Extension zone calculation (clock-time proxy for display) ── */}
+                {/* ── Extension zone calculation — anchored to task.dueDate, same
+                     wall-clock source of truth as remainingSecs/isTimerExceeded
+                     above. Previously used requested-work-hours as the
+                     denominator, which drifts from the actual due date. ── */}
                 {(() => {
                   const _createdMs = task.createdAtISO
                     ? new Date(task.createdAtISO).getTime()
                     : task.createdAt?.seconds
                       ? task.createdAt.seconds * 1000
                       : null;
-                  const _timerWindowSecs = Number(task.deadlineWindowSecs)
-                    || Number(task.senderTimerWindowSecs)
-                    || (Number(task.etcHours) * 3600)
-                    || 0;
-                  const _window = (task.hasTimer === false && task.fixedDeadline && _createdMs)
-                    ? (new Date(task.fixedDeadline).getTime() - _createdMs)
-                    : _timerWindowSecs > 0
-                      ? _timerWindowSecs * 1000
-                      : (task.etcHours || 0) * 3600000;
-                  const _workedMs = (workedSecs || 0) * 1000;
-                  const _elapsed = _timerWindowSecs > 0
-                    ? Math.min((_workedMs / (_timerWindowSecs * 1000)) * 100, 100)
-                    : (_window > 0 && _createdMs)
-                      ? Math.min(((Date.now() - _createdMs) / _window) * 100, 100)
-                      : 0;
+                  const _dueMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
+                  const _totalWindowMs = (_dueMs && _createdMs) ? (_dueMs - _createdMs) : 0;
+                  const _elapsed = _totalWindowMs > 0
+                    ? Math.min(((Date.now() - _createdMs) / _totalWindowMs) * 100, 100)
+                    : 0;
                   window.__extElapsedPct = _elapsed;
-                  // Also write to a data attribute on the DOM for reliability
                   if (typeof document !== "undefined") {
                     document.documentElement.setAttribute("data-ext-elapsed", String(_elapsed));
                   }
