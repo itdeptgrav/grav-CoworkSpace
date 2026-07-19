@@ -12,7 +12,7 @@ import DeadlineDecodePanel from "./DeadlineDecodePanel";
 import { useDutyStatus } from "../../../hooks/useDutyStatus";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 import { firebaseDb } from "../../../lib/coworkFirebase";
-import { addWorkingSecs } from "../../../lib/officeDueDate";
+import { addWorkingSecs, workingSecsBetween } from "../../../lib/officeDueDate";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
@@ -1330,13 +1330,13 @@ export default function DetailBody({
                 )}
 
                 {/* ── EMPLOYEE: in progress actions ── */}
-                {/* {isAssignee && status === "in_progress" && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
+                {isAssignee && status === "in_progress" && !task.isRepeat && !task.isThirdParty && !task.isGoal && (
                   <>
                     <ActionBtn variant="outline" onClick={() => handleAction("report")}>
                       Submit Daily Report
                     </ActionBtn>
                   </>
-                )} */}
+                )}
 
                 {/* ── EMPLOYEE: submit for review ── */}
                 {isAssignee && isStarted && !task.isGoal && !task.isThirdParty && !task.isRepeat && !compStatus && (
@@ -1360,10 +1360,35 @@ export default function DetailBody({
                       ? task.createdAt.seconds * 1000
                       : null;
                   const _dueMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
-                  const _totalWindowMs = (_dueMs && _createdMs) ? (_dueMs - _createdMs) : 0;
-                  const _elapsed = _totalWindowMs > 0
-                    ? Math.min(((Date.now() - _createdMs) / _totalWindowMs) * 100, 100)
-                    : 0;
+                  // Office-hours-aware elapsed — WORKING seconds on both sides,
+                  // so nights/breaks/off-days move neither numerator nor
+                  // denominator. Schedule is fetched once and cached on window;
+                  // until it arrives we fall back to the old wall-clock ratio
+                  // (the next render corrects it).
+                  if (typeof window !== "undefined" && !window.__officeSchedCache && !window.__officeSchedLoading) {
+                    window.__officeSchedLoading = true;
+                    (async () => {
+                      try {
+                        const { getDoc, doc } = await import("firebase/firestore");
+                        const _s = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
+                        window.__officeSchedCache = _s.exists()
+                          ? { schedule: _s.data().schedule || null, breaks: _s.data().breaks || [] }
+                          : { schedule: null, breaks: [] };
+                      } catch (_) { window.__officeSchedCache = { schedule: null, breaks: [] }; }
+                    })();
+                  }
+                  const _oc = (typeof window !== "undefined" && window.__officeSchedCache) || null;
+                  let _elapsed = 0;
+                  if (_dueMs && _createdMs) {
+                    if (_oc && _oc.schedule) {
+                      const _tot = workingSecsBetween(_createdMs, _dueMs, _oc.schedule, null, _oc.breaks);
+                      const _don = workingSecsBetween(_createdMs, Date.now(), _oc.schedule, null, _oc.breaks);
+                      _elapsed = _tot > 0 ? Math.min((_don / _tot) * 100, 100) : 0;
+                    } else {
+                      const _totalWindowMs = _dueMs - _createdMs;
+                      _elapsed = _totalWindowMs > 0 ? Math.min(((Date.now() - _createdMs) / _totalWindowMs) * 100, 100) : 0;
+                    }
+                  }
                   window.__extElapsedPct = _elapsed;
                   if (typeof document !== "undefined") {
                     document.documentElement.setAttribute("data-ext-elapsed", String(_elapsed));

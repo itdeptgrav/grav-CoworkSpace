@@ -20,7 +20,7 @@ import CoworkingShell from "../../../../components/coworking/layout/CoworkingShe
 import MessageBubble from "../../../../components/coworking/messaging/MessageBubble";
 import MediaMessageInput from "../../../../components/coworking/messaging/MediaMessageInput";
 import { GwAvatar, GwSpinner, GwEmpty } from "../../../../components/coworking/shared/CoworkShared";
-import { firebaseDb } from "../../../../lib/coworkFirebase";
+import { firebaseDb, getCoworkToken } from "../../../../lib/coworkFirebase";
 import { uploadImage, uploadVoice, uploadPDF } from "../../../../lib/mediaUploadApi";
 import DMCallManager, { triggerCall } from "../../../../components/coworking/messaging/DMCallManager";
 
@@ -245,6 +245,22 @@ export default function ConversationPage() {
         },
         updatedAt: serverTimestamp(),
       });
+
+      // Push-notify the receiver. This page writes Firestore directly, so the
+      // backend never sees the message — without this call, DMs sent from this
+      // screen produce NO FCM push / email (the split-view messages page
+      // already fires the same endpoint). Fire-and-forget: never blocks send.
+      (async () => {
+        try {
+          const _tok = await getCoworkToken();
+          const _base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+          await fetch(`${_base}/cowork/direct-message/notify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${_tok}` },
+            body: JSON.stringify({ toEmployeeId: otherEmpId, text: text || "", messageType: resolvedType }),
+          });
+        } catch (_) { }
+      })();
 
       setMessages(prev => prev.filter(m => m.messageId !== tempId));
       pendingMapRef.current.delete(tempId);
