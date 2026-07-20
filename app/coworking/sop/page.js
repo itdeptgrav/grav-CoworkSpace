@@ -156,9 +156,13 @@ function RecheckBadge({ label, color, bg, border }) {
 // Backward compat: old entries with isCredit:true were the goal reward entries
 
 function isReward(b) {
-  if (b.isCredit === false) return false;
+  // bleachType is the modern authoritative field — it must win. The old
+  // "if (b.isCredit === false) return false" short-circuit broke this:
+  // the schema defaults isCredit:false on EVERY entry, so timer-engine
+  // rewards (bleachType:"debit", isCredit untouched → false) rendered as
+  // red violations even though the backend scored them correctly.
   if (b.bleachType) return b.bleachType === "debit";
-  return b.isCredit === true;
+  return b.isCredit === true; // legacy entries without bleachType
 }
 
 // ── SOP Settings Panel ────────────────────────────────────────────────────────
@@ -1320,7 +1324,7 @@ function BleachPanel({ role, employees, approvedSops, folders, employeeId, emplo
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3, flexWrap: "wrap" }}>
                               <span style={{ fontSize: 10, fontWeight: 600, color: reward ? "#15803D" : "#991B1B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                {reward ? "Goal Reward" : "SOP Violation"}
+                                {reward ? (b.sopName || "Reward") : "SOP Violation"}
                               </span>
                               {b.folderName && b.folderName !== "Uncategorized" && (
                                 <span style={{ fontSize: 10, color: C.textMuted }}>{b.folderName}</span>
@@ -2127,7 +2131,7 @@ function OwnHistory({ employeeId }) {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 10, fontWeight: 600, color: reward ? "#15803D" : "#991B1B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                              {reward ? "Goal Reward" : "SOP Violation"}
+                              {reward ? (b.sopName || "Reward") : "SOP Violation"}
                             </span>
                             {b.folderName && b.folderName !== "Uncategorized" && (
                               <span style={{ fontSize: 10, color: C.textMuted }}>{b.folderName}</span>
