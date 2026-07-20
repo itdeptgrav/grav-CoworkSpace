@@ -49,7 +49,7 @@ export default function CoworkingLayout({ children }) {
     return (
         <>
             <TopLoadingBar />
-            <WelcomeCelebration />
+            
             {employeeId && (
                 <GlobalCallReceiver employeeId={employeeId} employeeName={employeeName || ""} />
             )}
