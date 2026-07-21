@@ -3240,6 +3240,14 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 .cw-duty-emreq-reason { font-size: 11.5px; color: #667085; }
 
 
+.cw-duty-mode-grid { flex-wrap: wrap; }
+.cw-duty-btn.is-break .cw-duty-dot { background: #0E7490; }
+.cw-duty-live-box.is-break { background: #ECFEFF; border-color: #A5F3FC; }
+.cw-duty-mode-btn-break { border-color: #A5F3FC; color: #0E7490; }
+.cw-duty-mode-btn-break:hover { background: #ECFEFF; }
+.cw-duty-history-tag.break { color: #0E7490; background: #ECFEFF; }
+.cw-topbar-break { background: #ECFEFF; border-bottom-color: #A5F3FC; transition: background 0.3s ease, border-color 0.3s ease; }
+
       `}</style>
 
       <div className="cw-shell">

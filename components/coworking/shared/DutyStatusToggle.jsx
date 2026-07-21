@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { requestEmergencyApproval } from "../../../lib/emergencyApproval";
+import { requestEmergencyApproval, shiftOngoingTaskDeadlines } from "../../../lib/emergencyApproval";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const DAY_KEYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const DAY_KEYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 const TERMINAL_STATUSES = ["done", "cancelled", "tl_final_approved", "ceo_approved"];
 
 function istDow(ms) { return new Date(ms + IST_OFFSET_MS).getUTCDay(); }
@@ -66,14 +66,39 @@ async function applyPendingEmergencyApproval(employeeId, employeeName, statusRef
   const snap = await getDoc(statusRef);
   const data = snap.exists() ? snap.data() : {};
   const pendingMs = Number(data.pendingEmergencyGapMs) || 0;
-  if (pendingMs <= 0) return { requested: false };
+  if (pendingMs <= 0) return;
   const pendingReason = data.pendingEmergencyReason || null;
   await updateDoc(statusRef, { pendingEmergencyGapMs: null, pendingEmergencyReason: null });
   return requestEmergencyApproval(employeeId, employeeName, pendingMs, pendingReason);
 }
 
+async function applyPendingBreakGap(employeeId, statusRef) {
+  const { getDoc, updateDoc } = await import("firebase/firestore");
+  const snap = await getDoc(statusRef);
+  const pendingMs = snap.exists() ? Number(snap.data().pendingBreakGapMs) || 0 : 0;
+  if (pendingMs <= 0) return;
+  await updateDoc(statusRef, { pendingBreakGapMs: null });
+  await shiftOngoingTaskDeadlines(employeeId, pendingMs);
+}
+
+/** Reads the daily break-time cap from Office Settings. Defaults to 60 min
+ * if unset — matches the input's default in the Settings page. */
+async function getMaxBreakSecs() {
+  try {
+    const { firebaseDb } = await import("../../../lib/coworkFirebase");
+    const { doc, getDoc } = await import("firebase/firestore");
+    const snap = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
+    const mins = snap.exists() ? Number(snap.data().maxBreakMinutesPerDay) : null;
+    return (mins && mins > 0) ? mins * 60 : 3600;
+  } catch (e) {
+    console.warn("[break-mode] could not read max break minutes, defaulting to 60:", e.message);
+    return 3600;
+  }
+}
+
 async function setDutyMode(employeeId, targetMode, opts = {}) {
   const employeeName = opts.employeeName || employeeId;
+
   if (targetMode === "emergency" && !opts.reason?.trim()) {
     throw new Error("A reason is required to enter Emergency Mode.");
   }
@@ -86,6 +111,7 @@ async function setDutyMode(employeeId, targetMode, opts = {}) {
   const prev = prevSnap.exists() ? prevSnap.data() : {};
   const prevMode = prev.mode || (prev.isOnline ? "online" : "offline");
   const now = Date.now();
+  const todayKey = new Date(now).toISOString().slice(0, 10); // matches dailyHours' existing (UTC) convention
 
   let sessionHours = 0;
   let dayKey = null;
@@ -105,48 +131,81 @@ async function setDutyMode(employeeId, targetMode, opts = {}) {
     emergencyReason: targetMode === "emergency" ? opts.reason.trim() : null,
   };
 
+  // ── Closing out EMERGENCY — leaving it for ANYTHING else (Online, Offline,
+  // or now Break too), not just the two cases handled before. ──
   let directEmergencyGapMs = 0;
   let directEmergencyReason = null;
-  if (prevMode === "emergency" && targetMode === "offline") {
-    const gap = now - (Number(prev.emergencyStartedAtMs) || now);
-    patch.pendingEmergencyGapMs = gap > 0 ? gap : null;
-    // Captured NOW, before patch below wipes emergencyReason to null —
-    // otherwise the reason would be lost by the time the next Online
-    // transition tries to build the approval request from it.
-    patch.pendingEmergencyReason = prev.emergencyReason || null;
-    patch.emergencyStartedAtMs = null;
-  } else if (prevMode === "emergency" && targetMode === "online") {
+  if (prevMode === "emergency" && targetMode === "online") {
     directEmergencyGapMs = now - (Number(prev.emergencyStartedAtMs) || now);
     directEmergencyReason = prev.emergencyReason || null;
     patch.emergencyStartedAtMs = null;
-  } else if (targetMode === "emergency") {
+  } else if (prevMode === "emergency" && targetMode !== "online") {
+    const gap = now - (Number(prev.emergencyStartedAtMs) || now);
+    patch.pendingEmergencyGapMs = gap > 0 ? gap : null;
+    patch.pendingEmergencyReason = prev.emergencyReason || null;
+    patch.emergencyStartedAtMs = null;
+  }
+
+  // ── Closing out BREAK — the daily cap is evaluated NOW, against whatever
+  // "today" is at this exact moment, not deferred to whenever they next log
+  // in (which could be a different calendar day entirely). ──
+  let directBreakAppliedMs = 0;
+  let breakIncrementSecs = 0;
+  if (prevMode === "break") {
+    const sessionSecs = Math.max(0, (now - (Number(prev.breakStartedAtMs) || now)) / 1000);
+    breakIncrementSecs = sessionSecs;
+    const usedBeforeToday = Number(prev.dailyBreakSeconds?.[todayKey]) || 0;
+    const maxSecs = await getMaxBreakSecs();
+    const remainingBudget = Math.max(0, maxSecs - usedBeforeToday);
+    const appliedSecs = Math.min(sessionSecs, remainingBudget);
+    patch.breakStartedAtMs = null;
+    if (targetMode === "online") {
+      directBreakAppliedMs = appliedSecs * 1000;
+    } else {
+      patch.pendingBreakGapMs = appliedSecs > 0 ? appliedSecs * 1000 : null;
+    }
+  }
+
+  if (targetMode === "emergency") {
     patch.emergencyStartedAtMs = now;
+  } else if (targetMode === "break") {
+    patch.breakStartedAtMs = now;
   }
 
   await setDoc(ref, patch, { merge: true });
 
-  if (targetMode === "emergency") {
-    console.log("[emergency-pause] entering Emergency Mode — attempting to pause any running timer");
+  // Real, uncapped break time used today — for honest reporting, independent
+  // of how much of it actually got applied to task deadlines.
+  if (breakIncrementSecs > 0) {
     try {
-      const paused = await autoPauseRunningTimer(employeeId);
-      console.log(`[emergency-pause] paused ${paused.length} timer(s):`, paused.map(p => p.taskId));
+      await updateDoc(ref, { [`dailyBreakSeconds.${todayKey}`]: increment(+breakIncrementSecs.toFixed(2)) });
     } catch (e) {
-      console.warn("[DutyStatusToggle] could not auto-pause timer on emergency:", e.message);
+      console.warn("[DutyStatusToggle] could not record daily break seconds:", e.message);
     }
+  }
+
+  if (targetMode === "emergency" || targetMode === "break") {
+    try { await autoPauseRunningTimer(employeeId); }
+    catch (e) { console.warn("[DutyStatusToggle] could not auto-pause timer:", e.message); }
   }
 
   if (targetMode === "online") {
     try { await applyLoginLatenessShift(employeeId, ref); }
     catch (e) { console.warn("[DutyStatusToggle] lateness shift failed:", e.message); }
 
-    console.log(`[emergency-shift] directEmergencyGapMs computed as: ${directEmergencyGapMs}ms`);
     if (directEmergencyGapMs > 0) {
       try { await requestEmergencyApproval(employeeId, employeeName, directEmergencyGapMs, directEmergencyReason); }
       catch (e) { console.warn("[DutyStatusToggle] emergency approval request failed:", e.message); }
     }
-
     try { await applyPendingEmergencyApproval(employeeId, employeeName, ref); }
     catch (e) { console.warn("[DutyStatusToggle] pending emergency approval request failed:", e.message); }
+
+    if (directBreakAppliedMs > 0) {
+      try { await shiftOngoingTaskDeadlines(employeeId, directBreakAppliedMs); }
+      catch (e) { console.warn("[DutyStatusToggle] direct break shift failed:", e.message); }
+    }
+    try { await applyPendingBreakGap(employeeId, ref); }
+    catch (e) { console.warn("[DutyStatusToggle] pending break shift failed:", e.message); }
   }
 
   try {
@@ -159,19 +218,22 @@ async function setDutyMode(employeeId, targetMode, opts = {}) {
 
   try {
     await addDoc(collection(firebaseDb, "cowork_duty_status", employeeId, "logs"), {
-      type: targetMode === "online" ? "login" : targetMode === "offline" ? "logout" : "emergency",
+      type: targetMode === "online" ? "login" : targetMode === "offline" ? "logout" : targetMode === "emergency" ? "emergency" : "break",
       at: serverTimestamp(),
       source: "manual",
       ...(targetMode === "emergency" ? { reason: opts.reason.trim() } : {}),
       ...(patch.pendingEmergencyGapMs ? { emergencyGapStoredMs: patch.pendingEmergencyGapMs } : {}),
       ...(directEmergencyGapMs > 0 ? { emergencyGapAppliedMs: directEmergencyGapMs } : {}),
+      ...(patch.pendingBreakGapMs ? { breakGapStoredMs: patch.pendingBreakGapMs } : {}),
+      ...(directBreakAppliedMs > 0 ? { breakGapAppliedMs: directBreakAppliedMs } : {}),
+      ...(breakIncrementSecs > 0 ? { breakSessionSecs: +breakIncrementSecs.toFixed(2) } : {}),
       ...(dayKey ? { sessionHours: +sessionHours.toFixed(2) } : {}),
     });
   } catch (e) {
     console.warn("[DutyStatusToggle] could not write activity log:", e.message);
   }
 
-  return { prevMode, directEmergencyGapMs };
+  return { prevMode, directEmergencyGapMs, directBreakAppliedMs };
 }
 
 async function fetchMyEmergencyRequests(employeeId, max = 5) {
@@ -247,31 +309,36 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [emergencyReasonInput, setEmergencyReasonInput] = useState("");
-
   const [logs, setLogs] = useState([]);
   const [emergencyRequests, setEmergencyRequests] = useState([]);
-
+  const [maxBreakSecs, setMaxBreakSecs] = useState(3600);
   const [busy, setBusy] = useState(false);
   const [resultMessage, setResultMessage] = useState(null);
   const [resultIsError, setResultIsError] = useState(false);
 
   useEffect(() => {
+    (async () => setMaxBreakSecs(await getMaxBreakSecs()))();
+  }, []);
+
+  useEffect(() => {
     if (!employeeId) return;
-    let unsub = () => { };
+    let unsub = () => {};
     (async () => {
       const { firebaseDb } = await import("../../../lib/coworkFirebase");
       const { doc, onSnapshot } = await import("firebase/firestore");
       unsub = onSnapshot(
         doc(firebaseDb, "cowork_duty_status", employeeId),
         (snap) => {
-          if (!snap.exists()) { setStatus({ mode: "offline", sinceMs: null, dailyHours: {} }); return; }
+          if (!snap.exists()) { setStatus({ mode: "offline", sinceMs: null, dailyHours: {}, dailyBreakSeconds: {} }); return; }
           const d = snap.data();
           setStatus({
             mode: d.mode || (d.isOnline ? "online" : "offline"),
             sinceMs: d.since?.toDate ? d.since.toDate().getTime() : null,
             dailyHours: d.dailyHours || {},
+            dailyBreakSeconds: d.dailyBreakSeconds || {},
             emergencyReason: d.emergencyReason || null,
             emergencyStartedAtMs: d.emergencyStartedAtMs || null,
+            breakStartedAtMs: d.breakStartedAtMs || null,
           });
         },
         (e) => console.error("[DutyStatusToggle] snapshot:", e.message)
@@ -281,7 +348,7 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
   }, [employeeId]);
 
   useEffect(() => {
-    if (status?.mode !== "online") return;
+    if (status?.mode !== "online" && status?.mode !== "break") return;
     const t = setInterval(() => setTick(x => x + 1), 1000);
     return () => clearInterval(t);
   }, [status?.mode]);
@@ -296,17 +363,24 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
     return closedToday + openSession;
   })();
 
-  const stateClass = mode ? ` is-${mode}` : "";
-  const label = mode === null ? "…" : mode === "online" ? "Online" : mode === "emergency" ? "Emergency" : "Offline";
+  const usedBreakSecondsToday = status?.dailyBreakSeconds?.[todayKey] || 0;
+  const breakElapsedSeconds = mode === "break" && status?.breakStartedAtMs ? Math.max(0, (Date.now() - status.breakStartedAtMs) / 1000) : 0;
+  const breakRemainingSeconds = Math.max(0, maxBreakSecs - usedBreakSecondsToday - breakElapsedSeconds);
+
+  const stateClass = mode ? ` is-${mode === "break" ? "break" : mode}` : "";
+  const label = mode === null ? "…" : mode === "online" ? "Online" : mode === "emergency" ? "Emergency" : mode === "break" ? "On Break" : "Offline";
   const caption = mode === "online" ? `Worked today · ${formatDuration(workedTodaySeconds)}`
     : mode === "emergency" ? `Since ${fmtTime(status?.emergencyStartedAtMs)}`
-      : mode === "offline" ? "Not tracking time" : "";
+    : mode === "break" ? `${formatDuration(breakElapsedSeconds)} elapsed`
+    : mode === "offline" ? "Not tracking time" : "";
 
   const statusDescription = mode === "online"
     ? "You're marked Online. Today's working time is being tracked automatically from your login."
     : mode === "emergency"
-      ? `You're in Emergency Mode. Reason: "${status?.emergencyReason || "—"}". Nothing is being tracked as active work right now.`
-      : "You're marked Offline. No working time is being tracked right now.";
+    ? `You're in Emergency Mode. Reason: "${status?.emergencyReason || "—"}". Nothing is being tracked as active work right now.`
+    : mode === "break"
+    ? "You're on Break. Any running task timer has been paused."
+    : "You're marked Offline. No working time is being tracked right now.";
 
   const openPanel = async () => {
     setResultMessage(null);
@@ -324,12 +398,20 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
     if (target === "emergency" && !emergencyReasonInput.trim()) return;
     setBusy(true);
     try {
-      const { prevMode } = await setDutyMode(employeeId, target, { reason: emergencyReasonInput, employeeName });
+      const { prevMode, directBreakAppliedMs } = await setDutyMode(employeeId, target, { reason: emergencyReasonInput, employeeName });
 
       if (target === "emergency") {
         setResultMessage(`Emergency Mode activated at ${fmtTime(Date.now())}. Reason: "${emergencyReasonInput.trim()}". This time will be sent to your manager for approval once you sign back in.`);
+      } else if (target === "break") {
+        setResultMessage(`Break started at ${fmtTime(Date.now())}. Any running task timer has been paused.`);
       } else if (target === "online") {
-        const extra = prevMode === "emergency" ? " Your Emergency Mode time has been sent to your manager for approval — it'll only count toward your task deadlines once they approve it." : "";
+        let extra = "";
+        if (prevMode === "emergency") extra += " Your Emergency Mode time has been sent to your manager for approval — it'll only count toward your task deadlines once they approve it.";
+        if (prevMode === "break") {
+          extra += directBreakAppliedMs > 0
+            ? ` Your break time has been added to today's task deadlines (${formatDuration(directBreakAppliedMs / 1000)}).`
+            : " Your break used up today's full break budget, so no additional time was added to your task deadlines.";
+        }
         setResultMessage(`You're online. Login recorded at ${fmtTime(Date.now())}.${extra}`);
       } else {
         let pauseNote = "";
@@ -342,7 +424,9 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
         } catch (e) {
           pauseNote = " (Couldn't confirm whether a task timer was running — please pause it manually if one was.)";
         }
-        const extra = prevMode === "emergency" ? " Your Emergency Mode time has been recorded — it'll be sent to your manager for approval the next time you sign in." : "";
+        let extra = "";
+        if (prevMode === "emergency") extra = " Your Emergency Mode time has been recorded — it'll be sent to your manager for approval the next time you sign in.";
+        if (prevMode === "break") extra = " Your break time has been recorded — it'll be added to your tasks' deadlines (up to today's remaining budget) the next time you sign in.";
         setResultMessage(`You're offline. Logout recorded at ${fmtTime(Date.now())}.${pauseNote}${extra}`);
       }
 
@@ -395,6 +479,12 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
               <div className="cw-duty-live-label">Emergency Mode</div>
               <div className="cw-duty-static-value">Since {fmtTime(status?.emergencyStartedAtMs)}</div>
             </div>
+          ) : mode === "break" ? (
+            <div className="cw-duty-live-box is-break">
+              <div className="cw-duty-live-label">On Break</div>
+              <div className="cw-duty-live-value">{formatDuration(breakElapsedSeconds)}</div>
+              <div className="cw-duty-since">{formatDuration(breakRemainingSeconds)} of today's break budget left</div>
+            </div>
           ) : (
             <div className="cw-duty-live-box">
               <div className="cw-duty-live-label">Status</div>
@@ -419,12 +509,21 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
                   <button className="cw-duty-mode-btn" onClick={() => setPendingAction("offline")}>Sign Out</button>
                 </div>
               </>
+            ) : mode === "break" ? (
+              <>
+                <div className="cw-duty-section-label">You're on break</div>
+                <div className="cw-duty-mode-grid">
+                  <button className="cw-duty-mode-btn cw-duty-mode-btn-primary" onClick={() => setPendingAction("online")}>Sign In</button>
+                  <button className="cw-duty-mode-btn" onClick={() => setPendingAction("offline")}>Sign Out</button>
+                </div>
+              </>
             ) : (
               <>
                 <div className="cw-duty-section-label">Change status</div>
                 <div className="cw-duty-mode-grid">
                   <button
                     className={`cw-duty-mode-btn${mode === "online" ? "" : " cw-duty-mode-btn-primary"}`}
+                    style={{ flexBasis: "100%" }}
                     onClick={() => setPendingAction(mode === "online" ? "offline" : "online")}
                   >
                     {mode === "online" ? "Sign Out" : "Sign In"}
@@ -434,6 +533,12 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
                     onClick={() => { setPendingAction("emergency"); setEmergencyReasonInput(""); }}
                   >
                     Emergency Mode
+                  </button>
+                  <button
+                    className="cw-duty-mode-btn cw-duty-mode-btn-break"
+                    onClick={() => setPendingAction("break")}
+                  >
+                    Break Mode
                   </button>
                 </div>
               </>
@@ -456,6 +561,15 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
                 </button>
               </div>
             </>
+          ) : pendingAction === "break" ? (
+            <>
+              <div className="cw-duty-section-label">Start Break?</div>
+              <div className="cw-duty-confirm-sub">Any running task timer will be paused automatically. Break time counts against today's allowed budget ({formatDuration(maxBreakSecs)} total).</div>
+              <div className="cw-duty-confirm-actions">
+                <button className="cw-duty-btn-cancel" onClick={() => setPendingAction(null)} disabled={busy}>Back</button>
+                <button className="cw-duty-btn-primary" onClick={confirm} disabled={busy}>{busy ? "Saving…" : "Start Break"}</button>
+              </div>
+            </>
           ) : (
             <>
               <div className="cw-duty-section-label">{pendingAction === "offline" ? "Sign out?" : "Sign in?"}</div>
@@ -463,8 +577,10 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
                 {pendingAction === "offline"
                   ? "This logs your logout time and pauses any task timer you currently have running."
                   : mode === "emergency"
-                    ? "This ends Emergency Mode and signs you in. The time will be sent to your manager for approval."
-                    : "This logs your login time now."}
+                  ? "This ends Emergency Mode and signs you in. The time will be sent to your manager for approval."
+                  : mode === "break"
+                  ? "This ends your break and signs you in. Break time (up to today's remaining budget) will be added to your task deadlines."
+                  : "This logs your login time now."}
               </div>
               <div className="cw-duty-confirm-actions">
                 <button className="cw-duty-btn-cancel" onClick={() => setPendingAction(null)} disabled={busy}>Back</button>
@@ -498,7 +614,7 @@ export default function DutyStatusToggle({ employeeId, employeeName, onStatusCha
           ) : logs.slice(0, 6).map(l => (
             <div key={l.id} className="cw-duty-history-row">
               <span className={`cw-duty-history-tag ${l.type}`}>
-                {l.type === "login" ? "Login" : l.type === "logout" ? "Logout" : "Emergency"}
+                {l.type === "login" ? "Login" : l.type === "logout" ? "Logout" : l.type === "emergency" ? "Emergency" : "Break"}
               </span>
               <span className="cw-duty-history-time">{fmtTime(l.at)}</span>
             </div>

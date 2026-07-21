@@ -102,6 +102,7 @@ export default function SettingsPage() {
   const [gapVal, setGapVal]           = useState("2");
   const [gapUnit, setGapUnit]         = useState("hours");
   const [breaks, setBreaks]           = useState([]);
+  const [maxBreakMins, setMaxBreakMins] = useState("60");
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
@@ -120,6 +121,7 @@ export default function SettingsPage() {
           const data = snap.data();
           if (data.schedule) setSchedule({ ...DEFAULT_SCHEDULE, ...data.schedule });
           if (Array.isArray(data.breaks)) setBreaks(data.breaks);
+          if (data.maxBreakMinutesPerDay) setMaxBreakMins(String(data.maxBreakMinutesPerDay));
           if (data.maxTaskActionGapMinutes) {
             const mins = Number(data.maxTaskActionGapMinutes);
             if (mins >= 60 && mins % 60 === 0) {
@@ -176,9 +178,11 @@ export default function SettingsPage() {
         schedule,
         maxTaskActionGapMinutes: gapMins,
         breaks: cleanBreaks,
+        maxBreakMinutesPerDay: Number(maxBreakMins) || 60,
         updatedAt: serverTimestamp(),
         updatedBy: employeeId,
       }, { merge: true });
+      
 
       setBreaks(cleanBreaks);
       setSaved(true);
@@ -301,6 +305,15 @@ export default function SettingsPage() {
             title="☕ Daily Breaks"
             subtitle="Recurring breaks (lunch, tea, etc.) subtracted from every working day when calculating due dates. Applies the same every day."
           >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, marginBottom: 16 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 600, color: "#374151", flexShrink: 0 }}>Max break time allowed per day</label>
+              <input
+                type="number" min="1" max="480" value={maxBreakMins}
+                onChange={e => { setMaxBreakMins(e.target.value); setSaved(false); }}
+                style={{ width: 70, padding: "6px 10px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 13, fontFamily: F, outline: "none", textAlign: "center", fontWeight: 600 }}
+              />
+              <span style={{ fontSize: 12, color: "#6B7280" }}>minutes/day — used to cap how much Break Mode time counts toward task deadlines</span>
+            </div>
             {breaks.length === 0 && (
               <div style={{ fontSize:12, color:"#9CA3AF", padding:"10px 0" }}>
                 No breaks defined yet. Working hours are treated as one continuous block.
