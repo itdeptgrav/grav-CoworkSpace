@@ -92,8 +92,8 @@ async function apiFetch(path, opts = {}) {
 
 // Status Constants
 const STATUS = {
-  open: { label: "Not Started", color: "#D97706", bg: "#FEF3C7", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
-  confirmed: { label: "Confirmed", color: "#4F46E5", bg: "#EEF2FF", dot: "#4F46E5", glow: "rgba(79,70,229,0.3)" },
+  cancelled: { label: "Cancelled", color: "#6B7280", bg: "#F3F4F6", dot: "#6B7280", glow: "rgba(107,114,128,0.3)" },
+  open: { label: "Not Started", color: "#D97706", bg: "#FEF3C7", dot: "#D97706", glow: "rgba(217,119,6,0.3)" }, confirmed: { label: "Confirmed", color: "#4F46E5", bg: "#EEF2FF", dot: "#4F46E5", glow: "rgba(79,70,229,0.3)" },
   in_progress: { label: "In Progress", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
   pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
@@ -7698,6 +7698,7 @@ em-emoji-picker,
                               {(t.subtaskIds || []).map(sid => {
                                 const sub = allTaskMap?.get(sid);
                                 if (!sub) return null;
+                                if (sub.isSelfAssigned && sub.status === "cancelled") return null;
                                 return (
                                   <TaskRow
                                     key={sub.taskId} t={sub} depth={depth + 1} section={section}
@@ -7999,7 +8000,7 @@ em-emoji-picker,
                                 (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
                               );
                               const myOwnTasks = allTasks.filter(t =>
-                                t.status !== "cancelled" && t.isSelfAssigned === true &&
+                                t.isSelfAssigned === true &&
                                 (t.assigneeIds || []).includes(employeeId) && t.approverId !== employeeId
                               );
                               return (
@@ -8069,9 +8070,15 @@ em-emoji-picker,
                                               style={{ background: "#fff", border: "1px solid #E5E7EB", borderLeft: "3px solid #1B4F8A", borderRadius: 6, padding: "10px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
                                               <div style={{ flex: 1, minWidth: 0 }}>
                                                 <div style={{ fontSize: 12, fontWeight: 600, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
-                                                  {t.approverName && <>Approver: <strong>{t.approverName}</strong></>}
-                                                  {t.fixedDeadline && <> · {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                                <div style={{ fontSize: 11, color: t.status === "cancelled" ? "#DC2626" : "#64748B", marginTop: 2 }}>
+                                                  {t.status === "cancelled" ? (
+                                                    <>Rejected by <strong>{t.selfAssignRejectedByName || "approver"}</strong>{t.selfAssignRejectionReason && <>: {t.selfAssignRejectionReason}</>}</>
+                                                  ) : (
+                                                    <>
+                                                      {t.approverName && <>Approver: <strong>{t.approverName}</strong></>}
+                                                      {t.fixedDeadline && <> · {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                                    </>
+                                                  )}
                                                 </div>
                                               </div>
                                               <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: sst.color, background: sst.bg, flexShrink: 0 }}>{sst.label}</span>

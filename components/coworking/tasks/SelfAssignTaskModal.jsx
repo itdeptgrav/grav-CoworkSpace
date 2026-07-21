@@ -51,18 +51,23 @@ export default function SelfAssignTaskModal({
 
     useEffect(() => {
         Promise.all([listAllEmployees(), listTasks()])
-            .then(([emps, tasks]) => {
+            .then(([emps, taskResult]) => {
                 const eligible = emps.filter(
                     e => (e.role === "tl" || e.role === "ceo") && e.employeeId !== currentEmployeeId
                 );
                 setApprovers(eligible);
-                const roots = tasks.filter(t => !t.parentTaskId && !t.isFolder);
+                const roots = (taskResult.tasks || []).filter(t =>
+                    !t.parentTaskId && !t.isFolder && (
+                        (t.assigneeIds || []).includes(currentEmployeeId) ||
+                        t.assignedBy === currentEmployeeId ||
+                        t.createdBy === currentEmployeeId
+                    )
+                );
                 setAllRootTasks(roots);
             })
-            .catch(() => { })
+            .catch(e => console.error("[SelfAssignTaskModal] load error:", e.message))
             .finally(() => setLoadingData(false));
     }, [currentEmployeeId]);
-
     useEffect(() => {
         const handler = (e) => {
             if (approverRef.current && !approverRef.current.contains(e.target)) setApproverOpen(false);
@@ -125,7 +130,6 @@ export default function SelfAssignTaskModal({
                 approverName: selectedApprover.name,
                 isSelfAssigned: true,
             });
-
             onSuccess?.(newTask);
         } catch (err) {
             setError(err.message);
