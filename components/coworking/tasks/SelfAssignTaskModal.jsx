@@ -4,6 +4,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { createTask, listAllEmployees, listTasks } from "../../../lib/mediaUploadApi";
+import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { firebaseDb } from "../../../lib/coworkFirebase";
 
 export default function SelfAssignTaskModal({
     onClose,
@@ -130,6 +132,27 @@ export default function SelfAssignTaskModal({
                 approverName: selectedApprover.name,
                 isSelfAssigned: true,
             });
+
+            // Notify the approver — this self-assigned task needs their review
+            try {
+                await setDoc(doc(collection(firebaseDb, "cowork_notifications")), {
+                    recipientEmployeeId: selectedApprover.employeeId,
+                    type: "self_task_approval_needed",
+                    title: "Self-assigned task needs your approval",
+                    body: `${currentEmployeeName} assigned themselves "${form.title.trim()}" and needs your review.`,
+                    data: {
+                        taskId: newTask?.taskId || null,
+                        taskTitle: form.title.trim(),
+                        requesterId: currentEmployeeId,
+                        requesterName: currentEmployeeName,
+                    },
+                    read: false,
+                    createdAt: serverTimestamp(),
+                });
+            } catch (notifErr) {
+                console.error("[SelfAssignTaskModal] notify approver failed:", notifErr.message);
+            }
+
             onSuccess?.(newTask);
         } catch (err) {
             setError(err.message);
