@@ -92,8 +92,8 @@ async function apiFetch(path, opts = {}) {
 
 // Status Constants
 const STATUS = {
-  open: { label: "Not Started", color: "#D97706", bg: "#FEF3C7", dot: "#D97706", glow: "rgba(217,119,6,0.3)" },
-  confirmed: { label: "Confirmed", color: "#4F46E5", bg: "#EEF2FF", dot: "#4F46E5", glow: "rgba(79,70,229,0.3)" },
+  cancelled: { label: "Cancelled", color: "#6B7280", bg: "#F3F4F6", dot: "#6B7280", glow: "rgba(107,114,128,0.3)" },
+  open: { label: "Not Started", color: "#D97706", bg: "#FEF3C7", dot: "#D97706", glow: "rgba(217,119,6,0.3)" }, confirmed: { label: "Confirmed", color: "#4F46E5", bg: "#EEF2FF", dot: "#4F46E5", glow: "rgba(79,70,229,0.3)" },
   in_progress: { label: "In Progress", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
   done: { label: "Done", color: "#16A34A", bg: "#F0FDF4", dot: "#16A34A", glow: "rgba(22,163,74,0.3)" },
   pending_tl_approval: { label: "Pending TL Approval", color: "#7C3AED", bg: "#F5F3FF", dot: "#7C3AED", glow: "rgba(124,58,237,0.3)" },
@@ -844,7 +844,8 @@ export default function TasksPage() {
   const [myPendingCrossDeptTasks, setMyPendingCrossDeptTasks] = useState([]);
   const [myTlHoursSetTasks, setMyTlHoursSetTasks] = useState([]); const [deptApprovalBusy, setDeptApprovalBusy] = useState(null); // taskId currently being approved/rejected
   const [deptPanelOpen, setDeptPanelOpen] = useState(false); const [deptPanelIdx, setDeptPanelIdx] = useState(0); // cross-dept banner: minimized strip by default + one-card pager
-
+  const [crossDeptListOpen, setCrossDeptListOpen] = useState(true);
+  const [tlHoursListOpen, setTlHoursListOpen] = useState(true);
   const [employeeMapFull, setEmployeeMapFull] = useState(new Map()); const [filterOpen, setFilterOpen] = useState(false);
   const [priCtxMenu, setPriCtxMenu] = useState(null); // { x, y, taskId, current }
 
@@ -1269,8 +1270,11 @@ export default function TasksPage() {
           console.error("[handleTimerStart] blocked-dates fetch failed, proceeding without holiday/leave awareness:", _bdErr.message);
         }
 
-        // If anchor found → compute dueDate from chain anchor + this task's window
-        // If no higher running task → normal calcDueDate from now
+        // If anchor found → compute dueDate from chain anchor + this task's window.
+        // If no higher-priority task is running → anchor on THIS moment (the
+        // employee's first Play click), never on taskCreatedAtMs. A task can
+        // sit unstarted for hours/days after creation; the due date must count
+        // from when work actually begins, not from when it was assigned.
         const dueDate = _anchorMs
           ? snapToOfficeHours(
             _anchorMs + _taskWindowSecs * 1000,
@@ -1278,11 +1282,10 @@ export default function TasksPage() {
             _blockedDates,
             settings.breaks || []
           )
-          : calcDueDate(
+          : addWorkingSecs(
+            Date.now(),
             _taskWindowSecs,
             settings.schedule || null,
-            settings.maxTaskActionGapMinutes || 120,
-            taskCreatedAtMs,
             _blockedDates,
             settings.breaks || []
           );
@@ -6786,30 +6789,38 @@ em-emoji-picker,
 
               {taskSection === "created" && myPendingCrossDeptTasks.length > 0 && (
                 <div style={{ padding: "10px 16px", background: "#F0F9FF", borderBottom: "1px solid #BAE6FD", flexShrink: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#0369A1", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                    Your Cross-Department Tasks — In Progress ({myPendingCrossDeptTasks.length})
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: crossDeptListOpen ? 8 : 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#0369A1", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Your Cross-Department Tasks — In Progress ({myPendingCrossDeptTasks.length})
+                    </div>
+                    <button onClick={() => setCrossDeptListOpen(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", color: "#0369A1", fontSize: 10, fontWeight: 600, display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                      {crossDeptListOpen ? "Minimize" : "Maximize"}
+                      <span style={{ display: "inline-block", transform: crossDeptListOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
+                    </button>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {myPendingCrossDeptTasks.map(t => (
-                      <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BAE6FD", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{t.title}</div>
-                        {t.status === "pending_department_approval" ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                            <div style={{ fontSize: 11, color: "#6B7280" }}>Waiting on department approval before this reaches {t.pendingAssigneeName || "the assignee"}:</div>
-                            {(t.departmentApprovals || []).map((a, i) => (
-                              <div key={i} style={{ fontSize: 11, color: "#374151", paddingLeft: 4 }}>
-                                {a.status === "approved" ? "✅" : a.status === "rejected" ? "❌" : "⏳"} {a.approverName}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 11, color: "#6B7280" }}>
-                            Both HODs approved — waiting on {t.pendingAssigneeName || "the assignee"}'s department TL to set the real hours before they can see it.
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  {crossDeptListOpen && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto", paddingRight: 2 }}>
+                      {myPendingCrossDeptTasks.map(t => (
+                        <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BAE6FD", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", marginBottom: 4 }}>{t.title}</div>
+                          {t.status === "pending_department_approval" ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              <div style={{ fontSize: 11, color: "#6B7280" }}>Waiting on department approval before this reaches {t.pendingAssigneeName || "the assignee"}:</div>
+                              {(t.departmentApprovals || []).map((a, i) => (
+                                <div key={i} style={{ fontSize: 11, color: "#374151", paddingLeft: 4 }}>
+                                  {a.status === "approved" ? "✅" : a.status === "rejected" ? "❌" : "⏳"} {a.approverName}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: "#6B7280" }}>
+                              Both HODs approved — waiting on {t.pendingAssigneeName || "the assignee"}'s department TL to set the real hours before they can see it.
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -6817,19 +6828,27 @@ em-emoji-picker,
                 const ongoingTlHoursSetTasks = myTlHoursSetTasks.filter(t => t.status !== "done");
                 return taskSection === "created" && role === "tl" && ongoingTlHoursSetTasks.length > 0 && (
                   <div style={{ padding: "10px 16px", background: "#F0FDF4", borderBottom: "1px solid #BBF7D0", flexShrink: 0 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                      Cross-Department Tasks You Set Hours For ({ongoingTlHoursSetTasks.length})
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: tlHoursListOpen ? 8 : 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#15803D", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Cross-Department Tasks You Set Hours For ({ongoingTlHoursSetTasks.length})
+                      </div>
+                      <button onClick={() => setTlHoursListOpen(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", color: "#15803D", fontSize: 10, fontWeight: 600, display: "flex", alignItems: "center", gap: 3, padding: 0 }}>
+                        {tlHoursListOpen ? "Minimize" : "Maximize"}
+                        <span style={{ display: "inline-block", transform: tlHoursListOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
+                      </button>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {ongoingTlHoursSetTasks.map(t => (
-                        <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BBF7D0", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
-                          <div style={{ fontSize: 11, color: "#6B7280" }}>
-                            for {employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member"} — assigned by {t.assignedByName || t.assignedBy} — status: {(STATUS[t.status] || STATUS.open).label}
+                    {tlHoursListOpen && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto", paddingRight: 2 }}>
+                        {ongoingTlHoursSetTasks.map(t => (
+                          <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #BBF7D0", borderRadius: 6, cursor: "pointer" }} onClick={() => { setRightPanel(null); setMobDetailPanel(null); handleSelectNode(t); }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                            <div style={{ fontSize: 11, color: "#6B7280" }}>
+                              for {employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member"} — assigned by {t.assignedByName || t.assignedBy} — status: {(STATUS[t.status] || STATUS.open).label}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -7681,6 +7700,7 @@ em-emoji-picker,
                               {(t.subtaskIds || []).map(sid => {
                                 const sub = allTaskMap?.get(sid);
                                 if (!sub) return null;
+                                if (sub.isSelfAssigned && sub.status === "cancelled") return null;
                                 return (
                                   <TaskRow
                                     key={sub.taskId} t={sub} depth={depth + 1} section={section}
@@ -7982,7 +8002,7 @@ em-emoji-picker,
                                 (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
                               );
                               const myOwnTasks = allTasks.filter(t =>
-                                t.status !== "cancelled" && t.isSelfAssigned === true &&
+                                t.isSelfAssigned === true &&
                                 (t.assigneeIds || []).includes(employeeId) && t.approverId !== employeeId
                               );
                               return (
@@ -8052,9 +8072,15 @@ em-emoji-picker,
                                               style={{ background: "#fff", border: "1px solid #E5E7EB", borderLeft: "3px solid #1B4F8A", borderRadius: 6, padding: "10px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
                                               <div style={{ flex: 1, minWidth: 0 }}>
                                                 <div style={{ fontSize: 12, fontWeight: 600, color: "#1E293B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</div>
-                                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
-                                                  {t.approverName && <>Approver: <strong>{t.approverName}</strong></>}
-                                                  {t.fixedDeadline && <> · {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                                <div style={{ fontSize: 11, color: t.status === "cancelled" ? "#DC2626" : "#64748B", marginTop: 2 }}>
+                                                  {t.status === "cancelled" ? (
+                                                    <>Rejected by <strong>{t.selfAssignRejectedByName || "approver"}</strong>{t.selfAssignRejectionReason && <>: {t.selfAssignRejectionReason}</>}</>
+                                                  ) : (
+                                                    <>
+                                                      {t.approverName && <>Approver: <strong>{t.approverName}</strong></>}
+                                                      {t.fixedDeadline && <> · {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                                    </>
+                                                  )}
                                                 </div>
                                               </div>
                                               <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, color: sst.color, background: sst.bg, flexShrink: 0 }}>{sst.label}</span>

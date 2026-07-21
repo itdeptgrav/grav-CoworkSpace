@@ -49,7 +49,6 @@ export default function CoworkingLayout({ children }) {
     return (
         <>
             <TopLoadingBar />
-            
             {employeeId && (
                 <GlobalCallReceiver employeeId={employeeId} employeeName={employeeName || ""} />
             )}

@@ -56,7 +56,13 @@ export default function SelfAssignTaskModal({
                     e => (e.role === "tl" || e.role === "ceo") && e.employeeId !== currentEmployeeId
                 );
                 setApprovers(eligible);
-                const roots = (taskResult.tasks || []).filter(t => !t.parentTaskId && !t.isFolder);
+                const roots = (taskResult.tasks || []).filter(t =>
+                    !t.parentTaskId && !t.isFolder && (
+                        (t.assigneeIds || []).includes(currentEmployeeId) ||
+                        t.assignedBy === currentEmployeeId ||
+                        t.createdBy === currentEmployeeId
+                    )
+                );
                 setAllRootTasks(roots);
             })
             .catch(e => console.error("[SelfAssignTaskModal] load error:", e.message))
@@ -124,7 +130,6 @@ export default function SelfAssignTaskModal({
                 approverName: selectedApprover.name,
                 isSelfAssigned: true,
             });
-
             onSuccess?.(newTask);
         } catch (err) {
             setError(err.message);

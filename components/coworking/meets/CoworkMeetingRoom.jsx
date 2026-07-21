@@ -1005,6 +1005,10 @@ function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, emp
     const videoRef = useRef(null);
 
     const isLive = info?.live;
+    // isHost = role is ceo/tl (used for record/join-code/invite — any CEO/TL, by design).
+    // isActualHost = this employee is ALSO the creator of THIS specific meeting.
+    // Only isActualHost may start it / skip the "waiting for host" gate.
+    const isActualHost = isHost && meet?.createdBy === employeeId;
 
     useEffect(() => {
         if (!camOn) { setStream(s => { s?.getTracks().forEach(t => t.stop()); return null; }); return; }
@@ -1125,7 +1129,7 @@ function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, emp
                                 {isHost && info?.joinCode && <span className="lob-live-code">{info.joinCode}</span>}
                             </div>
                         )}
-                        {!isLive && !isHost && <div className="lob-wait-banner">Waiting for host to start the meeting</div>}
+                        {!isLive && !isActualHost && <div className="lob-wait-banner">Waiting for host to start the meeting</div>}
                         {error && <div className="lob-err-banner">{error}</div>}
 
                         <div style={{ borderTop: "1px solid #F3F4F6" }} />
@@ -1169,8 +1173,8 @@ function LobbyScreen({ meet, info, isHost, isInvited, busy, error, setError, emp
                         <div style={{ borderTop: "1px solid #F3F4F6" }} />
 
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            <p className="lob-section-label">{isHost ? "Host Controls" : isInvited ? "Join Meeting" : "Enter Code"}</p>
-                            {isHost ? (
+                            <p className="lob-section-label">{isActualHost ? "Host Controls" : isInvited ? "Join Meeting" : "Enter Code"}</p>
+                            {isActualHost ? (
                                 <>
                                     <button className="lob-btn-primary" onClick={handleStart} disabled={busy}>
                                         {busy ? "Connecting…" : isLive ? "Rejoin Meeting" : "Start Meeting"}

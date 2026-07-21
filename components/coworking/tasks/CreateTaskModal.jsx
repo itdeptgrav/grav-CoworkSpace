@@ -88,7 +88,7 @@ function TimeTrackingSection({ hasTimer, deadline, deadlineTime, onSet, timerDur
                 value={timerDurationUnit || "hours"} onChange={e => onSet("timerDurationUnit", e.target.value)}>
                 <option value="minutes">Minutes</option>
                 <option value="hours">Hours</option>
-                <option value="days">Days</option>
+
               </select>
             </div>
           </div>
