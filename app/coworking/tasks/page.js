@@ -1270,8 +1270,11 @@ export default function TasksPage() {
           console.error("[handleTimerStart] blocked-dates fetch failed, proceeding without holiday/leave awareness:", _bdErr.message);
         }
 
-        // If anchor found → compute dueDate from chain anchor + this task's window
-        // If no higher running task → normal calcDueDate from now
+        // If anchor found → compute dueDate from chain anchor + this task's window.
+        // If no higher-priority task is running → anchor on THIS moment (the
+        // employee's first Play click), never on taskCreatedAtMs. A task can
+        // sit unstarted for hours/days after creation; the due date must count
+        // from when work actually begins, not from when it was assigned.
         const dueDate = _anchorMs
           ? snapToOfficeHours(
             _anchorMs + _taskWindowSecs * 1000,
@@ -1279,11 +1282,10 @@ export default function TasksPage() {
             _blockedDates,
             settings.breaks || []
           )
-          : calcDueDate(
+          : addWorkingSecs(
+            Date.now(),
             _taskWindowSecs,
             settings.schedule || null,
-            settings.maxTaskActionGapMinutes || 120,
-            taskCreatedAtMs,
             _blockedDates,
             settings.breaks || []
           );
