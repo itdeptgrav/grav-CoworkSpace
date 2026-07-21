@@ -612,7 +612,11 @@ function SopSettingsPanel({ employeeId, employeeName, onClose }) {
                       const next = !timerSopEnabled;
                       setTimerSopEnabled(next);
                       try {
-                        await setDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"), { timerSopEnabled: next }, { merge: true });
+                        await setDoc(doc(firebaseDb, "cowork_sop_settings", "task_events"),
+                          next
+                            ? { timerSopEnabled: true, timerSopEnabledAt: new Date().toISOString() }
+                            : { timerSopEnabled: false },
+                          { merge: true });
                       } catch (e) {
                         console.error("[timerSopEnabled]", e.message);
                         setTimerSopEnabled(!next);

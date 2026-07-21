@@ -1497,9 +1497,8 @@ export default function DetailBody({
                     )}
                   </>
                 )}
-
                 {/* ── TL: deadline proposal actions ── */}
-                {isTL && !isCEO && status === "pending_deadline_approval" && !task.isFolder && (
+                {isTL && !isCEO && !isAssignee && status === "pending_deadline_approval" && !task.isFolder && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <div style={{ fontSize: 11, color: "#374151" }}>
                       Employee's deadline proposal:
