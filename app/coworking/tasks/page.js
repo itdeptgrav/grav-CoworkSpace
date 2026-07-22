@@ -984,7 +984,7 @@ export default function TasksPage() {
   const isCEO = role === "ceo";
   const isTL = role === "tl";
   const isEmployee = role === "employee";
-  const canDrag = isCEO || isTL; // employees see order but cannot drag
+  const canDrag = (isCEO || isTL) && taskSection === "created"; // employees see order but cannot drag; drag-and-drop is only available in "Created by Me" — not "Assigned to Me" or "Self Tasks"
 
   // Drag cross-level warning modal
   const [dragWarnModal, setDragWarnModal] = useState(null);
@@ -1232,7 +1232,13 @@ export default function TasksPage() {
             .sort((a, b) => Number(a.priority) - Number(b.priority));
 
           // Start anchor from P1's due date
-          _anchorMs = new Date(_runningP1.dueDate).getTime();
+          // Clamp to now — if the running higher-priority task is itself
+          // overdue (still in_progress past its own dueDate), stacking a new
+          // task's window on top of that stale, past timestamp produces a
+          // dueDate that's already in the past the instant the timer starts.
+          // Same defensive clamp already used in the priority-change
+          // recalculation path further down this file (search Math.max(_predMs).
+          _anchorMs = Math.max(new Date(_runningP1.dueDate).getTime(), Date.now());
 
           // Walk through intermediate tasks to build cumulative anchor
           for (const _bt of _between) {
@@ -1276,8 +1282,9 @@ export default function TasksPage() {
         // sit unstarted for hours/days after creation; the due date must count
         // from when work actually begins, not from when it was assigned.
         const dueDate = _anchorMs
-          ? snapToOfficeHours(
-            _anchorMs + _taskWindowSecs * 1000,
+          ? addWorkingSecs(
+            _anchorMs,
+            _taskWindowSecs,
             settings.schedule || null,
             _blockedDates,
             settings.breaks || []
@@ -1553,6 +1560,15 @@ export default function TasksPage() {
           : (b.order !== undefined ? b.order : (Number(b.priority ?? 999)) * 1000);
         return ap - bp;
       });
+
+    // Only upward reordering (raising priority) is allowed by drag.
+    // _siblings is sorted by current priority (index 0 = P1/top). Dragging
+    // a task DOWN onto a lower-priority sibling (its original index comes
+    // BEFORE the drop target's) is blocked — silent reject, same pattern
+    // as the cross-person guard above.
+    const _origDragIdx = _siblings.findIndex(t => t.taskId === dragId);
+    const _origDropIdx = _siblings.findIndex(t => t.taskId === dropOnTaskId);
+    if (_origDragIdx !== -1 && _origDropIdx !== -1 && _origDragIdx < _origDropIdx) return;
 
     const _withoutDrag = _siblings.filter(t => t.taskId !== dragId);
     const _dropIdx = _withoutDrag.findIndex(t => t.taskId === dropOnTaskId);
@@ -5795,6 +5811,10 @@ em-emoji-picker,
                       const bp = (_sharedAssignee && b.assigneePriorities?.[_sharedAssignee] !== undefined) ? b.assigneePriorities[_sharedAssignee] : (b.order !== undefined ? b.order : (Number(b.priority ?? 999)) * 1000);
                       return ap - bp;
                     });
+                  const _origDragIdx = _siblings.findIndex(t => t.taskId === dragId);
+                  const _origDropIdx = _siblings.findIndex(t => t.taskId === dropOnTaskId);
+                  if (_origDragIdx !== -1 && _origDropIdx !== -1 && _origDragIdx < _origDropIdx) return;
+
                   const _withoutDrag = _siblings.filter(t => t.taskId !== dragId);
                   const _dropIdx = _withoutDrag.findIndex(t => t.taskId === dropOnTaskId);
                   _withoutDrag.splice(_dropIdx === -1 ? 0 : _dropIdx, 0, _dragTask);
@@ -7361,9 +7381,9 @@ em-emoji-picker,
 
                           <div
                             onClick={() => onSelect(t)}
-                            draggable={!!(isCEO || isTL)}
+                            draggable={!!canDrag}
                             onDragStart={e => {
-                              if (!isCEO && !isTL) { e.preventDefault(); return; }
+                              if (!canDrag) { e.preventDefault(); return; }
                               dragTaskIdRef.current = t.taskId;
                               dragOverIdRef.current = null;
                               e.dataTransfer.effectAllowed = "move";
@@ -7377,7 +7397,7 @@ em-emoji-picker,
                             }}
                             onDragOver={e => {
                               e.preventDefault();
-                              if (!isCEO && !isTL) return;
+                              if (!canDrag) return;
                               if (dragTaskIdRef.current === t.taskId) return;
                               e.dataTransfer.dropEffect = "move";
                               if (dragOverIdRef.current !== t.taskId) {
@@ -7429,7 +7449,7 @@ em-emoji-picker,
                               borderLeft: isSelected ? "3px solid #1B4F8A" : "3px solid transparent",
                               borderRadius: 6,
                               margin: "0 10px 6px",
-                              cursor: (isCEO || isTL) ? "grab" : "pointer",
+                              cursor: canDrag ? "grab" : "pointer",
                               transition: "background 0.12s, border-color 0.12s",
                             }}
                             onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.background = "#F8FAFC"; e.currentTarget.style.borderColor = "#D7DDE8"; } }}
@@ -8044,11 +8064,44 @@ em-emoji-picker,
                                                 </div>
                                               </div>
                                               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                                                <button onClick={async () => { try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                                <button onClick={async () => {
+                                                  try {
+                                                    await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: true }) });
+                                                    try {
+                                                      await setDoc(doc(collection(firebaseDb, "cowork_notifications")), {
+                                                        recipientEmployeeId: t.assignedBy,
+                                                        type: "self_task_approved",
+                                                        title: "Self-assigned task approved",
+                                                        body: `${employeeName} approved your self-assigned task "${t.title}".`,
+                                                        data: { taskId: t.taskId, taskTitle: t.title, approverId: employeeId, approverName: employeeName },
+                                                        read: false,
+                                                        createdAt: serverTimestamp(),
+                                                      });
+                                                    } catch (notifErr) { console.error("[self-assign-approve] notify creator failed:", notifErr.message); }
+                                                    await loadAllTasks();
+                                                  } catch (e) { alert(e.message); }
+                                                }}
                                                   style={{ padding: "4px 10px", background: "#1B4F8A", color: "#fff", border: "none", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
                                                   Approve
                                                 </button>
-                                                <button onClick={async () => { const r = prompt("Rejection reason:"); if (r === null) return; try { await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) }); await loadAllTasks(); } catch (e) { alert(e.message); } }}
+                                                <button onClick={async () => {
+                                                  const r = prompt("Rejection reason:"); if (r === null) return;
+                                                  try {
+                                                    await apiFetch(`/cowork/task/${t.taskId}/self-assign-approve`, { method: "POST", body: JSON.stringify({ approved: false, rejectionReason: r }) });
+                                                    try {
+                                                      await setDoc(doc(collection(firebaseDb, "cowork_notifications")), {
+                                                        recipientEmployeeId: t.assignedBy,
+                                                        type: "self_task_rejected",
+                                                        title: "Self-assigned task rejected",
+                                                        body: `${employeeName} rejected your self-assigned task "${t.title}": ${r}`,
+                                                        data: { taskId: t.taskId, taskTitle: t.title, approverId: employeeId, approverName: employeeName, rejectionReason: r },
+                                                        read: false,
+                                                        createdAt: serverTimestamp(),
+                                                      });
+                                                    } catch (notifErr) { console.error("[self-assign-approve] notify creator failed:", notifErr.message); }
+                                                    await loadAllTasks();
+                                                  } catch (e) { alert(e.message); }
+                                                }}
                                                   style={{ padding: "4px 10px", background: "#fff", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
                                                   Reject
                                                 </button>
@@ -8705,7 +8758,7 @@ em-emoji-picker,
                 })()}
 
                 {/* Creator approval panel in chat column — 3 tabs always visible */}
-                {task && !task.isFolder && task.status === "pending_deadline_approval" && task.assignedBy === employeeId && (() => {
+                {task && !task.isFolder && task.status === "pending_deadline_approval" && (task.assignedBy === employeeId || isCEO || isTL) && (() => {
                   const isExt = ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "");
                   const activeTab = showCounterForm ? "suggest" : showRejectInput ? "reject" : null;
                   const setTab = (t) => {

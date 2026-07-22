@@ -1349,46 +1349,22 @@ export default function DetailBody({
                     Re-submit for Review
                   </ActionBtn>
                 )}
-                {/* ── Extension zone calculation — anchored to task.dueDate, same
-                     wall-clock source of truth as remainingSecs/isTimerExceeded
-                     above. Previously used requested-work-hours as the
-                     denominator, which drifts from the actual due date. ── */}
+                {/* ── Extension zone calculation — elapsed % of the task's own
+                     work window (workedSecs / windowSecs), matching "Time
+                     Tracked" above. See the IIFE below for why this replaced
+                     the createdAt→dueDate wall-clock version. ── */}
                 {(() => {
-                  const _createdMs = task.createdAtISO
-                    ? new Date(task.createdAtISO).getTime()
-                    : task.createdAt?.seconds
-                      ? task.createdAt.seconds * 1000
-                      : null;
-                  const _dueMs = task.dueDate ? new Date(task.dueDate).getTime() : null;
-                  // Office-hours-aware elapsed — WORKING seconds on both sides,
-                  // so nights/breaks/off-days move neither numerator nor
-                  // denominator. Schedule is fetched once and cached on window;
-                  // until it arrives we fall back to the old wall-clock ratio
-                  // (the next render corrects it).
-                  if (typeof window !== "undefined" && !window.__officeSchedCache && !window.__officeSchedLoading) {
-                    window.__officeSchedLoading = true;
-                    (async () => {
-                      try {
-                        const { getDoc, doc } = await import("firebase/firestore");
-                        const _s = await getDoc(doc(firebaseDb, "cowork_settings", "office"));
-                        window.__officeSchedCache = _s.exists()
-                          ? { schedule: _s.data().schedule || null, breaks: _s.data().breaks || [] }
-                          : { schedule: null, breaks: [] };
-                      } catch (_) { window.__officeSchedCache = { schedule: null, breaks: [] }; }
-                    })();
-                  }
-                  const _oc = (typeof window !== "undefined" && window.__officeSchedCache) || null;
-                  let _elapsed = 0;
-                  if (_dueMs && _createdMs) {
-                    if (_oc && _oc.schedule) {
-                      const _tot = workingSecsBetween(_createdMs, _dueMs, _oc.schedule, null, _oc.breaks);
-                      const _don = workingSecsBetween(_createdMs, Date.now(), _oc.schedule, null, _oc.breaks);
-                      _elapsed = _tot > 0 ? Math.min((_don / _tot) * 100, 100) : 0;
-                    } else {
-                      const _totalWindowMs = _dueMs - _createdMs;
-                      _elapsed = _totalWindowMs > 0 ? Math.min(((Date.now() - _createdMs) / _totalWindowMs) * 100, 100) : 0;
-                    }
-                  }
+                  // Elapsed % = actual worked seconds / the task's own window
+                  // (workedSecs, windowSecs — the exact values shown above as
+                  // "Time Tracked"). Previously measured wall-clock working-time
+                  // from task.createdAt to task.dueDate, which counts the idle
+                  // gap between creation and the employee's first Play as
+                  // "elapsed" — a task started long after creation showed a high
+                  // % here with almost no actual work done. windowSecs already
+                  // accounts for approved extensions (see its definition above),
+                  // so this doesn't reintroduce the "drift from actual due date"
+                  // problem the old wall-clock version was written to fix.
+                  const _elapsed = windowSecs > 0 ? Math.min((workedSecs / windowSecs) * 100, 100) : 0;
                   window.__extElapsedPct = _elapsed;
                   if (typeof document !== "undefined") {
                     document.documentElement.setAttribute("data-ext-elapsed", String(_elapsed));
