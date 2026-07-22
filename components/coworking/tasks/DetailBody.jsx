@@ -601,6 +601,11 @@ export default function DetailBody({
 
   // ── derived ──────────────────────────────────────────────────────────────
   const status = task.status;
+  // Only gates the ASSIGNEE'S OWN self-service actions — never blocks a
+  // TL/CEO's review of someone ELSE's task based on the reviewer's own
+  // duty status.
+  const myDutyMode = useDutyStatus(employeeId);
+  const assigneeActionsBlocked = isAssignee && myDutyMode && myDutyMode !== "online";
   const workedSecs = getDisplaySeconds ? getDisplaySeconds(task.taskId) : 0;
   // Total window = original + extension (if extension was approved and timer resumed)
   // Use wall-clock remaining from dueDate as total window when extension exists
@@ -1102,7 +1107,7 @@ export default function DetailBody({
 
 
           {/* ── SECTION: TIMER CONTROL (assignee, in progress) ── */}
-          {isAssignee && isConfirmed && isStarted && !treatAsFolder && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
+          {isAssignee && isConfirmed && isStarted && !treatAsFolder && !assigneeActionsBlocked && task.hasTimer && !task.isRepeat && !task.isThirdParty && !task.isGoal &&
             !hasForwardedChild && (
               <>
                 <Section title="Timer" />
@@ -1147,6 +1152,18 @@ export default function DetailBody({
             <>
               <Section title="Actions" />
               <div style={{ padding: "10px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+
+                {/* ── OFFLINE / EMERGENCY / BREAK — assignee's own actions disabled ── */}
+                {assigneeActionsBlocked && (
+                  <div style={{ padding: "10px 12px", background: myDutyMode === "emergency" ? "#FFFBEB" : myDutyMode === "break" ? "#ECFEFF" : "#F2F4F7", border: `1px solid ${myDutyMode === "emergency" ? "#FDE68A" : myDutyMode === "break" ? "#A5F3FC" : "#E4E7EC"}`, borderRadius: 6, fontSize: 12, color: myDutyMode === "emergency" ? "#92400E" : myDutyMode === "break" ? "#0E7490" : "#475467", lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>
+                      {myDutyMode === "emergency" ? "You're in Emergency Mode" : myDutyMode === "break" ? "You're on Break" : "You're Offline"}
+                    </div>
+                    <div>
+                      No task actions — starting the timer, submitting, requesting an extension — can be performed while you're {myDutyMode === "emergency" ? "in Emergency Mode" : myDutyMode === "break" ? "on Break" : "Offline"}. Go Online from the header to continue working on this task.
+                    </div>
+                  </div>
+                )}
 
                 {/* ── DEADLINE ALERT BANNER (top of actions) ── */}
                 {isFixedDeadlinePassed && (
@@ -1316,7 +1333,7 @@ export default function DetailBody({
                 )}
 
                 {/* ── EMPLOYEE: confirmed, not started → Start Working (timer tasks only) ── */}
-                {isAssignee && isConfirmed && !isStarted && status === "confirmed" && task.hasTimer !== false && (
+                {isAssignee && isConfirmed && !isStarted && status === "confirmed" && task.hasTimer !== false && !assigneeActionsBlocked && (
                   <ActionBtn onClick={() => handleAction("start")} busy={actionBusy}>
                     Start Working
                   </ActionBtn>
@@ -1339,12 +1356,12 @@ export default function DetailBody({
                 )}
 
                 {/* ── EMPLOYEE: submit for review ── */}
-                {isAssignee && isStarted && !task.isGoal && !task.isThirdParty && !task.isRepeat && !compStatus && (
+                {isAssignee && isStarted && !task.isGoal && !task.isThirdParty && !task.isRepeat && !compStatus && !assigneeActionsBlocked && (
                   <ActionBtn onClick={() => handleAction("submit_completion")} busy={actionBusy}>
                     Submit for Review
                   </ActionBtn>
                 )}
-                {isAssignee && (compStatus === "tl_rejected" || compStatus === "ceo_rejected") && (
+                {isAssignee && (compStatus === "tl_rejected" || compStatus === "ceo_rejected") && !assigneeActionsBlocked && (
                   <ActionBtn onClick={() => handleAction("submit_completion")} busy={actionBusy}>
                     Re-submit for Review
                   </ActionBtn>
@@ -1372,7 +1389,7 @@ export default function DetailBody({
                 })()}
 
                 {/* ── EXTENSION REQUEST ── */}
-                {isAssignee & !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && (
+                {isAssignee & !task.isFolder && !["open", "done", "cancelled"].includes(status) && !["tl_final_approved", "ceo_approved", "submitted", "tl_approved"].includes(compStatus) && task.deadlineExtRequest?.status !== "pending" && !assigneeActionsBlocked && (
                   <>
                     {!ef.showExtReqForm ? (() => {
                       const _pct = window.__extElapsedPct

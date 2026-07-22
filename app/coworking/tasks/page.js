@@ -9,6 +9,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
+import { useDutyStatus } from "../../../hooks/useDutyStatus";
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell";
 
 import CreateTaskModal from "../../../components/coworking/tasks/CreateTaskModal";
@@ -660,6 +661,7 @@ function RepeatSubmissionsTab({ task, employeeId, isAssignee, isCEO, isTL }) {
 /* ─── Main Page ─── */
 export default function TasksPage() {
   const { user, role, employeeId, employeeName, loading } = useCoworkAuth();
+  const myDutyMode = useDutyStatus(employeeId);
   const router = useRouter();
   const searchParams = useSearchParams();
   const isGoalView = searchParams?.get("filter") === "goal";
@@ -6311,7 +6313,7 @@ em-emoji-picker,
                             <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#F0FDF4", color: "#166534", whiteSpace: "nowrap" }}>
                               📅 {new Date(t.fixedDeadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                             </span>
-                            {canControl && (
+                            {canControl && (!myDutyMode || myDutyMode === "online") && (
                               <button
                                 disabled={fdBlocked}
                                 title={isRunningFD ? "Pause" : fdBlocked ? "Confirm task first" : "Play — track time"}
@@ -6354,7 +6356,7 @@ em-emoji-picker,
                       return (
                         <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                           {/* Button only for assignees — only show after task is confirmed/in_progress */}
-                          {canControl && (["confirmed", "in_progress", "deadline_approved", "done"].includes(t.status) || isRunning || (sess?.totalSeconds || 0) > 0) && (
+                          {canControl && (!myDutyMode || myDutyMode === "online") && (["confirmed", "in_progress", "deadline_approved", "done"].includes(t.status) || isRunning || (sess?.totalSeconds || 0) > 0) && (
                             <button
                               disabled={timerBlocked}
                               onClick={e => {
@@ -6493,7 +6495,7 @@ em-emoji-picker,
                   </div>
                   {(() => {
                     const _run = timerActiveTaskId === t.taskId;
-                    const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
+                    const _blk = (!["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run) || ((t.assigneeIds || []).includes(employeeId) && myDutyMode && myDutyMode !== "online");
                     const _sec = getDisplaySeconds(t.taskId);
                     const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
                     return (
@@ -6507,6 +6509,7 @@ em-emoji-picker,
                   })()}
                   <div className="col-status" style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                     {(t.assigneeIds || []).includes(employeeId) && (() => {
+                      if (myDutyMode && myDutyMode !== "online") return null;
                       const _run = timerActiveTaskId === t.taskId;
                       const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
                       const _sec = getDisplaySeconds(t.taskId);
@@ -6876,6 +6879,20 @@ em-emoji-picker,
               {(role === "tl" || role === "ceo") && (
                 <div style={{ padding: "10px 16px 0" }}>
                   <EmergencyApprovalsPanel currentEmployeeId={employeeId} isCEO={role === "ceo"} />
+                </div>
+              )}
+
+              {myDutyMode && myDutyMode !== "online" && (
+                <div style={{
+                  margin: "10px 16px", padding: "10px 14px", borderRadius: 8,
+                  background: myDutyMode === "emergency" ? "#FFFBEB" : myDutyMode === "break" ? "#ECFEFF" : "#F2F4F7",
+                  border: `1px solid ${myDutyMode === "emergency" ? "#FDE68A" : myDutyMode === "break" ? "#A5F3FC" : "#E4E7EC"}`,
+                  fontSize: 12.5,
+                  color: myDutyMode === "emergency" ? "#92400E" : myDutyMode === "break" ? "#0E7490" : "#475467",
+                  lineHeight: 1.6,
+                }}>
+                  <strong>{myDutyMode === "emergency" ? "Emergency Mode" : myDutyMode === "break" ? "On Break" : "Offline"}</strong>
+                  {" — "}task actions (timer, submit, extension requests) are disabled while you're {myDutyMode === "emergency" ? "in Emergency Mode" : myDutyMode === "break" ? "on Break" : "Offline"}. Go Online from the header to resume working.
                 </div>
               )}
 
@@ -7691,9 +7708,9 @@ em-emoji-picker,
                                 </>
                               )}
                               {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && !(t.subtaskIds || []).length && (() => {
+                                if (myDutyMode && myDutyMode !== "online") return null;
                                 const _run = timerActiveTaskId === t.taskId;
-                                const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;
-                                const _sec = getDisplaySeconds(t.taskId);
+                                const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;                                const _sec = getDisplaySeconds(t.taskId);
                                 const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
                                 return (
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }} onClick={e => e.stopPropagation()}>
@@ -8358,7 +8375,13 @@ em-emoji-picker,
               {/* === Image-2: chat content shows ONLY when no detail tab is active === */}
               {(rightPanel === null) && (<>
 
-                <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
+                {(isAssignee && myDutyMode && myDutyMode !== "online") ? (
+                  <div style={{ padding: "10px 14px", background: myDutyMode === "emergency" ? "#FFFBEB" : myDutyMode === "break" ? "#ECFEFF" : "#F2F4F7", border: `1px solid ${myDutyMode === "emergency" ? "#FDE68A" : myDutyMode === "break" ? "#A5F3FC" : "#E4E7EC"}`, borderRadius: 6, fontSize: 12.5, color: myDutyMode === "emergency" ? "#92400E" : myDutyMode === "break" ? "#0E7490" : "#475467", lineHeight: 1.6 }}>
+                    <strong>{myDutyMode === "emergency" ? "Emergency Mode" : myDutyMode === "break" ? "On Break" : "Offline"}</strong> — the timer is paused and no task actions can be taken right now. Go Online from the header to resume.
+                  </div>
+                ) : (
+                  <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
+                )}
 
                 {/* ── TASK GUIDE — formal info strip for new open tasks ── */}
                 {task && !task.isFolder && !task.isRepeat && !task.isThirdParty && !task.isGoal && isAssignee && !isConfirmed && task.status === "open" && !task.dueDate && (
@@ -9176,7 +9199,13 @@ em-emoji-picker,
               {task && !task.isFolder && rightPanel && (
                 <div className="gv-chat-inline-detail" style={{ flex: 1, overflowY: task.isGoal ? "auto" : "hidden", background: "#fff", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
-                  <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
+                  {(isAssignee && myDutyMode && myDutyMode !== "online") ? (
+                    <div style={{ padding: "10px 14px", background: myDutyMode === "emergency" ? "#FFFBEB" : myDutyMode === "break" ? "#ECFEFF" : "#F2F4F7", border: `1px solid ${myDutyMode === "emergency" ? "#FDE68A" : myDutyMode === "break" ? "#A5F3FC" : "#E4E7EC"}`, borderRadius: 6, fontSize: 12.5, color: myDutyMode === "emergency" ? "#92400E" : myDutyMode === "break" ? "#0E7490" : "#475467", lineHeight: 1.6 }}>
+                      <strong>{myDutyMode === "emergency" ? "Emergency Mode" : myDutyMode === "break" ? "On Break" : "Offline"}</strong> — the timer is paused and no task actions can be taken right now. Go Online from the header to resume.
+                    </div>
+                  ) : (
+                    <TaskActionBanner task={task} employeeId={employeeId} isCEO={isCEO} isTL={isTL} isAssignee={isAssignee} isConfirmed={isConfirmed} isStarted={isStarted} actionBusy={actionBusy} handleAction={handleAction} getDisplaySeconds={getDisplaySeconds} timerActiveTaskId={timerActiveTaskId} handleTimerStart={handleTimerStart} handleTimerPause={handleTimerPause} allTaskMap={allTaskMap} />
+                  )}
 
                   {rightPanel === "files" ? (
                     filesLoading ? (
