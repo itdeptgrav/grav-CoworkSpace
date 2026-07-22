@@ -8758,7 +8758,7 @@ em-emoji-picker,
                 })()}
 
                 {/* Creator approval panel in chat column — 3 tabs always visible */}
-                {task && !task.isFolder && task.status === "pending_deadline_approval" && task.assignedBy === employeeId && (() => {
+                {task && !task.isFolder && task.status === "pending_deadline_approval" && (task.assignedBy === employeeId || isCEO || isTL) && (() => {
                   const isExt = ["in_progress", "confirmed"].includes(task.prevStatusBeforeDeadlineProposal || "");
                   const activeTab = showCounterForm ? "suggest" : showRejectInput ? "reject" : null;
                   const setTab = (t) => {
