@@ -5,17 +5,37 @@
  * UPDATED: Added "Join Cowork Meeting" button that routes to the
  * built-in LiveKit meeting room at /coworking/cowork-meeting/[meetId]
  */
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate } from "../../../lib/coworkUtils";
+import { createPublicLink } from "../../../lib/livekitApi";
 
 export default function CoworkMeetCard({ meet, role }) {
   const router = useRouter();
   const isPast = new Date(meet.dateTime) < new Date();
   const isLive = meet.status === "live";
   const isEnded = meet.status === "ended";
+  const isHost = role === "ceo" || role === "tl";
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const handleJoinCowork = () => {
     router.push(`/coworking/cowork-meeting/${meet.meetId}`);
+  };
+
+  const handleGetPublicLink = async () => {
+    setLinkBusy(true);
+    try {
+      const res = await createPublicLink(meet.meetId);
+      const url = `${window.location.origin}/coworking/join/${res.publicShareToken}`;
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (e) {
+      alert(e.message || "Could not create public link");
+    } finally {
+      setLinkBusy(false);
+    }
   };
 
   return (
@@ -134,6 +154,34 @@ export default function CoworkMeetCard({ meet, role }) {
             </svg>
             Google Meet
           </a>
+        )}
+
+        {isHost && !isEnded && (
+          <button
+            onClick={handleGetPublicLink}
+            disabled={linkBusy}
+            style={{ ...s.gMeetBtn, cursor: linkBusy ? "wait" : "pointer" }}
+            title="Copy a link anyone can join with — no account needed"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M10 13a5 5 0 007.07 0l1.93-1.93a5 5 0 00-7.07-7.07L10 5" />
+              <path d="M14 11a5 5 0 00-7.07 0L5 12.93a5 5 0 007.07 7.07L14 19" />
+            </svg>
+            {linkCopied
+              ? "Link copied!"
+              : linkBusy
+                ? "Generating…"
+                : "Public Link"}
+          </button>
         )}
       </div>
     </div>
