@@ -381,9 +381,9 @@ export default function ReviewCompletionModal({ task, currentEmployeeId, role, r
               <button onClick={() => { setShowReworkForm(true); setShowRejectForm(false); }} disabled={submitting} style={{ flex: 1, padding: "9px", border: "1px solid #FCD34D", borderRadius: 6, background: "#FFFBEB", color: "#92400E", fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", ...F }}>
                 🔄 Rework
               </button>
-              <button onClick={() => { setShowRejectForm(true); setShowReworkForm(false); }} disabled={submitting} style={{ flex: 1, padding: "9px", border: "1px solid #FECACA", borderRadius: 6, background: "#FEF2F2", color: "#DC2626", fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", ...F }}>
+              {/*<button onClick={() => { setShowRejectForm(true); setShowReworkForm(false); }} disabled={submitting} style={{ flex: 1, padding: "9px", border: "1px solid #FECACA", borderRadius: 6, background: "#FEF2F2", color: "#DC2626", fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", ...F }}>
                 ✕ Reject
-              </button>
+              </button>*/}
               <button onClick={() => prepareConfirm("approve")} disabled={submitting} style={{ flex: 2, padding: "9px", border: "none", borderRadius: 6, background: submitting ? "#E5E7EB" : "#059669", color: submitting ? "#9CA3AF" : "#fff", fontSize: 12, fontWeight: 600, cursor: submitting ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, ...F }}>
                 {isCEOReview ? "✅ Final Approve" : "✅ Approve"}
               </button>

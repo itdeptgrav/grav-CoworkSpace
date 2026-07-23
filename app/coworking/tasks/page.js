@@ -7618,37 +7618,6 @@ em-emoji-picker,
                                     const workedStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
                                     return (
                                       <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }} onClick={e => e.stopPropagation()}>
-                                        {isAssigneeOfThis && t.status === "in_progress" && (
-                                          <button
-                                            type="button"
-                                            title={isRunning ? "Pause" : "Resume"}
-                                            disabled={!isRunning && t.dueDate && new Date(t.dueDate) < new Date()}
-                                            onClick={() => isRunning
-                                              ? handleTimerPause?.(t.taskId, t.title)
-                                              : handleTimerStart?.(t.taskId, t.title)
-                                            }
-                                            style={{
-                                              width: 18, height: 18, borderRadius: "50%", border: "none",
-                                              background: isRunning ? "#DCFCE7" : (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "#FEE2E2" : "#EBF2FA",
-                                              color: isRunning ? "#16A34A" : (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "#DC2626" : "#1B4F8A",
-                                              cursor: (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? "not-allowed" : "pointer",
-                                              opacity: (!isRunning && t.dueDate && new Date(t.dueDate) < new Date()) ? 0.4 : 1,
-                                              display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                              flexShrink: 0, padding: 0,
-                                            }}
-                                          >
-                                            {isRunning ? (
-                                              <svg width="7" height="7" viewBox="0 0 12 12" fill="currentColor">
-                                                <rect x="2" y="1.5" width="3" height="9" rx="1" />
-                                                <rect x="7" y="1.5" width="3" height="9" rx="1" />
-                                              </svg>
-                                            ) : (
-                                              <svg width="7" height="7" viewBox="0 0 12 12" fill="currentColor">
-                                                <path d="M2.5 1.5l8 4.5-8 4.5V1.5z" />
-                                              </svg>
-                                            )}
-                                          </button>
-                                        )}
                                         {secs > 0 && (
                                           <span style={{ fontSize: 10, color: isOver ? "#DC2626" : "#6B7280" }}>
                                             ⏱ {workedStr}{total > 0 ? ` / ${Math.floor(total / 3600) > 0 ? `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m` : `${Math.floor(total / 60)}m`}` : ""}
@@ -7710,7 +7679,7 @@ em-emoji-picker,
                               {!t.hasTimer && t.fixedDeadline && (t.assigneeIds || []).includes(employeeId) && !(t.subtaskIds || []).length && (() => {
                                 if (myDutyMode && myDutyMode !== "online") return null;
                                 const _run = timerActiveTaskId === t.taskId;
-                                const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run;                                const _sec = getDisplaySeconds(t.taskId);
+                                const _blk = !["confirmed", "in_progress", "done", "deadline_approved"].includes(t.status) && !_run; const _sec = getDisplaySeconds(t.taskId);
                                 const _fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
                                 return (
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }} onClick={e => e.stopPropagation()}>
