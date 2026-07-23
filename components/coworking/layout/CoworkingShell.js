@@ -2791,7 +2791,13 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 .cw-duty-since { font-size: 11px; color: #98A2B3; margin-top: 6px; }
 
 @media (max-width: 1024px) {
-  .cw-duty-btn { display: none; }
+  /* Was fully hidden below 1024px — all phones and most tablets. That's
+     the bug: online/offline status disappeared on mobile entirely. Now
+     it stays visible, just compact: drop the "Worked today Xh Ym"
+     caption and tighten padding so the pill still fits next to the
+     hamburger/title on the left and the four icon buttons on the right. */
+  .cw-duty-btn { padding: 0 8px; gap: 5px; }
+  .cw-duty-caption { display: none; }
 }
         .cw-topbar-notif-dot {
           position: absolute;
