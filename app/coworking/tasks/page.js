@@ -3540,7 +3540,11 @@ export default function TasksPage() {
       snap.forEach(d => {
         const t = { taskId: d.id, ...d.data() };
         if (t.isSelfAssigned) return;
-        const assigneeId = (t.assigneeIds || [])[0];
+        // pendingAssigneeId first — assigneeIds is intentionally still empty at
+        // this stage on the cross-department-approval path (see department-approve
+        // in taskForward.js). Without this fallback, every such task silently
+        // dropped out of this list the moment it reached pending_tl_hours.
+        const assigneeId = t.pendingAssigneeId || (t.assigneeIds || [])[0];
         if (!assigneeId) return;
         const assigneeDept = employeeMapFull.get(assigneeId)?.department || "";
         if (myDept && assigneeDept === myDept) mine.push(t);
@@ -4045,7 +4049,7 @@ export default function TasksPage() {
       if (t.assignedBy === employeeId) return true;
       if (t.tlHoursSetBy === employeeId) return true;
       if (t.status === "pending_tl_hours" && role === "tl") {
-        const draftAssignee = (t.assigneeIds || [])[0];
+        const draftAssignee = t.pendingAssigneeId || (t.assigneeIds || [])[0];
         const draftDept = employeeMapFull.get(draftAssignee)?.department;
         const myDept = employeeMapFull.get(employeeId)?.department;
         if (draftDept && myDept && draftDept === myDept) return true;
@@ -6771,12 +6775,18 @@ em-emoji-picker,
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {pendingDraftHours.map(t => {
-                        const assigneeName = employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member";
+                        const assigneeName = employeeMapFull.get(t.pendingAssigneeId || (t.assigneeIds || [])[0])?.name || "your team member";
                         const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
                         const isBusy = draftHoursBusyId === t.taskId;
                         return (
                           <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 6 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                              <button type="button" onClick={() => handleSelectNode(t)}
+                                style={{ flexShrink: 0, padding: "3px 9px", border: "1px solid #CBD5E1", borderRadius: 5, background: "#F8FAFC", color: "#374151", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                Task Details
+                              </button>
+                            </div>
                             <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>for {assigneeName} — set their real estimated hours</div>
                             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                               <div style={{ flex: 1, padding: "7px 6px", border: "1px solid #1B4F8A", borderRadius: 6, background: "#EBF2FA", color: "#1B4F8A", fontSize: 11, fontWeight: 600, textAlign: "center" }}>
@@ -8508,13 +8518,20 @@ em-emoji-picker,
                       )}
 
                       {task.status === "pending_tl_hours" && !task.isSelfAssigned && (() => {
-                        const draftAssigneeId = (task.assigneeIds || [])[0];
+                        // pendingAssigneeId covers the cross-department-approval path, where
+                        // assigneeIds is intentionally still empty at this point. Falls back
+                        // to assigneeIds[0] for the no-gate deadline-mode path.
+                        const draftAssigneeId = task.pendingAssigneeId || (task.assigneeIds || [])[0];
                         const draftAssigneeDept = employeeMapFull.get(draftAssigneeId)?.department || "";
                         const myDept = employeeMapFull.get(employeeId)?.department || "";
                         const iAmTheirTl = role === "tl" && draftAssigneeDept && myDept === draftAssigneeDept;
                         if (iAmTheirTl) {
                           const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
                           const _lbl = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 };
+                          // Same Map-keyed state the summary card uses (declared once, near the
+                          // top of the component) — was referencing undeclared flat
+                          // draftHoursVal/draftHoursUnit/draftHoursBusy variables before.
+                          const draftBusyHere = draftHoursBusyId === task.taskId;
                           return (
                             <div style={{ padding: "10px 16px", borderLeft: "3px solid #6B7280", background: "#F9FAFB" }}>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 8 }}>Set the real estimated hours before {employeeMapFull.get(draftAssigneeId)?.name || "your team member"} can see this task.</div>
@@ -8529,15 +8546,15 @@ em-emoji-picker,
                               </div>
                               <label style={_lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(required — {employeeMapFull.get(draftAssigneeId)?.name || "assignee"} can negotiate)</span></label>
                               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                                <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3" value={draftHoursVal} onChange={e => setDraftHoursVal(e.target.value.replace(/[^0-9]/g, ""))} />
-                                <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnit} onChange={e => setDraftHoursUnit(e.target.value)}>
+                                <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3" value={draftHoursValMap[task.taskId] || ""} onChange={e => setDraftHoursValMap(m => ({ ...m, [task.taskId]: e.target.value.replace(/[^0-9]/g, "") }))} />
+                                <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnitMap[task.taskId] || "hours"} onChange={e => setDraftHoursUnitMap(m => ({ ...m, [task.taskId]: e.target.value }))}>
                                   <option value="minutes">Minutes</option>
                                   <option value="hours">Hours</option>
                                   <option value="days">Days</option>
                                 </select>
                               </div>
-                              <button disabled={draftHoursBusy} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftHoursBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftHoursBusy ? 0.6 : 1 }}>
-                                {draftHoursBusy ? "Setting…" : "Set Hours & Activate Task"}
+                              <button disabled={draftBusyHere} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftBusyHere ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftBusyHere ? 0.6 : 1 }}>
+                                {draftBusyHere ? "Setting…" : "Set Hours & Activate Task"}
                               </button>
                             </div>
                           );

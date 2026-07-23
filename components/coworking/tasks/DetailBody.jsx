@@ -638,6 +638,12 @@ export default function DetailBody({
   // at THIS level. All of that belongs to the subtasks, not the parent.
   const treatAsFolder = task.isFolder || (task.subtaskIds || []).length > 0;
 
+  // Cross-department task still waiting on approval, or approved but not yet
+  // activated (estimated hours not set). Nothing here is genuinely assigned
+  // or actionable yet, regardless of what isAssignee/isTL happen to compute
+  // to for the current viewer — no workflow action should show.
+  const isPendingCrossDeptGate = status === "pending_tl_hours" || status === "pending_department_approval";
+
   // Wall-clock based remaining/over — reflects approved extensions immediately
   // When timer hasn't started yet (workedSecs=0, not running), show full budget
   // not wall-clock dueDate which may differ from window due to cascade timing gaps.
@@ -1165,6 +1171,15 @@ export default function DetailBody({
                   </div>
                 )}
 
+                {/* ── CROSS-DEPARTMENT GATE — not yet fully assigned, no workflow actions apply ── */}
+                {isPendingCrossDeptGate && (
+                  <div style={{ padding: "10px 12px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, fontSize: 11, color: "#92400E", lineHeight: 1.6 }}>
+                    {status === "pending_department_approval"
+                      ? "This cross-department assignment is still waiting on approval — no task actions apply until both sides sign off."
+                      : "This cross-department task is approved but not yet active — estimated hours still need to be set before any task actions apply."}
+                  </div>
+                )}
+
                 {/* ── DEADLINE ALERT BANNER (top of actions) ── */}
                 {isFixedDeadlinePassed && (
                   <div style={{ padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.6 }}>
@@ -1203,7 +1218,7 @@ export default function DetailBody({
                 })()}
 
                 {/* ── EMPLOYEE: pre-confirm deadline flow ── */}
-                {isAssignee && !isConfirmed && !task.isGoal && !task.isThirdParty && !task.isRepeat && (
+                {isAssignee && !isConfirmed && !isPendingCrossDeptGate && !task.isGoal && !task.isThirdParty && !task.isRepeat && (
                   <>
                     {/* Timer task: propose deadline */}
                     {task.hasTimer === true && status === "open" && (
@@ -1654,7 +1669,7 @@ export default function DetailBody({
                 )}
 
                 {/* ── TL/CEO: forward task ── */}
-                {(isTL || isCEO) && !task.isFolder && (
+                {(isTL || isCEO) && !task.isFolder && !isPendingCrossDeptGate && (
                   <ActionBtn variant="ghost" onClick={() => handleAction("forward")}>
                     Forward / Split Task
                   </ActionBtn>
