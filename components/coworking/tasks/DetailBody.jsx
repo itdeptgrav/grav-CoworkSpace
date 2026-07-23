@@ -14,6 +14,7 @@ import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { addWorkingSecs, workingSecsBetween } from "../../../lib/officeDueDate";
 import MoveToFolderModal from "./MoveToFolderModal";
+import EditTaskModal from "./EditTaskModal";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
@@ -603,6 +604,7 @@ export default function DetailBody({
   // no extra fetch needed. A folder can't be moved into another folder, and
   // a task already in this exact folder is filtered out below at render time.
   const [showMoveToFolder, setShowMoveToFolder] = useState(false);
+  const [showEditTask, setShowEditTask] = useState(false);
   const folderOptions = (task.isFolder || !allTaskMap)
     ? []
     : [...allTaskMap.values()].filter(t => t.isFolder && t.taskId !== task.taskId);
@@ -1676,6 +1678,16 @@ export default function DetailBody({
                   </ActionBtn>
                 )}
 
+                {/* ── TL/CEO: edit title/description/requirements — available even
+                    while the task is still in the cross-department pending
+                    window, unlike Forward/Confirm below, since fixing the
+                    task's own content isn't a workflow action. ── */}
+                {(isTL || isCEO) && (
+                  <ActionBtn variant="ghost" onClick={() => setShowEditTask(true)}>
+                    Edit Task
+                  </ActionBtn>
+                )}
+
                 {/* ── TL/CEO: forward task ── */}
                 {(isTL || isCEO) && !task.isFolder && !isPendingCrossDeptGate && (
                   <ActionBtn variant="ghost" onClick={() => handleAction("forward")}>
@@ -1715,6 +1727,14 @@ export default function DetailBody({
           folders={folderOptions}
           onClose={() => setShowMoveToFolder(false)}
           onSuccess={() => { setShowMoveToFolder(false); onDataRefresh?.(); }}
+        />
+      )}
+
+      {showEditTask && (
+        <EditTaskModal
+          task={task}
+          onClose={() => setShowEditTask(false)}
+          onSuccess={() => { setShowEditTask(false); onDataRefresh?.(); }}
         />
       )}
     </div>
