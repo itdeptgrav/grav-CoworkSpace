@@ -31,6 +31,9 @@ async function resetEmployeePassword(employeeId, newPassword) {
   return data;
 }
 
+// ── Department options for the Change Department dropdown ────────────────────
+const DEPARTMENT_OPTIONS = ["HR", "Sales", "Operations", "Design", "Engineering", "Finance", "Marketing", "Management"];
+
 export default function CreateEmployeePage() {
   const { user, role, loading } = useCoworkAuth();
   const router = useRouter();
@@ -66,6 +69,13 @@ export default function CreateEmployeePage() {
   const [roleModal, setRoleModal] = useState(null);  // { employeeId, name, currentRole }
   const [roleBusy, setRoleBusy] = useState(false);
   const [roleError, setRoleError] = useState("");
+
+  // ── Change department modal state ───────────────────────────────────────
+  const [deptModal, setDeptModal] = useState(null); // { employeeId, name, currentDept }
+  const [deptValue, setDeptValue] = useState("");
+  const [deptCustomMode, setDeptCustomMode] = useState(true);
+  const [deptBusy, setDeptBusy] = useState(false);
+  const [deptError, setDeptError] = useState("");
 
   // ── Edit Employee ID modal state ────────────────────────────────────────
   const [editIdModal, setEditIdModal] = useState(null);
@@ -196,6 +206,40 @@ export default function CreateEmployeePage() {
       setRoleError(e.message || "Role change failed.");
     } finally {
       setRoleBusy(false);
+    }
+  };
+
+  // ── Change department ─────────────────────────────────────────────────────
+  const openDept = (emp) => {
+    setDeptModal({ employeeId: emp.employeeId, name: emp.name, currentDept: emp.department || "" });
+    setDeptValue(emp.department || "");
+    setDeptCustomMode(!DEPARTMENT_OPTIONS.includes(emp.department));
+    setDeptError("");
+  };
+  const closeDept = () => { if (deptBusy) return; setDeptModal(null); };
+  const handleChangeDepartment = async (e) => {
+    e.preventDefault();
+    if (!deptModal || deptBusy) return;
+    if (!deptValue.trim()) { setDeptError("Department is required."); return; }
+    setDeptBusy(true); setDeptError("");
+    try {
+      const user = firebaseAuth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
+      const res = await fetch(`${BASE}/cowork/employee/${deptModal.employeeId}/change-department`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ department: deptValue.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Department change failed");
+      setDeptModal(null);
+      const refreshed = await listEmployees();
+      setEmployees(refreshed.employees || []);
+    } catch (e) {
+      setDeptError(e.message || "Department change failed.");
+    } finally {
+      setDeptBusy(false);
     }
   };
 
@@ -584,6 +628,14 @@ export default function CreateEmployeePage() {
                         >
                           Edit ID
                         </button>
+                        <button
+                          onClick={() => openDept(emp)}
+                          style={{ padding: "5px 12px", border: "1px solid #c7d2fe", borderRadius: 4, background: "#eef2ff", color: "#4338ca", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "sans-serif", transition: "all 0.12s" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#e0e7ff"; e.currentTarget.style.borderColor = "#a5b4fc"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "#eef2ff"; e.currentTarget.style.borderColor = "#c7d2fe"; }}
+                        >
+                          Change Dept
+                        </button>
                         {emp.role !== "ceo" && (
                           <>
                             <button
@@ -710,6 +762,81 @@ export default function CreateEmployeePage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHANGE DEPARTMENT MODAL ─────────────────────────────────── */}
+      {deptModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={e => { if (e.target === e.currentTarget) closeDept(); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 420, boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "sans-serif", overflow: "hidden" }}>
+
+            {/* Header */}
+            <div style={{ background: "#eef2ff", borderBottom: "1px solid #c7d2fe", padding: "18px 24px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#e0e7ff", border: "1px solid #c7d2fe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>
+                🏢
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#3730a3" }}>Change Department</div>
+                <div style={{ fontSize: 12, color: "#6366f1", marginTop: 2 }}>
+                  {deptModal.name} &nbsp;·&nbsp; {deptModal.employeeId}
+                </div>
+              </div>
+              <button onClick={closeDept} disabled={deptBusy}
+                style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af", lineHeight: 1 }}>
+                ×
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleChangeDepartment} style={{ padding: "20px 24px" }}>
+              <div style={{ fontSize: 13, color: "#374151", marginBottom: 14 }}>
+                Current department: <strong>{deptModal.currentDept || "—"}</strong>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <label style={s.label}>New Department</label>
+                <button type="button"
+                  onClick={() => { setDeptCustomMode(p => !p); setDeptValue(""); }}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 500, color: deptCustomMode ? "#1d4ed8" : "#6b7280", textDecoration: "underline", padding: 0 }}>
+                  {deptCustomMode ? "Use dropdown" : "Enter custom"}
+                </button>
+              </div>
+
+              {deptCustomMode ? (
+                <input type="text" style={{ ...s.input, width: "100%", boxSizing: "border-box" }}
+                  value={deptValue} onChange={e => setDeptValue(e.target.value)}
+                  placeholder="Enter department name" autoFocus required />
+              ) : (
+                <select style={{ ...s.input, width: "100%", boxSizing: "border-box" }}
+                  value={deptValue} onChange={e => setDeptValue(e.target.value)} required>
+                  <option value="">Select department</option>
+                  {DEPARTMENT_OPTIONS.map(d => (
+                    <option key={d}>{d}</option>
+                  ))}
+                </select>
+              )}
+
+              {deptError && (
+                <div style={{ marginTop: 14, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, fontSize: 12, color: "#dc2626" }}>
+                  {deptError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                <button type="button" onClick={closeDept} disabled={deptBusy}
+                  style={{ flex: 1, padding: "9px 0", border: "1px solid #e5e7eb", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: deptBusy ? "not-allowed" : "pointer", fontFamily: "sans-serif" }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={deptBusy || !deptValue.trim()}
+                  style={{ flex: 1, padding: "9px 0", border: "none", borderRadius: 6, background: deptBusy || !deptValue.trim() ? "#a5b4fc" : "#4f46e5", color: "#fff", fontSize: 13, fontWeight: 600, cursor: deptBusy || !deptValue.trim() ? "not-allowed" : "pointer", fontFamily: "sans-serif", transition: "background 0.15s" }}>
+                  {deptBusy ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

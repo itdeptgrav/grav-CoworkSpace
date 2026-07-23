@@ -48,7 +48,7 @@ import EmergencyApprovalsPanel from "../../../components/coworking/shared/Emerge
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
 import LinkedText from "../../../components/coworking/messaging/LinkedText";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
-import { listTasks, getFullTask, getDailyReports, deleteTask } from "../../../lib/mediaUploadApi";
+import { listTasks, getFullTask, getDailyReports, deleteTask, moveTaskToFolder } from "../../../lib/mediaUploadApi";
 import ThirdPartyTask from "../../../components/coworking/tasks/ThirdPartyTask";
 import GoalTask from "../../../components/coworking/tasks/GoalTask";
 import { taskForwardApi } from "../../../lib/taskForwardApi";
@@ -1489,6 +1489,29 @@ export default function TasksPage() {
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
+
+    // ── Drop onto a folder, OR onto a task that already lives directly
+    // inside one: both cases mean "move into that folder" and must ALWAYS
+    // land as the folder's own direct child — never nested one level deeper
+    // under whichever sibling row you happened to drop on. Skips the
+    // assignee-guard and the priority/sibling machinery below entirely;
+    // neither applies here (folders have no assignees or priority, and a
+    // drop target's sibling doesn't get to decide the destination).
+    const _dropParentTask = dropTask.parentTaskId ? allTaskMapRef.current.get(dropTask.parentTaskId) : null;
+    const _targetFolder = dropTask.isFolder ? dropTask : (_dropParentTask?.isFolder ? _dropParentTask : null);
+    if (_targetFolder) {
+      if (dragTask.isFolder) { alert("A folder can't be moved into another folder."); return; }
+      if ((dragTask.parentTaskId || null) === _targetFolder.taskId) return; // already inside this folder
+      setDragWarnModal({
+        dragId, dropOnTaskId: _targetFolder.taskId,
+        dragTitle: dragTask.title || dragId,
+        dropTitle: _targetFolder.title || _targetFolder.taskId,
+        newParentId: _targetFolder.taskId,
+        isRootMove: false,
+        isMoveIntoFolder: true,
+      });
+      return;
+    }
 
     // ── Same-assignee guard ────────────────────────────────────────────────
     // In Person grouping mode the UI shows one card per assignee. Dragging a
@@ -3540,7 +3563,11 @@ export default function TasksPage() {
       snap.forEach(d => {
         const t = { taskId: d.id, ...d.data() };
         if (t.isSelfAssigned) return;
-        const assigneeId = (t.assigneeIds || [])[0];
+        // pendingAssigneeId first — assigneeIds is intentionally still empty at
+        // this stage on the cross-department-approval path (see department-approve
+        // in taskForward.js). Without this fallback, every such task silently
+        // dropped out of this list the moment it reached pending_tl_hours.
+        const assigneeId = t.pendingAssigneeId || (t.assigneeIds || [])[0];
         if (!assigneeId) return;
         const assigneeDept = employeeMapFull.get(assigneeId)?.department || "";
         if (myDept && assigneeDept === myDept) mine.push(t);
@@ -4045,7 +4072,7 @@ export default function TasksPage() {
       if (t.assignedBy === employeeId) return true;
       if (t.tlHoursSetBy === employeeId) return true;
       if (t.status === "pending_tl_hours" && role === "tl") {
-        const draftAssignee = (t.assigneeIds || [])[0];
+        const draftAssignee = t.pendingAssigneeId || (t.assigneeIds || [])[0];
         const draftDept = employeeMapFull.get(draftAssignee)?.department;
         const myDept = employeeMapFull.get(employeeId)?.department;
         if (draftDept && myDept && draftDept === myDept) return true;
@@ -5774,9 +5801,11 @@ em-emoji-picker,
             <div style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 12 }}>
                 <strong>"{dragWarnModal.dragTitle}"</strong> will be moved{" "}
-                {dragWarnModal.isRootMove
-                  ? <span>to the <strong>root level</strong> (becomes a parent task)</span>
-                  : <span>under <strong>"{dragWarnModal.dropTitle}"</strong>'s parent</span>
+                {dragWarnModal.isMoveIntoFolder
+                  ? <span>inside the folder <strong>"{dragWarnModal.dropTitle}"</strong></span>
+                  : dragWarnModal.isRootMove
+                    ? <span>to the <strong>root level</strong> (becomes a parent task)</span>
+                    : <span>under <strong>"{dragWarnModal.dropTitle}"</strong>'s parent</span>
                 }.
               </div>
               <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 9, padding: "10px 14px", fontSize: 12, color: "#166534" }}>
@@ -5790,8 +5819,19 @@ em-emoji-picker,
                 Cancel — keep position
               </button>
               <button onClick={() => {
-                const { dragId, dropOnTaskId, newParentId } = dragWarnModal;
+                const { dragId, dropOnTaskId, newParentId, isMoveIntoFolder } = dragWarnModal;
                 setDragWarnModal(null);
+                if (isMoveIntoFolder) {
+                  (async () => {
+                    try {
+                      await moveTaskToFolder(dragId, dropOnTaskId);
+                      await loadAllTasks();
+                    } catch (e) {
+                      alert(e?.message || "Move failed.");
+                    }
+                  })();
+                  return;
+                }
                 // Route through priority modal so reason is collected and conflict check fires
                 const _dragTask = allTaskMapRef.current?.get(dragId);
                 const _dropTask = allTaskMapRef.current?.get(dropOnTaskId);
@@ -6560,13 +6600,23 @@ em-emoji-picker,
                   .map(sid => allTasks.find(t => t.taskId === sid) || allTaskMap.get(sid))
                   .filter(Boolean)
                   .sort((a, b) => {
-                    if (a.order !== undefined || b.order !== undefined) {
-                      const ao = a.order !== undefined ? a.order : 90000 + (Number(a.priority ?? 5)) * 1000;
-                      const bo = b.order !== undefined ? b.order : 90000 + (Number(b.priority ?? 5)) * 1000;
-                      return ao - bo;
-                    }
+                    // Priority is now ALWAYS the dominant key, across every tier —
+                    // the old version let `order` override priority entirely
+                    // whenever either task had one, and its fallback for the task
+                    // WITHOUT an order (90000 + priority*1000) doesn't reliably
+                    // land after a real small order value anyway. That's what
+                    // produced the "random" ordering: a task moved into a folder
+                    // (no order field) could sort below or above an unrelated
+                    // higher-priority task purely based on whether that OTHER
+                    // task happened to carry a leftover order from a past
+                    // same-tier drag-reorder.
                     const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
                     if (pa !== pb) return pa - pb;
+                    // Equal priority — respect a manual drag-reorder position
+                    // between the two, but only as a tie-breaker within the
+                    // same tier, never as a way to jump ahead of a genuinely
+                    // higher-priority task.
+                    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
                     return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
                   })
                   .map(sub => <TblRow key={sub.taskId} t={sub} depth={depth + 1} isSubtask />)}
@@ -6771,12 +6821,18 @@ em-emoji-picker,
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {pendingDraftHours.map(t => {
-                        const assigneeName = employeeMapFull.get((t.assigneeIds || [])[0])?.name || "your team member";
+                        const assigneeName = employeeMapFull.get(t.pendingAssigneeId || (t.assigneeIds || [])[0])?.name || "your team member";
                         const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
                         const isBusy = draftHoursBusyId === t.taskId;
                         return (
                           <div key={t.taskId} style={{ padding: "10px 12px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 6 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.title}</div>
+                              <button type="button" onClick={() => handleSelectNode(t)}
+                                style={{ flexShrink: 0, padding: "3px 9px", border: "1px solid #CBD5E1", borderRadius: 5, background: "#F8FAFC", color: "#374151", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                                Task Details
+                              </button>
+                            </div>
                             <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>for {assigneeName} — set their real estimated hours</div>
                             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                               <div style={{ flex: 1, padding: "7px 6px", border: "1px solid #1B4F8A", borderRadius: 6, background: "#EBF2FA", color: "#1B4F8A", fontSize: 11, fontWeight: 600, textAlign: "center" }}>
@@ -7703,19 +7759,29 @@ em-emoji-picker,
                           {/* Subtasks recursive */}
                           {hasSubtasks && isExpanded && (
                             <div>
-                              {(t.subtaskIds || []).map(sid => {
-                                const sub = allTaskMap?.get(sid);
-                                if (!sub) return null;
-                                if (sub.isSelfAssigned && sub.status === "cancelled") return null;
-                                return (
+                              {(t.subtaskIds || [])
+                                .map(sid => allTaskMap?.get(sid))
+                                .filter(sub => sub && !(sub.isSelfAssigned && sub.status === "cancelled"))
+                                .sort((a, b) => {
+                                  // Same rule as the other task-row renderer: priority
+                                  // always wins across tiers, order only breaks a tie
+                                  // within the same priority. This component had no
+                                  // sort at all before — children rendered in raw
+                                  // subtaskIds order, i.e. whatever order they were
+                                  // added to the folder in.
+                                  const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
+                                  if (pa !== pb) return pa - pb;
+                                  if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                                  return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+                                })
+                                .map(sub => (
                                   <TaskRow
                                     key={sub.taskId} t={sub} depth={depth + 1} section={section}
                                     allTaskMap={allTaskMap} employeeMap={employeeMap}
                                     employeeId={employeeId} onSelect={onSelect}
                                     selectedId={selectedId} expandedIds={expandedIds} toggleExpand={toggleExpand}
                                   />
-                                );
-                              })}
+                                ))}
                             </div>
                           )}
                         </div>
@@ -8508,13 +8574,20 @@ em-emoji-picker,
                       )}
 
                       {task.status === "pending_tl_hours" && !task.isSelfAssigned && (() => {
-                        const draftAssigneeId = (task.assigneeIds || [])[0];
+                        // pendingAssigneeId covers the cross-department-approval path, where
+                        // assigneeIds is intentionally still empty at this point. Falls back
+                        // to assigneeIds[0] for the no-gate deadline-mode path.
+                        const draftAssigneeId = task.pendingAssigneeId || (task.assigneeIds || [])[0];
                         const draftAssigneeDept = employeeMapFull.get(draftAssigneeId)?.department || "";
                         const myDept = employeeMapFull.get(employeeId)?.department || "";
                         const iAmTheirTl = role === "tl" && draftAssigneeDept && myDept === draftAssigneeDept;
                         if (iAmTheirTl) {
                           const _inp = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: "inherit", color: "#111827", background: "#fff", boxSizing: "border-box", width: "100%", outline: "none" };
                           const _lbl = { fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 5 };
+                          // Same Map-keyed state the summary card uses (declared once, near the
+                          // top of the component) — was referencing undeclared flat
+                          // draftHoursVal/draftHoursUnit/draftHoursBusy variables before.
+                          const draftBusyHere = draftHoursBusyId === task.taskId;
                           return (
                             <div style={{ padding: "10px 16px", borderLeft: "3px solid #6B7280", background: "#F9FAFB" }}>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", marginBottom: 8 }}>Set the real estimated hours before {employeeMapFull.get(draftAssigneeId)?.name || "your team member"} can see this task.</div>
@@ -8529,15 +8602,15 @@ em-emoji-picker,
                               </div>
                               <label style={_lbl}>Your Estimated Duration <span style={{ fontWeight: 400, textTransform: "none", color: "#9CA3AF" }}>(required — {employeeMapFull.get(draftAssigneeId)?.name || "assignee"} can negotiate)</span></label>
                               <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                                <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3" value={draftHoursVal} onChange={e => setDraftHoursVal(e.target.value.replace(/[^0-9]/g, ""))} />
-                                <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnit} onChange={e => setDraftHoursUnit(e.target.value)}>
+                                <input className="ctm-inp" style={{ ..._inp, width: 80 }} type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 3" value={draftHoursValMap[task.taskId] || ""} onChange={e => setDraftHoursValMap(m => ({ ...m, [task.taskId]: e.target.value.replace(/[^0-9]/g, "") }))} />
+                                <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnitMap[task.taskId] || "hours"} onChange={e => setDraftHoursUnitMap(m => ({ ...m, [task.taskId]: e.target.value }))}>
                                   <option value="minutes">Minutes</option>
                                   <option value="hours">Hours</option>
                                   <option value="days">Days</option>
                                 </select>
                               </div>
-                              <button disabled={draftHoursBusy} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftHoursBusy ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftHoursBusy ? 0.6 : 1 }}>
-                                {draftHoursBusy ? "Setting…" : "Set Hours & Activate Task"}
+                              <button disabled={draftBusyHere} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftBusyHere ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftBusyHere ? 0.6 : 1 }}>
+                                {draftBusyHere ? "Setting…" : "Set Hours & Activate Task"}
                               </button>
                             </div>
                           );
@@ -9232,6 +9305,7 @@ em-emoji-picker,
                     <DetailBody
                       task={task}
                       allTaskMap={allTaskMap}
+                      onDataRefresh={loadAllTasks}
                       hasForwardedChild={(task?.subtaskIds || []).length > 0}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}
@@ -9398,6 +9472,7 @@ em-emoji-picker,
                 <DetailBody
                   task={task}
                   allTaskMap={allTaskMap}
+                  onDataRefresh={loadAllTasks}
                   hasForwardedChild={(task?.subtaskIds || []).length > 0}
                   dailyReports={dailyReports}
                   reportsLoading={reportsLoading}
@@ -9653,6 +9728,7 @@ em-emoji-picker,
                     <DetailBody
                       task={task}
                       allTaskMap={allTaskMap}
+                      onDataRefresh={loadAllTasks}
                       hasForwardedChild={(task?.subtaskIds || []).length > 0}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}

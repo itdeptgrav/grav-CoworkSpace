@@ -13,6 +13,8 @@ import { useDutyStatus } from "../../../hooks/useDutyStatus";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { addWorkingSecs, workingSecsBetween } from "../../../lib/officeDueDate";
+import MoveToFolderModal from "./MoveToFolderModal";
+import EditTaskModal from "./EditTaskModal";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
@@ -595,9 +597,17 @@ export default function DetailBody({
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, }) {
+  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, allTaskMap, onDataRefresh, }) {
   const df = deadlineFlow || {};
   const ef = extFlow || {};
+  // Move to Folder — folder options come from the already-loaded task map,
+  // no extra fetch needed. A folder can't be moved into another folder, and
+  // a task already in this exact folder is filtered out below at render time.
+  const [showMoveToFolder, setShowMoveToFolder] = useState(false);
+  const [showEditTask, setShowEditTask] = useState(false);
+  const folderOptions = (task.isFolder || !allTaskMap)
+    ? []
+    : [...allTaskMap.values()].filter(t => t.isFolder && t.taskId !== task.taskId);
 
   // ── derived ──────────────────────────────────────────────────────────────
   const status = task.status;
@@ -637,6 +647,12 @@ export default function DetailBody({
   // isFolder task — no submission, no deadline extension, no timer controls
   // at THIS level. All of that belongs to the subtasks, not the parent.
   const treatAsFolder = task.isFolder || (task.subtaskIds || []).length > 0;
+
+  // Cross-department task still waiting on approval, or approved but not yet
+  // activated (estimated hours not set). Nothing here is genuinely assigned
+  // or actionable yet, regardless of what isAssignee/isTL happen to compute
+  // to for the current viewer — no workflow action should show.
+  const isPendingCrossDeptGate = status === "pending_tl_hours" || status === "pending_department_approval";
 
   // Wall-clock based remaining/over — reflects approved extensions immediately
   // When timer hasn't started yet (workedSecs=0, not running), show full budget
@@ -1165,6 +1181,15 @@ export default function DetailBody({
                   </div>
                 )}
 
+                {/* ── CROSS-DEPARTMENT GATE — not yet fully assigned, no workflow actions apply ── */}
+                {isPendingCrossDeptGate && (
+                  <div style={{ padding: "10px 12px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, fontSize: 11, color: "#92400E", lineHeight: 1.6 }}>
+                    {status === "pending_department_approval"
+                      ? "This cross-department assignment is still waiting on approval — no task actions apply until both sides sign off."
+                      : "This cross-department task is approved but not yet active — estimated hours still need to be set before any task actions apply."}
+                  </div>
+                )}
+
                 {/* ── DEADLINE ALERT BANNER (top of actions) ── */}
                 {isFixedDeadlinePassed && (
                   <div style={{ padding: "10px 12px", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 6, fontSize: 11, color: "#991B1B", lineHeight: 1.6 }}>
@@ -1203,7 +1228,7 @@ export default function DetailBody({
                 })()}
 
                 {/* ── EMPLOYEE: pre-confirm deadline flow ── */}
-                {isAssignee && !isConfirmed && !task.isGoal && !task.isThirdParty && !task.isRepeat && (
+                {isAssignee && !isConfirmed && !isPendingCrossDeptGate && !task.isGoal && !task.isThirdParty && !task.isRepeat && (
                   <>
                     {/* Timer task: propose deadline */}
                     {task.hasTimer === true && status === "open" && (
@@ -1653,10 +1678,27 @@ export default function DetailBody({
                   </ActionBtn>
                 )}
 
+                {/* ── TL/CEO: edit title/description/requirements — available even
+                    while the task is still in the cross-department pending
+                    window, unlike Forward/Confirm below, since fixing the
+                    task's own content isn't a workflow action. ── */}
+                {(isTL || isCEO) && (
+                  <ActionBtn variant="ghost" onClick={() => setShowEditTask(true)}>
+                    Edit Task
+                  </ActionBtn>
+                )}
+
                 {/* ── TL/CEO: forward task ── */}
-                {(isTL || isCEO) && !task.isFolder && (
+                {(isTL || isCEO) && !task.isFolder && !isPendingCrossDeptGate && (
                   <ActionBtn variant="ghost" onClick={() => handleAction("forward")}>
                     Forward / Split Task
+                  </ActionBtn>
+                )}
+
+                {/* ── TL/CEO: move this standard task into an existing folder ── */}
+                {(isTL || isCEO) && !task.isFolder && !isPendingCrossDeptGate && (
+                  <ActionBtn variant="ghost" onClick={() => setShowMoveToFolder(true)}>
+                    Move to Folder
                   </ActionBtn>
                 )}
 
@@ -1677,6 +1719,23 @@ export default function DetailBody({
           )}
 
         </div>
+      )}
+
+      {showMoveToFolder && (
+        <MoveToFolderModal
+          task={task}
+          folders={folderOptions}
+          onClose={() => setShowMoveToFolder(false)}
+          onSuccess={() => { setShowMoveToFolder(false); onDataRefresh?.(); }}
+        />
+      )}
+
+      {showEditTask && (
+        <EditTaskModal
+          task={task}
+          onClose={() => setShowEditTask(false)}
+          onSuccess={() => { setShowEditTask(false); onDataRefresh?.(); }}
+        />
       )}
     </div>
   );

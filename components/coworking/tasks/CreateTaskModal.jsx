@@ -156,6 +156,12 @@ export default function CreateTaskModal({
 
   const [isGoalUrl, setIsGoalUrl] = useState(false);
   const [reqInput, setReqInput] = useState("");
+  // Which requirement (by index) is being edited in-place, and its draft
+  // text. Shared between single-task and multi-row modes since only one is
+  // ever visible at a time — clicking away from the input (onBlur) saves and
+  // closes it before a row/mode switch can leave it pointed at stale data.
+  const [editingReqIndex, setEditingReqIndex] = useState(null);
+  const [editReqValue, setEditReqValue] = useState("");
 
   // ── C2 Band (Gold Task) state ─────────────────────────────────────────────
   const [isGoldTask, setIsGoldTask] = useState(false);
@@ -375,6 +381,7 @@ export default function CreateTaskModal({
 
   // ── Shared employee state ──
   const [employees, setEmployees] = useState([]);
+  const [myDept, setMyDept] = useState(""); // current user's own department, for the Own/Other Department scope below
   const [selectedIds, setSelectedIds] = useState(editTask?.assigneeIds || []);
   const [selectedDepts, setSelectedDepts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -388,14 +395,30 @@ export default function CreateTaskModal({
 
   useEffect(() => {
     listAllEmployees()
-      .then(emps => setEmployees(emps.filter(e => e.employeeId !== currentEmployeeId)))
+      .then(emps => {
+        // Grab our own department from the unfiltered list before excluding
+        // ourselves from the assignable pool below.
+        setMyDept(emps.find(e => e.employeeId === currentEmployeeId)?.department || "");
+        setEmployees(emps.filter(e => e.employeeId !== currentEmployeeId));
+      })
       .catch(() => { });
   }, [currentEmployeeId]);
 
   const toggle = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
   const toggleDept = (dept) => setSelectedDepts(prev => prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]);
-  const visibleEmployees = selectedDepts.length === 0 ? employees : employees.filter(e => selectedDepts.includes(e.department));
+  // Own/Other Department (form.hasTimer) is a hard scope, not just a
+  // suggestion — Own Department shows only your own department's people,
+  // Other Department excludes them entirely. selectedDepts narrows further
+  // within whatever this already allows, it doesn't replace it.
+  const deptScopedEmployees = myDept
+    ? (form.hasTimer ? employees.filter(e => e.department === myDept) : employees.filter(e => e.department !== myDept))
+    : employees;
+  const visibleEmployees = selectedDepts.length === 0 ? deptScopedEmployees : deptScopedEmployees.filter(e => selectedDepts.includes(e.department));
+  // Chips come from the SAME scoped list, not the full employee roster — a
+  // department the toggle already excludes (e.g. your own, in Other
+  // Department mode) can't appear as a chip that only leads to "No
+  // employees found" when clicked.
+  const singleAllDepts = [...new Set(deptScopedEmployees.map(e => e.department).filter(Boolean))].sort();
   // Subtasks only: pins two kinds of shortcuts to the front of the picker —
   // (1) yourself, so you can assign a subtask to yourself in one click,
   // (2) the PARENT task's existing assignee(s). `employees` deliberately
@@ -406,9 +429,20 @@ export default function CreateTaskModal({
   const parentAssignees = employees.filter(e => parentAssigneeIds.includes(e.employeeId));
   const otherEmployees = employees.filter(e => !parentAssigneeIds.includes(e.employeeId));
   const orderedEmployees = [selfAsAssignee, ...parentAssignees, ...otherEmployees];
+  // Same hard own/other-department scope as visibleEmployees above, keyed off
+  // the currently active row's own toggle instead of the single-task form —
+  // each subtask row has its own independent Own/Other Department choice.
+  const activeRowHasTimer = (subtaskRows[activeRowIndex] || {}).hasTimer;
+  const rowDeptScopedEmployees = myDept
+    ? (activeRowHasTimer ? employees.filter(e => e.department === myDept) : employees.filter(e => e.department !== myDept))
+    : employees;
+  const rowAllDepts = [...new Set(rowDeptScopedEmployees.map(e => e.department).filter(Boolean))].sort();
+  const deptScopedOrderedEmployees = myDept
+    ? orderedEmployees.filter(e => e.__isSelf || (activeRowHasTimer ? e.department === myDept : e.department !== myDept))
+    : orderedEmployees;
   const subtaskVisibleEmployees = selectedDepts.length === 0
-    ? orderedEmployees
-    : orderedEmployees.filter(e => e.__isSelf || selectedDepts.includes(e.department));
+    ? deptScopedOrderedEmployees
+    : deptScopedOrderedEmployees.filter(e => e.__isSelf || selectedDepts.includes(e.department));
   const assignedToTL = selectedIds.some(id => employees.find(e => e.employeeId === id)?.role === "tl");
   const needsApproval = currentRole === "employee" && assignedToTL;
 
@@ -594,6 +628,12 @@ export default function CreateTaskModal({
             assigneeIds: row.assigneeIds, dueDate: null, priority: rowPriority,
             hasTimer: row.hasTimer, fixedDeadline: fixedDL,
             senderTimerWindowSecs: _rowSenderTimerSecs,
+            // Same category of bug as the sender-timer one noted above: the
+            // "+Add" requirements UI writes to row.requirements, but nothing
+            // here ever put it in the create payload, so every requirement
+            // typed for a subtask was silently dropped and never reached the
+            // backend — hence nothing to show on the task's Details page.
+            requirements: row.requirements || [],
             parentTaskId: parentTask?.taskId || null,
             createdByRole: currentRole, createdBy: currentEmployeeId,
             createdByCeo: currentRole === "ceo", createdByTl: currentRole === "tl",
@@ -866,11 +906,41 @@ export default function CreateTaskModal({
             {(activeRow.requirements || []).length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
                 {(activeRow.requirements || []).map((req, ri) => (
-                  <div key={ri} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
-                    <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
-                    <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{req}</span>
-                    <button onClick={() => setActiveRowField("requirements", (activeRow.requirements || []).filter((_, i) => i !== ri))}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                  <div key={ri} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
+                    {editingReqIndex === ri ? (
+                      <input
+                        autoFocus
+                        className="ctm-inp"
+                        style={{ ...inp, flex: 1, padding: "4px 8px" }}
+                        value={editReqValue}
+                        onChange={e => setEditReqValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter" && editReqValue.trim()) {
+                            e.preventDefault();
+                            setActiveRowField("requirements", (activeRow.requirements || []).map((r, i) => i === ri ? editReqValue.trim() : r));
+                            setEditingReqIndex(null);
+                          } else if (e.key === "Escape") {
+                            setEditingReqIndex(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (editReqValue.trim()) {
+                            setActiveRowField("requirements", (activeRow.requirements || []).map((r, i) => i === ri ? editReqValue.trim() : r));
+                          }
+                          setEditingReqIndex(null);
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>•</span>
+                        <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5, cursor: "pointer" }}
+                          onClick={() => { setEditingReqIndex(ri); setEditReqValue(req); }}>{req}</span>
+                        <button type="button" title="Edit" onClick={() => { setEditingReqIndex(ri); setEditReqValue(req); }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 0, flexShrink: 0, lineHeight: 1 }}>✎</button>
+                        <button onClick={() => setActiveRowField("requirements", (activeRow.requirements || []).filter((_, i) => i !== ri))}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -908,16 +978,16 @@ export default function CreateTaskModal({
 
       {rowStep === 2 && (
         <>
-          {allDepts.length > 0 && (
+          {rowAllDepts.length > 0 && (
             <div style={{ padding: "8px 10px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, marginBottom: 4 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
                 Filter by department
                 {selectedDepts.length > 0 && <button type="button" onClick={() => setSelectedDepts([])} style={{ fontSize: 11, color: "#1B4F8A", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Clear filter</button>}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {allDepts.map(dept => {
+                {rowAllDepts.map(dept => {
                   const active = selectedDepts.includes(dept);
-                  const cnt = employees.filter(e => e.department === dept).length;
+                  const cnt = rowDeptScopedEmployees.filter(e => e.department === dept).length;
                   return (
                     <button key={dept} type="button" onClick={() => toggleDept(dept)}
                       style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", border: `1px solid ${active ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 4, background: active ? "#EBF2FA" : "#fff", color: active ? "#1B4F8A" : "#374151", fontSize: 11, fontWeight: active ? 600 : 400, cursor: "pointer", fontFamily: "inherit" }}>
@@ -1030,11 +1100,41 @@ export default function CreateTaskModal({
                       {(form.requirements || []).length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
                           {(form.requirements || []).map((req, ri) => (
-                            <div key={ri} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
-                              <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
-                              <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{req}</span>
-                              <button onClick={() => set("requirements", (form.requirements || []).filter((_, i) => i !== ri))}
-                                style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                            <div key={ri} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
+                              {editingReqIndex === ri ? (
+                                <input
+                                  autoFocus
+                                  className="ctm-inp"
+                                  style={{ ...inp, flex: 1, padding: "4px 8px" }}
+                                  value={editReqValue}
+                                  onChange={e => setEditReqValue(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === "Enter" && editReqValue.trim()) {
+                                      e.preventDefault();
+                                      set("requirements", (form.requirements || []).map((r, i) => i === ri ? editReqValue.trim() : r));
+                                      setEditingReqIndex(null);
+                                    } else if (e.key === "Escape") {
+                                      setEditingReqIndex(null);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (editReqValue.trim()) {
+                                      set("requirements", (form.requirements || []).map((r, i) => i === ri ? editReqValue.trim() : r));
+                                    }
+                                    setEditingReqIndex(null);
+                                  }}
+                                />
+                              ) : (
+                                <>
+                                  <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>•</span>
+                                  <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5, cursor: "pointer" }}
+                                    onClick={() => { setEditingReqIndex(ri); setEditReqValue(req); }}>{req}</span>
+                                  <button type="button" title="Edit" onClick={() => { setEditingReqIndex(ri); setEditReqValue(req); }}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 0, flexShrink: 0, lineHeight: 1 }}>✎</button>
+                                  <button onClick={() => set("requirements", (form.requirements || []).filter((_, i) => i !== ri))}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                                </>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1366,16 +1466,16 @@ export default function CreateTaskModal({
                   )}
                   {!isFolder && (
                     <>
-                      {allDepts.length > 0 && (
+                      {singleAllDepts.length > 0 && (
                         <div style={{ padding: "8px 10px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6 }}>
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
                             Filter by department
                             {selectedDepts.length > 0 && <button type="button" onClick={() => setSelectedDepts([])} style={{ fontSize: 11, color: "#1B4F8A", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Clear filter</button>}
                           </div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                            {allDepts.map(dept => {
+                            {singleAllDepts.map(dept => {
                               const active = selectedDepts.includes(dept);
-                              const cnt = employees.filter(e => e.department === dept).length;
+                              const cnt = deptScopedEmployees.filter(e => e.department === dept).length;
                               return (
                                 <button key={dept} type="button" onClick={() => toggleDept(dept)}
                                   style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", border: `1px solid ${active ? "#1B4F8A" : "#E5E7EB"}`, borderRadius: 4, background: active ? "#EBF2FA" : "#fff", color: active ? "#1B4F8A" : "#374151", fontSize: 11, fontWeight: active ? 600 : 400, cursor: "pointer", fontFamily: "inherit" }}>
