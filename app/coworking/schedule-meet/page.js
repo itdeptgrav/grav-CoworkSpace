@@ -21,15 +21,8 @@ import { useRouter } from "next/navigation";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
 import { listMeets, cancelMeet, updateMeet } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
-import {
-  collection,
-  getDocs,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
 import MeetingSummaryModal from "../../../components/coworking/meets/MeetingSummaryModal";
-import { createPublicLink } from "../../../lib/livekitApi";
 
 function getMeetStatus(meet) {
   if (meet.isCancelled) return "cancelled";
@@ -44,10 +37,7 @@ function getMeetStatus(meet) {
 
 function fmtFull(iso) {
   if (!iso) return "";
-  return new Date(iso).toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function timeUntil(iso) {
@@ -62,16 +52,7 @@ function timeUntil(iso) {
 
 // Neutral avatar fills — desaturated greys, no rainbow
 // Muted, professional avatar palette — colour without the neon
-const AV_COLORS = [
-  "#3B6CB5",
-  "#3F8F6B",
-  "#B07A2F",
-  "#6B5B95",
-  "#A85454",
-  "#3D8B96",
-  "#7A6248",
-  "#5C6BB5",
-];
+const AV_COLORS = ["#3B6CB5", "#3F8F6B", "#B07A2F", "#6B5B95", "#A85454", "#3D8B96", "#7A6248", "#5C6BB5"];
 const avBg = (id = "") => AV_COLORS[(id.charCodeAt(0) || 0) % AV_COLORS.length];
 
 // ── EditMeetingModal ───────────────────────────────────────────────────────────
@@ -92,42 +73,26 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
     dateTime: toIST(meet.dateTime),
     googleMeetLink: meet.googleMeetLink || "",
   });
-  const [participantIds, setParticipantIds] = React.useState([
-    ...(meet.participants || []),
-  ]);
+  const [participantIds, setParticipantIds] = React.useState([...(meet.participants || [])]);
   const [deptFilter, setDeptFilter] = React.useState([]);
   const [empSearch, setEmpSearch] = React.useState("");
 
-  const initials = (name = "") =>
-    name
-      .trim()
-      .split(" ")
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?";
+  const initials = (name = "") => name.trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 
-  const allDepts = [
-    ...new Set(employees.map((e) => e.department).filter(Boolean)),
-  ].sort();
+  const allDepts = [...new Set(employees.map(e => e.department).filter(Boolean))].sort();
 
-  const visibleEmps = employees.filter((e) => {
-    const matchDept =
-      deptFilter.length === 0 || deptFilter.includes(e.department);
-    const matchSearch =
-      !empSearch ||
-      (e.name || "").toLowerCase().includes(empSearch.toLowerCase());
+  const visibleEmps = employees.filter(e => {
+    const matchDept = deptFilter.length === 0 || deptFilter.includes(e.department);
+    const matchSearch = !empSearch || (e.name || "").toLowerCase().includes(empSearch.toLowerCase());
     return matchDept && matchSearch;
   });
 
   const togglePart = (id) =>
-    setParticipantIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+    setParticipantIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const selectAll = () => {
-    const ids = visibleEmps.map((e) => e.employeeId);
-    setParticipantIds((prev) => [...new Set([...prev, ...ids])]);
+    const ids = visibleEmps.map(e => e.employeeId);
+    setParticipantIds(prev => [...new Set([...prev, ...ids])]);
   };
 
   const handleSubmit = () => {
@@ -142,40 +107,22 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
 
   React.useEffect(() => {
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
+    return () => { document.body.style.overflow = ""; };
   }, []);
 
   return (
     <div className="sm-edit-overlay" onClick={onClose}>
-      <div className="sm-edit-box" onClick={(e) => e.stopPropagation()}>
+      <div className="sm-edit-box" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="sm-edit-head">
           <span className="sm-edit-title">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#475569"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                display: "inline",
-                marginRight: 8,
-                verticalAlign: "middle",
-              }}
-            >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline", marginRight: 8, verticalAlign: "middle" }}>
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
             Edit Meeting
           </span>
-          <button className="sm-edit-close" onClick={onClose}>
-            ×
-          </button>
+          <button className="sm-edit-close" onClick={onClose}>×</button>
         </div>
 
         <div className="sm-edit-body">
@@ -187,9 +134,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             <input
               className="sm-edit-input"
               value={form.title}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, title: e.target.value }))
-              }
+              onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
               placeholder="e.g. Weekly Sync"
             />
           </div>
@@ -200,9 +145,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             <textarea
               className="sm-edit-input sm-edit-textarea"
               value={form.description}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, description: e.target.value }))
-              }
+              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               placeholder="Agenda, notes, context…"
             />
           </div>
@@ -215,9 +158,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
               type="datetime-local"
               value={form.dateTime}
               min={getISTMin()}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, dateTime: e.target.value }))
-              }
+              onChange={e => setForm(p => ({ ...p, dateTime: e.target.value }))}
             />
           </div>
 
@@ -227,38 +168,20 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             <input
               className="sm-edit-input"
               value={form.googleMeetLink}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, googleMeetLink: e.target.value }))
-              }
+              onChange={e => setForm(p => ({ ...p, googleMeetLink: e.target.value }))}
               placeholder="https://meet.google.com/xxx-xxxx-xxx"
             />
           </div>
 
           {/* Participants */}
           <div className="sm-edit-field">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 6,
-                minWidth: 0,
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, minWidth: 0 }}>
               <label className="sm-edit-label" style={{ marginBottom: 0 }}>
                 Participants ({participantIds.length} selected)
               </label>
               <button
                 onClick={selectAll}
-                style={{
-                  fontSize: 11,
-                  color: "#475569",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  flexShrink: 0,
-                }}
+                style={{ fontSize: 11, color: "#475569", background: "none", border: "none", cursor: "pointer", fontWeight: 600, flexShrink: 0 }}
               >
                 Select all visible
               </button>
@@ -267,15 +190,11 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             {/* Dept filter pills */}
             {allDepts.length > 0 && (
               <div className="sm-edit-dept-row">
-                {allDepts.map((d) => (
+                {allDepts.map(d => (
                   <button
                     key={d}
                     className={`sm-edit-dept-btn${deptFilter.includes(d) ? " active" : ""}`}
-                    onClick={() =>
-                      setDeptFilter((p) =>
-                        p.includes(d) ? p.filter((x) => x !== d) : [...p, d],
-                      )
-                    }
+                    onClick={() => setDeptFilter(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d])}
                   >
                     {d}
                   </button>
@@ -287,7 +206,7 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             <input
               className="sm-edit-input"
               value={empSearch}
-              onChange={(e) => setEmpSearch(e.target.value)}
+              onChange={e => setEmpSearch(e.target.value)}
               placeholder="Search by name…"
               style={{ marginBottom: 6 }}
             />
@@ -295,120 +214,46 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
             {/* Employee list */}
             <div className="sm-edit-emp-list">
               {visibleEmps.length === 0 ? (
-                <div
-                  style={{
-                    padding: "16px",
-                    textAlign: "center",
-                    color: "#9CA3AF",
-                    fontSize: 12,
-                  }}
-                >
-                  No employees found
-                </div>
-              ) : (
-                visibleEmps.map((emp) => {
-                  const checked = participantIds.includes(emp.employeeId);
-                  return (
-                    <div
-                      key={emp.employeeId}
-                      className="sm-edit-emp-item"
-                      onClick={() => togglePart(emp.employeeId)}
-                    >
-                      <div
-                        className="sm-edit-emp-av"
-                        style={{
-                          background: avBg(emp.employeeId),
-                          overflow: "hidden",
-                          padding: 0,
-                        }}
-                      >
-                        {emp.profilePicUrl ? (
-                          <img
-                            src={emp.profilePicUrl}
-                            alt={emp.name}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        ) : (
-                          initials(emp.name || "")
-                        )}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="sm-edit-emp-name">
-                          {emp.name || emp.employeeId}
-                        </div>
-                        {emp.department && (
-                          <div className="sm-edit-emp-dept">
-                            {emp.department}
-                            {emp.role === "tl" ? " · TL" : ""}
-                          </div>
-                        )}
-                      </div>
-                      <div
-                        className={`sm-edit-emp-check${checked ? " checked" : ""}`}
-                      >
-                        {checked && (
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 12 12"
-                            fill="none"
-                          >
-                            <path
-                              d="M2 6l3 3 5-5"
-                              stroke="#fff"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        )}
-                      </div>
+                <div style={{ padding: "16px", textAlign: "center", color: "#9CA3AF", fontSize: 12 }}>No employees found</div>
+              ) : visibleEmps.map(emp => {
+                const checked = participantIds.includes(emp.employeeId);
+                return (
+                  <div key={emp.employeeId} className="sm-edit-emp-item" onClick={() => togglePart(emp.employeeId)}>
+                    <div className="sm-edit-emp-av" style={{ background: avBg(emp.employeeId), overflow: "hidden", padding: 0 }}>
+                      {emp.profilePicUrl ? <img src={emp.profilePicUrl} alt={emp.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initials(emp.name || "")}
                     </div>
-                  );
-                })
-              )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="sm-edit-emp-name">{emp.name || emp.employeeId}</div>
+                      {emp.department && <div className="sm-edit-emp-dept">{emp.department}{emp.role === "tl" ? " · TL" : ""}</div>}
+                    </div>
+                    <div className={`sm-edit-emp-check${checked ? " checked" : ""}`}>
+                      {checked && (
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
         {/* Footer */}
         <div className="sm-edit-foot">
-          <button
-            className="sm-edit-cancel-btn"
-            onClick={onClose}
-            disabled={saving}
-          >
+          <button className="sm-edit-cancel-btn" onClick={onClose} disabled={saving}>
             Discard
           </button>
-          <button
-            className="sm-edit-save-btn"
-            onClick={handleSubmit}
-            disabled={saving}
-          >
+          <button className="sm-edit-save-btn" onClick={handleSubmit} disabled={saving}>
             {saving ? (
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ animation: "sm-spin 0.8s linear infinite" }}
-                >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "sm-spin 0.8s linear infinite" }}>
                   <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
                 </svg>
                 Saving…
               </span>
-            ) : (
-              "Save Changes"
-            )}
+            ) : "Save Changes"}
           </button>
         </div>
       </div>
@@ -416,26 +261,13 @@ function EditMeetingModal({ meet, employees, saving, error, onSave, onClose }) {
   );
 }
 
-function MeetCard({
-  meet,
-  status,
-  router,
-  empMap = {},
-  onViewSummary,
-  isHost,
-  onCancel,
-  cancellingId,
-  employeeId,
-  onEdit,
-}) {
+
+function MeetCard({ meet, status, router, empMap = {}, onViewSummary, isHost, onCancel, cancellingId, employeeId, onEdit }) {
   const isCancelled = status === "cancelled";
   const dt = new Date(meet.dateTime);
   const month = dt.toLocaleString("en-IN", { month: "short" });
   const day = dt.getDate();
-  const time = dt.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const time = dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const parts = meet.participants || [];
   const shown = parts.slice(0, 4);
   const extra = parts.length - shown.length;
@@ -444,99 +276,46 @@ function MeetCard({
   const getName = (pid) => empMap[pid]?.name || pid || "?";
   const getDept = (pid) => empMap[pid]?.department || "";
   const getInitials = (name) =>
-    name
-      .trim()
-      .split(" ")
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?";
+    name.trim().split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 
-  const allNames = parts.map((pid) => getName(pid));
+  const allNames = parts.map(pid => getName(pid));
   const shownNames = allNames.slice(0, 4);
-  const tooltipText =
-    allNames.slice(0, 8).join(", ") +
-    (allNames.length > 8 ? ` +${allNames.length - 8} more` : "");
+  const tooltipText = allNames.slice(0, 8).join(", ") + (allNames.length > 8 ? ` +${allNames.length - 8} more` : "");
 
-  const canManage =
-    isHost &&
-    meet.createdBy === employeeId &&
-    !isCancelled &&
-    status !== "ended";
+  const canManage = isHost && meet.createdBy === employeeId && !isCancelled && status !== "ended";
   const isCancelling = cancellingId === meet.meetId;
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef(null);
-  const [linkBusy, setLinkBusy] = React.useState(false);
-  const [linkCopied, setLinkCopied] = React.useState(false);
-
-  const handleGetPublicLink = async () => {
-    setLinkBusy(true);
-    try {
-      const res = await createPublicLink(meet.meetId);
-      const url = `${window.location.origin}/coworking/join/${res.publicShareToken}`;
-      await navigator.clipboard.writeText(url);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    } catch (e) {
-      alert(e.message || "Could not create public link");
-    } finally {
-      setLinkBusy(false);
-    }
-  };
 
   React.useEffect(() => {
     if (!menuOpen) return;
     const handler = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target))
-        setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
   return (
-    <div
-      className={`smc${status === "live" ? " smc-live" : ""}${status === "ended" ? " smc-ended" : ""}${isCancelled ? " smc-cancelled" : ""}`}
-      style={isCancelled ? { position: "relative" } : {}}
-    >
+    <div className={`smc${status === "live" ? " smc-live" : ""}${status === "ended" ? " smc-ended" : ""}${isCancelled ? " smc-cancelled" : ""}`}
+      style={isCancelled ? { position: "relative" } : {}}>
+
       {/* ── Cancelled overlay ──────────────────────────────────────────── */}
       {isCancelled && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: 10,
-            zIndex: 2,
-            background: "rgba(255,255,255,0.55)",
-            backdropFilter: "blur(3px)",
-            WebkitBackdropFilter: "blur(3px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              background: "#F7EFEF",
-              border: "1px solid #E6D5D5",
-              borderRadius: 8,
-              padding: "8px 18px",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: "#A85454",
-                letterSpacing: "0.02em",
-              }}
-            >
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: 10, zIndex: 2,
+          background: "rgba(255,255,255,0.55)", backdropFilter: "blur(3px)",
+          WebkitBackdropFilter: "blur(3px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+            background: "#F7EFEF", border: "1px solid #E6D5D5",
+            borderRadius: 8, padding: "8px 18px",
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#A85454", letterSpacing: "0.02em" }}>
               Meeting Cancelled
             </span>
             {meet.cancelledByName && (
@@ -549,13 +328,10 @@ function MeetCard({
       )}
 
       {/* ── Card content ───────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "contents",
-          filter: isCancelled ? "blur(1.5px)" : "none",
-          pointerEvents: isCancelled ? "none" : "auto",
-        }}
-      >
+      <div style={{
+        display: "contents", filter: isCancelled ? "blur(1.5px)" : "none",
+        pointerEvents: isCancelled ? "none" : "auto"
+      }}>
         <div className="smc-date">
           <span className="smc-month">{month}</span>
           <span className="smc-day">{day}</span>
@@ -566,9 +342,7 @@ function MeetCard({
           <div className="smc-top">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="smc-title">{meet.title}</div>
-              {meet.description && (
-                <div className="smc-desc">{meet.description}</div>
-              )}
+              {meet.description && <div className="smc-desc">{meet.description}</div>}
             </div>
             {status === "live" && (
               <span className="smc-badge smc-badge-live">
@@ -578,108 +352,42 @@ function MeetCard({
             )}
             {status === "upcoming" && (
               <span className="smc-badge smc-badge-upcoming">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
                 Upcoming
               </span>
             )}
             {status === "ended" && (
               <span className="smc-badge smc-badge-ended">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                 Ended
               </span>
             )}
           </div>
           <div className="smc-meta">
-            {status === "live" && (
-              <span className="smc-meta-live">Started at {time}</span>
-            )}
-            {status === "upcoming" && until && (
-              <span className="smc-meta-until">{until}</span>
-            )}
-            {status === "ended" && (
-              <span className="smc-meta-ended">{fmtFull(meet.dateTime)}</span>
-            )}
+            {status === "live" && <span className="smc-meta-live">Started at {time}</span>}
+            {status === "upcoming" && until && <span className="smc-meta-until">{until}</span>}
+            {status === "ended" && <span className="smc-meta-ended">{fmtFull(meet.dateTime)}</span>}
             {parts.length > 0 && (
-              <div
-                className="smc-avstack"
-                title={tooltipText}
-                style={{ cursor: "default" }}
-              >
+              <div className="smc-avstack" title={tooltipText} style={{ cursor: "default" }}>
                 {shown.map((pid, i) => {
                   const name = getName(pid);
                   const init = getInitials(name);
                   return (
-                    <div
-                      key={pid}
-                      className="smc-av"
-                      style={{
-                        background: avBg(pid),
-                        zIndex: shown.length - i,
-                      }}
-                      title={`${name}${getDept(pid) ? ` · ${getDept(pid)}` : ""}`}
-                    >
+                    <div key={pid} className="smc-av"
+                      style={{ background: avBg(pid), zIndex: shown.length - i }}
+                      title={`${name}${getDept(pid) ? ` · ${getDept(pid)}` : ""}`}>
                       {init}
                     </div>
                   );
                 })}
-                {extra > 0 && (
-                  <div
-                    className="smc-av-extra"
-                    title={allNames.slice(4).join(", ")}
-                  >
-                    +{extra}
-                  </div>
-                )}
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    marginLeft: 8,
-                    gap: 0,
-                    minWidth: 0,
-                  }}
-                >
+                {extra > 0 && <div className="smc-av-extra" title={allNames.slice(4).join(", ")}>+{extra}</div>}
+                <div style={{ display: "flex", flexDirection: "column", marginLeft: 8, gap: 0, minWidth: 0 }}>
                   <span className="smc-av-count">
                     {parts.length} participant{parts.length !== 1 ? "s" : ""}
                   </span>
                   {shownNames.length > 0 && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: "#9CA3AF",
-                        maxWidth: 160,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {shownNames.slice(0, 2).join(", ")}
-                      {shownNames.length > 2
-                        ? ` +${parts.length - 2} more`
-                        : ""}
+                    <span style={{ fontSize: 10, color: "#9CA3AF", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {shownNames.slice(0, 2).join(", ")}{shownNames.length > 2 ? ` +${parts.length - 2} more` : ""}
                     </span>
                   )}
                 </div>
@@ -692,83 +400,27 @@ function MeetCard({
         {/* ── Actions column ─────────────────────────────────────────────── */}
         <div className="smc-actions">
           {status === "live" && (
-            <button
-              className="smc-btn smc-btn-join"
-              onClick={() =>
-                router.push(`/coworking/cowork-meeting/${meet.meetId}`)
-              }
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" />
-              </svg>
+            <button className="smc-btn smc-btn-join" onClick={() => router.push(`/coworking/cowork-meeting/${meet.meetId}`)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
               Join Now
             </button>
           )}
           {status === "upcoming" && (
             <>
-              <button
-                className="smc-btn smc-btn-cowork"
-                onClick={() =>
-                  router.push(`/coworking/cowork-meeting/${meet.meetId}`)
-                }
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polygon points="23 7 16 12 23 17 23 7" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" />
-                </svg>
+              <button className="smc-btn smc-btn-cowork" onClick={() => router.push(`/coworking/cowork-meeting/${meet.meetId}`)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>
                 CoWork
               </button>
               {meet.googleMeetLink && (
-                <a
-                  href={meet.googleMeetLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="smc-btn smc-btn-gmeet"
-                >
+                <a href={meet.googleMeetLink} target="_blank" rel="noopener noreferrer" className="smc-btn smc-btn-gmeet">
                   Google Meet
                 </a>
               )}
             </>
           )}
           {status === "ended" && (
-            <button
-              className="smc-btn smc-btn-view"
-              onClick={() =>
-                router.push(`/coworking/cowork-meeting/${meet.meetId}`)
-              }
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
+            <button className="smc-btn smc-btn-view" onClick={() => router.push(`/coworking/cowork-meeting/${meet.meetId}`)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
               View
             </button>
           )}
@@ -778,16 +430,7 @@ function MeetCard({
               onClick={() => onViewSummary(meet.meetId, meet.title)}
               title="View AI Meeting Summary"
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
                 <line x1="16" y1="13" x2="8" y2="13" />
@@ -797,159 +440,51 @@ function MeetCard({
             </button>
           )}
 
-          {!isCancelled && (canManage || (isHost && status !== "ended")) && (
+          {canManage && (
             <div ref={menuRef} style={{ position: "relative" }}>
               <button
                 className="smc-btn smc-btn-more"
-                onClick={() => setMenuOpen((p) => !p)}
+                onClick={() => setMenuOpen(p => !p)}
                 title="More options"
                 disabled={isCancelling}
               >
                 {isCancelling ? (
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ animation: "sm-spin 0.8s linear infinite" }}
-                  >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "sm-spin 0.8s linear infinite" }}>
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
                   </svg>
                 ) : (
                   <>
-                    <span
-                      style={{
-                        width: 3,
-                        height: 3,
-                        borderRadius: "50%",
-                        background: "currentColor",
-                        display: "inline-block",
-                      }}
-                    />
-                    <span
-                      style={{
-                        width: 3,
-                        height: 3,
-                        borderRadius: "50%",
-                        background: "currentColor",
-                        display: "inline-block",
-                      }}
-                    />
-                    <span
-                      style={{
-                        width: 3,
-                        height: 3,
-                        borderRadius: "50%",
-                        background: "currentColor",
-                        display: "inline-block",
-                      }}
-                    />
+                    <span style={{ width: 3, height: 3, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+                    <span style={{ width: 3, height: 3, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
+                    <span style={{ width: 3, height: 3, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
                   </>
                 )}
               </button>
 
               {menuOpen && !isCancelling && (
                 <div className="smc-popover">
-                  {isHost && status !== "ended" && (
-                    <>
-                      <button
-                        className="smc-popover-item"
-                        onClick={handleGetPublicLink}
-                        disabled={linkBusy}
-                        title="Copy a link anyone can join with — no account needed"
-                      >
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M10 13a5 5 0 007.07 0l1.93-1.93a5 5 0 00-7.07-7.07L10 5" />
-                          <path d="M14 11a5 5 0 00-7.07 0L5 12.93a5 5 0 007.07 7.07L14 19" />
-                        </svg>
-                        {linkCopied
-                          ? "Link copied ✓"
-                          : linkBusy
-                            ? "Copying…"
-                            : "Copy Public Link"}
-                      </button>
-                      {canManage && (
-                        <div
-                          style={{
-                            height: 1,
-                            background: "#F1F2F4",
-                            margin: "2px 0",
-                          }}
-                        />
-                      )}
-                    </>
-                  )}
-                  {canManage && (
-                    <button
-                      className="smc-popover-item"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onEdit(meet);
-                      }}
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                      </svg>
-                      Edit Meeting
-                    </button>
-                  )}
-                  {canManage && (
-                    <div
-                      style={{
-                        height: 1,
-                        background: "#F1F2F4",
-                        margin: "2px 0",
-                      }}
-                    />
-                  )}
-                  {canManage && (
-                    <button
-                      className="smc-popover-item smc-popover-item-danger"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onCancel(meet.meetId, meet.title, meet);
-                      }}
-                    >
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="15" y1="9" x2="9" y2="15" />
-                        <line x1="9" y1="9" x2="15" y2="15" />
-                      </svg>
-                      Cancel Meeting
-                    </button>
-                  )}
+                  <button
+                    className="smc-popover-item"
+                    onClick={() => { setMenuOpen(false); onEdit(meet); }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Edit Meeting
+                  </button>
+                  <div style={{ height: 1, background: "#F1F2F4", margin: "2px 0" }} />
+                  <button
+                    className="smc-popover-item smc-popover-item-danger"
+                    onClick={() => { setMenuOpen(false); onCancel(meet.meetId, meet.title, meet); }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="15" y1="9" x2="9" y2="15" />
+                      <line x1="9" y1="9" x2="15" y2="15" />
+                    </svg>
+                    Cancel Meeting
+                  </button>
                 </div>
               )}
             </div>
@@ -963,41 +498,9 @@ function MeetCard({
 function Section({ label, count, children }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          padding: "0 2px",
-          minWidth: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.07em",
-            color: "#6B7280",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            padding: "1px 8px",
-            borderRadius: 99,
-            background: "#F4F5F7",
-            color: "#6B7280",
-            border: "1px solid #E5E7EB",
-            flexShrink: 0,
-          }}
-        >
-          {count}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 2px", minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#6B7280", whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 99, background: "#F4F5F7", color: "#6B7280", border: "1px solid #E5E7EB", flexShrink: 0 }}>{count}</span>
         <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
       </div>
       {children}
@@ -1007,34 +510,9 @@ function Section({ label, count, children }) {
 
 function EmptyInline({ message }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "14px 18px",
-        background: "#FAFAFA",
-        border: "1px dashed #E5E7EB",
-        borderRadius: 8,
-        fontSize: 13,
-        color: "#9CA3AF",
-      }}
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ opacity: 0.5, flexShrink: 0 }}
-      >
-        <rect x="3" y="4" width="18" height="18" rx="2" />
-        <line x1="16" y1="2" x2="16" y2="6" />
-        <line x1="8" y1="2" x2="8" y2="6" />
-        <line x1="3" y1="10" x2="21" y2="10" />
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#FAFAFA", border: "1px dashed #E5E7EB", borderRadius: 8, fontSize: 13, color: "#9CA3AF" }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, flexShrink: 0 }}>
+        <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
       </svg>
       {message}
     </div>
@@ -1057,11 +535,9 @@ export default function MeetingsPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
-  const handleViewSummary = (meetId, meetTitle) =>
-    setSummaryModal({ meetId, meetTitle });
+  const handleViewSummary = (meetId, meetTitle) => setSummaryModal({ meetId, meetTitle });
 
-  const handleCancelRequest = (meetId, title, meet) =>
-    setCancelConfirm({ meetId, title, meet: meet || null });
+  const handleCancelRequest = (meetId, title, meet) => setCancelConfirm({ meetId, title, meet: meet || null });
 
   const handleCancelConfirm = async () => {
     if (!cancelConfirm) return;
@@ -1070,17 +546,11 @@ export default function MeetingsPage() {
     setCancellingId(meetId);
     try {
       await cancelMeet(meetId);
-      setMeets((prev) =>
-        prev.map((m) =>
-          m.meetId === meetId
-            ? {
-                ...m,
-                isCancelled: true,
-                cancelledByName: empMap[employeeId]?.name || "You",
-              }
-            : m,
-        ),
-      );
+      setMeets(prev => prev.map(m =>
+        m.meetId === meetId
+          ? { ...m, isCancelled: true, cancelledByName: empMap[employeeId]?.name || "You" }
+          : m
+      ));
     } catch (e) {
       alert(e.message || "Failed to cancel meeting. Please try again.");
     } finally {
@@ -1096,18 +566,9 @@ export default function MeetingsPage() {
   const handleEditSave = async (updated) => {
     if (!editModal) return;
     setEditError("");
-    if (!updated.title?.trim()) {
-      setEditError("Title is required.");
-      return;
-    }
-    if (!updated.dateTime) {
-      setEditError("Date and time is required.");
-      return;
-    }
-    if (!updated.participants?.length) {
-      setEditError("At least one participant is required.");
-      return;
-    }
+    if (!updated.title?.trim()) { setEditError("Title is required."); return; }
+    if (!updated.dateTime) { setEditError("Date and time is required."); return; }
+    if (!updated.participants?.length) { setEditError("At least one participant is required."); return; }
     setEditSaving(true);
     try {
       await updateMeet(editModal.meetId, {
@@ -1117,11 +578,9 @@ export default function MeetingsPage() {
         googleMeetLink: updated.googleMeetLink || null,
         participants: updated.participants,
       });
-      setMeets((prev) =>
-        prev.map((m) =>
-          m.meetId === editModal.meetId ? { ...m, ...updated } : m,
-        ),
-      );
+      setMeets(prev => prev.map(m =>
+        m.meetId === editModal.meetId ? { ...m, ...updated } : m
+      ));
       setEditModal(null);
     } catch (e) {
       setEditError(e.message || "Failed to save. Please try again.");
@@ -1143,97 +602,61 @@ export default function MeetingsPage() {
     if (role === "ceo") {
       q = query(collection(firebaseDb, "cowork_scheduled_meets"));
     } else if (role === "tl") {
-      q = query(
-        collection(firebaseDb, "cowork_scheduled_meets"),
-        where("participants", "array-contains", employeeId),
-      );
+      q = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("participants", "array-contains", employeeId));
     } else {
-      q = query(
-        collection(firebaseDb, "cowork_scheduled_meets"),
-        where("participants", "array-contains", employeeId),
-      );
+      q = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("participants", "array-contains", employeeId));
     }
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        let docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setMeets(docs);
-        setFetching(false);
-      },
-      () => {
-        listMeets()
-          .then((d) => setMeets(d.meets || []))
-          .catch(() => {})
-          .finally(() => setFetching(false));
-      },
-    );
+    const unsub = onSnapshot(q, snap => {
+      let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setMeets(docs);
+      setFetching(false);
+    }, () => {
+      listMeets().then(d => setMeets(d.meets || [])).catch(() => { }).finally(() => setFetching(false));
+    });
     let unsubCreated = null;
     if (role === "tl") {
-      const qCreated = query(
-        collection(firebaseDb, "cowork_scheduled_meets"),
-        where("createdBy", "==", employeeId),
-      );
-      unsubCreated = onSnapshot(
-        qCreated,
-        (snap) => {
-          const createdDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          setMeets((prev) => {
-            const map = new Map(prev.map((m) => [m.meetId || m.id, m]));
-            createdDocs.forEach((m) => map.set(m.meetId || m.id, m));
-            return Array.from(map.values());
-          });
-          setFetching(false);
-        },
-        () => {},
-      );
+      const qCreated = query(collection(firebaseDb, "cowork_scheduled_meets"),
+        where("createdBy", "==", employeeId));
+      unsubCreated = onSnapshot(qCreated, snap => {
+        const createdDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setMeets(prev => {
+          const map = new Map(prev.map(m => [m.meetId || m.id, m]));
+          createdDocs.forEach(m => map.set(m.meetId || m.id, m));
+          return Array.from(map.values());
+        });
+        setFetching(false);
+      }, () => { });
     }
-    return () => {
-      unsub();
-      if (unsubCreated) unsubCreated();
-    };
+    return () => { unsub(); if (unsubCreated) unsubCreated(); };
   }, [user, employeeId, role]);
 
   useEffect(() => {
     if (!user) return;
     getDocs(collection(firebaseDb, "cowork_employees"))
-      .then((snap) => {
+      .then(snap => {
         const map = {};
-        snap.forEach((d) => {
+        snap.forEach(d => {
           const e = d.data();
-          if (e.employeeId)
-            map[e.employeeId] = {
-              name: e.name || "?",
-              department: e.department || "",
-              profilePicUrl: e.profilePicUrl || "",
-            };
+          if (e.employeeId) map[e.employeeId] = { name: e.name || "?", department: e.department || "", profilePicUrl: e.profilePicUrl || "" };
         });
         setEmpMap(map);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [user]);
 
   if (loading || !user) return null;
 
   const q = search.toLowerCase();
-  const filtered = meets.filter(
-    (m) =>
-      !q ||
-      m.title?.toLowerCase().includes(q) ||
-      m.description?.toLowerCase().includes(q),
+  const filtered = meets.filter(m =>
+    !q || m.title?.toLowerCase().includes(q) || m.description?.toLowerCase().includes(q)
   );
 
-  const live = filtered
-    .filter((m) => getMeetStatus(m) === "live")
-    .sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-  const upcoming = filtered
-    .filter((m) => getMeetStatus(m) === "upcoming")
-    .sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
-  const ended = filtered
-    .filter((m) => getMeetStatus(m) === "ended")
-    .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
-  const cancelled = filtered
-    .filter((m) => getMeetStatus(m) === "cancelled")
-    .sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+  const live = filtered.filter(m => getMeetStatus(m) === "live").sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+  const upcoming = filtered.filter(m => getMeetStatus(m) === "upcoming").sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+  const ended = filtered.filter(m => getMeetStatus(m) === "ended").sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+  const cancelled = filtered.filter(m => getMeetStatus(m) === "cancelled").sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
 
   return (
     <>
@@ -1387,48 +810,17 @@ export default function MeetingsPage() {
 
       <div className="sm-page">
         <div className="sm-hdr">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              minWidth: 0,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
             <div className="sm-hdr-icon">
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#475569"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" />
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
             </div>
             <span className="sm-hdr-title">Meetings</span>
           </div>
           {isHost && (
-            <button
-              className="sm-new-btn"
-              onClick={() => router.push("/coworking/schedule-meet/new")}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+            <button className="sm-new-btn" onClick={() => router.push("/coworking/schedule-meet/new")}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
               <span className="sm-btn-label">New Meeting</span>
             </button>
           )}
@@ -1441,11 +833,9 @@ export default function MeetingsPage() {
               { n: upcoming.length, l: "Upcoming", c: "#35608F" },
               { n: ended.length, l: "Ended", c: "#6B7280" },
               { n: cancelled.length, l: "Cancelled", c: "#A85454" },
-            ].map((s) => (
+            ].map(s => (
               <div className="sm-stat" key={s.l}>
-                <span className="sm-stat-n" style={{ color: s.c }}>
-                  {s.n}
-                </span>
+                <span className="sm-stat-n" style={{ color: s.c }}>{s.n}</span>
                 <span className="sm-stat-l">{s.l}</span>
               </div>
             ))}
@@ -1454,204 +844,64 @@ export default function MeetingsPage() {
 
         <div className="sm-search-wrap">
           <div className="sm-search">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#9CA3AF"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search meetings…"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#9CA3AF",
-                  fontSize: 16,
-                  lineHeight: 1,
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-              >
-                ×
-              </button>
-            )}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search meetings…" />
+            {search && <button onClick={() => setSearch("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>}
           </div>
         </div>
 
         <div className="sm-body">
           {fetching ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[1, 2, 3].map((i) => (
+              {[1, 2, 3].map(i => (
                 <div key={i} className="smc sm-skel" style={{ gap: 12 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: 5,
-                      width: 50,
-                    }}
-                  >
-                    <div
-                      className="sm-skel-b"
-                      style={{ width: 28, height: 9 }}
-                    />
-                    <div
-                      className="sm-skel-b"
-                      style={{ width: 34, height: 24 }}
-                    />
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, width: 50 }}>
+                    <div className="sm-skel-b" style={{ width: 28, height: 9 }} />
+                    <div className="sm-skel-b" style={{ width: 34, height: 24 }} />
                   </div>
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 7,
-                    }}
-                  >
-                    <div
-                      className="sm-skel-b"
-                      style={{ width: "52%", height: 13 }}
-                    />
-                    <div
-                      className="sm-skel-b"
-                      style={{ width: "32%", height: 10 }}
-                    />
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}>
+                    <div className="sm-skel-b" style={{ width: "52%", height: 13 }} />
+                    <div className="sm-skel-b" style={{ width: "32%", height: 10 }} />
                   </div>
                 </div>
               ))}
             </div>
           ) : meets.length === 0 ? (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "80px 20px",
-                color: "#9CA3AF",
-              }}
-            >
-              <svg
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#CBD5E1"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ margin: "0 auto 16px", display: "block" }}
-              >
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" />
+            <div style={{ textAlign: "center", padding: "80px 20px", color: "#9CA3AF" }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 16px", display: "block" }}>
+                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
-              <div
-                style={{
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#6B7280",
-                  marginBottom: 6,
-                }}
-              >
-                No meetings yet
-              </div>
-              {isHost && (
-                <div style={{ fontSize: 13, color: "#9CA3AF" }}>
-                  Click "New Meeting" to schedule one.
-                </div>
-              )}
+              <div style={{ fontSize: 16, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>No meetings yet</div>
+              {isHost && <div style={{ fontSize: 13, color: "#9CA3AF" }}>Click "New Meeting" to schedule one.</div>}
             </div>
           ) : (
             <>
               {live.length > 0 && (
                 <Section label="Live Now" count={live.length}>
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    {live.map((m) => (
-                      <MeetCard
-                        key={m.meetId}
-                        meet={m}
-                        status="live"
-                        router={router}
-                        empMap={empMap}
-                        onViewSummary={handleViewSummary}
-                        isHost={isHost}
-                        onCancel={handleCancelRequest}
-                        cancellingId={cancellingId}
-                        employeeId={employeeId}
-                        onEdit={handleEditOpen}
-                      />
-                    ))}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {live.map(m => <MeetCard key={m.meetId} meet={m} status="live" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)}
                   </div>
                 </Section>
               )}
               <Section label="Upcoming" count={upcoming.length}>
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                >
-                  {upcoming.length === 0 ? (
-                    <EmptyInline message="No upcoming meetings" />
-                  ) : (
-                    upcoming.map((m) => (
-                      <MeetCard
-                        key={m.meetId}
-                        meet={m}
-                        status="upcoming"
-                        router={router}
-                        empMap={empMap}
-                        onViewSummary={handleViewSummary}
-                        isHost={isHost}
-                        onCancel={handleCancelRequest}
-                        cancellingId={cancellingId}
-                        employeeId={employeeId}
-                        onEdit={handleEditOpen}
-                      />
-                    ))
-                  )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {upcoming.length === 0
+                    ? <EmptyInline message="No upcoming meetings" />
+                    : upcoming.map(m => <MeetCard key={m.meetId} meet={m} status="upcoming" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)
+                  }
                 </div>
               </Section>
               {ended.length > 0 && (
                 <Section label="Past" count={ended.length}>
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    {ended.map((m) => (
-                      <MeetCard
-                        key={m.meetId}
-                        meet={m}
-                        status="ended"
-                        router={router}
-                        empMap={empMap}
-                        onViewSummary={handleViewSummary}
-                        isHost={isHost}
-                        onCancel={handleCancelRequest}
-                        cancellingId={cancellingId}
-                        employeeId={employeeId}
-                        onEdit={handleEditOpen}
-                      />
-                    ))}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {ended.map(m => <MeetCard key={m.meetId} meet={m} status="ended" router={router} empMap={empMap} onViewSummary={handleViewSummary} isHost={isHost} onCancel={handleCancelRequest} cancellingId={cancellingId} employeeId={employeeId} onEdit={handleEditOpen} />)}
                   </div>
                 </Section>
               )}
               {cancelled.length > 0 && (
                 <Section label="Cancelled" count={cancelled.length}>
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    {cancelled.map((m) => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {cancelled.map(m => (
                       <MeetCard
                         key={m.meetId}
                         meet={m}
@@ -1676,22 +926,10 @@ export default function MeetingsPage() {
 
       {/* ── Cancel Confirmation Dialog ─────────────────────────────────────── */}
       {cancelConfirm && (
-        <div
-          className="sm-confirm-overlay"
-          onClick={() => setCancelConfirm(null)}
-        >
-          <div className="sm-confirm-box" onClick={(e) => e.stopPropagation()}>
+        <div className="sm-confirm-overlay" onClick={() => setCancelConfirm(null)}>
+          <div className="sm-confirm-box" onClick={e => e.stopPropagation()}>
             <div className="sm-confirm-icon">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#A85454"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A85454" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="15" y1="9" x2="9" y2="15" />
                 <line x1="9" y1="9" x2="15" y2="15" />
@@ -1699,9 +937,7 @@ export default function MeetingsPage() {
             </div>
             <div className="sm-confirm-title">Cancel Meeting?</div>
             <div className="sm-confirm-body">
-              <strong style={{ color: "#1F2937", fontSize: 14 }}>
-                {cancelConfirm.title}
-              </strong>
+              <strong style={{ color: "#1F2937", fontSize: 14 }}>{cancelConfirm.title}</strong>
               {cancelConfirm.meet?.dateTime && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#6B7280" }}>
                   {fmtFull(cancelConfirm.meet.dateTime)}
@@ -1709,33 +945,16 @@ export default function MeetingsPage() {
               )}
               {cancelConfirm.meet?.participants?.length > 0 && (
                 <div style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
-                  {cancelConfirm.meet.participants.length} participant
-                  {cancelConfirm.meet.participants.length !== 1 ? "s" : ""} will
-                  be notified
+                  {cancelConfirm.meet.participants.length} participant{cancelConfirm.meet.participants.length !== 1 ? "s" : ""} will be notified
                 </div>
               )}
-              <div
-                style={{
-                  marginTop: 12,
-                  color: "#A85454",
-                  fontWeight: 600,
-                  fontSize: 13,
-                }}
-              >
-                This cannot be undone.
-              </div>
+              <div style={{ marginTop: 12, color: "#A85454", fontWeight: 600, fontSize: 13 }}>This cannot be undone.</div>
             </div>
             <div className="sm-confirm-actions">
-              <button
-                className="sm-confirm-btn sm-confirm-cancel-btn"
-                onClick={() => setCancelConfirm(null)}
-              >
+              <button className="sm-confirm-btn sm-confirm-cancel-btn" onClick={() => setCancelConfirm(null)}>
                 Keep Meeting
               </button>
-              <button
-                className="sm-confirm-btn sm-confirm-ok-btn"
-                onClick={handleCancelConfirm}
-              >
+              <button className="sm-confirm-btn sm-confirm-ok-btn" onClick={handleCancelConfirm}>
                 Yes, Cancel It
               </button>
             </div>
@@ -1757,10 +976,7 @@ export default function MeetingsPage() {
           saving={editSaving}
           error={editError}
           onSave={handleEditSave}
-          onClose={() => {
-            setEditModal(null);
-            setEditError("");
-          }}
+          onClose={() => { setEditModal(null); setEditError(""); }}
         />
       )}
 

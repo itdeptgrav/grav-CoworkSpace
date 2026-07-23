@@ -20,618 +20,337 @@ const AI_AVATAR_SRC = "/grav-logo.png";
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getToken() {
-  const user = firebaseAuth.currentUser;
-  if (!user) throw new Error("Not authenticated");
-  return user.getIdToken(false);
+    const user = firebaseAuth.currentUser;
+    if (!user) throw new Error("Not authenticated");
+    return user.getIdToken(false);
 }
 
 async function fetchSummary(meetId) {
-  const token = await getToken();
-  const res = await fetch(`${BASE}/cowork/audio/summary/${meetId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to fetch summary");
-  return data;
+    const token = await getToken();
+    const res = await fetch(`${BASE}/cowork/audio/summary/${meetId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to fetch summary");
+    return data;
 }
 
 async function generateSummary(meetId, force = false) {
-  const token = await getToken();
-  const url = force
-    ? `${BASE}/cowork/audio/summary/${meetId}?force=true`
-    : `${BASE}/cowork/audio/summary/${meetId}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to generate summary");
-  return data;
+    const token = await getToken();
+    const url = force
+        ? `${BASE}/cowork/audio/summary/${meetId}?force=true`
+        : `${BASE}/cowork/audio/summary/${meetId}`;
+    const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to generate summary");
+    return data;
 }
 
 // ── Dummy summary (auto-filled if user doesn't click Generate) ────────────────
 // Looks realistic; user can always click Regenerate to replace with real Gemini output.
 function buildDummySummary(meetTitle) {
-  const now = new Date();
-  return {
-    isDummy: true,
-    overview: `This meeting covered the primary agenda items for ${meetTitle || "the session"}. Participants discussed current progress, aligned on next steps, and agreed on action items to move the work forward.`,
-    participants: [],
-    keyPoints: [
-      "Team reviewed current progress against the plan.",
-      "Discussed blockers and dependencies across workstreams.",
-      "Aligned on priorities for the coming week.",
-      "Agreed on ownership for pending action items.",
-    ],
-    tasksAssigned: [],
-    deadlines: [],
-    actionItems: [
-      "Follow up on the discussion points raised",
-      "Share meeting notes with stakeholders",
-    ],
-    conversationFlow: [],
-    dialogue: [],
-    generatedAt: now.toISOString(),
-    source: "auto-generated-placeholder",
-  };
+    const now = new Date();
+    return {
+        isDummy: true,
+        overview: `This meeting covered the primary agenda items for ${meetTitle || "the session"}. Participants discussed current progress, aligned on next steps, and agreed on action items to move the work forward.`,
+        participants: [],
+        keyPoints: [
+            "Team reviewed current progress against the plan.",
+            "Discussed blockers and dependencies across workstreams.",
+            "Aligned on priorities for the coming week.",
+            "Agreed on ownership for pending action items.",
+        ],
+        tasksAssigned: [],
+        deadlines: [],
+        actionItems: [
+            { item: "Follow up on the discussion points raised", owner: "Team", priority: "normal" },
+            { item: "Share meeting notes with stakeholders", owner: "Host", priority: "normal" },
+        ],
+        conversationFlow: [],
+        dialogue: [],
+        generatedAt: now.toISOString(),
+        source: "auto-generated-placeholder",
+    };
 }
 
 async function downloadDocx(meetId) {
-  try {
-    const token = await getToken();
-    const res = await fetch(`${BASE}/cowork/audio/summary/${meetId}/download`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      alert(d.error || "Download failed. Generate summary first.");
-      return;
+    try {
+        const token = await getToken();
+        const res = await fetch(`${BASE}/cowork/audio/summary/${meetId}/download`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            alert(d.error || "Download failed. Generate summary first.");
+            return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const fileName = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1]
+            || `Meeting_Summary_${meetId}.docx`;
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert("Download failed: " + e.message);
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const fileName =
-      res.headers
-        .get("Content-Disposition")
-        ?.match(/filename="([^"]+)"/)?.[1] || `Meeting_Summary_${meetId}.docx`;
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert("Download failed: " + e.message);
-  }
 }
 
 async function askAI(meetId, question) {
-  const token = await getToken();
-  const res = await fetch(`${BASE}/cowork/audio/ask/${meetId}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ question }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to get answer");
-  return data.answer;
+    const token = await getToken();
+    const res = await fetch(`${BASE}/cowork/audio/ask/${meetId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to get answer");
+    return data.answer;
 }
 
 // ── Speaker colours — muted professional palette ──────────────────────────────
-const PALETTE = [
-  "#2563EB",
-  "#059669",
-  "#DC2626",
-  "#D97706",
-  "#7C3AED",
-  "#0891B2",
-  "#C2410C",
-  "#0369A1",
-  "#4D7C0F",
-  "#BE185D",
-];
+const PALETTE = ["#2563EB", "#059669", "#DC2626", "#D97706", "#7C3AED", "#0891B2", "#C2410C", "#0369A1", "#4D7C0F", "#BE185D"];
 const _clrMap = {};
 let _clrIdx = 0;
 function spkColor(name) {
-  if (!_clrMap[name]) {
-    _clrMap[name] = PALETTE[_clrIdx++ % PALETTE.length];
-  }
-  return _clrMap[name];
+    if (!_clrMap[name]) { _clrMap[name] = PALETTE[_clrIdx++ % PALETTE.length]; }
+    return _clrMap[name];
 }
 
 function getRows(summary) {
-  if (summary.dialogue?.length > 0) return summary.dialogue;
-  return (summary.conversationFlow || []).map((l) => {
-    const i = l.indexOf(":");
-    return i > 0
-      ? {
-          speaker: l.slice(0, i).trim(),
-          text: l
-            .slice(i + 1)
-            .trim()
-            .replace(/^"|"$/g, ""),
-        }
-      : { speaker: "—", text: l };
-  });
+    if (summary.dialogue?.length > 0) return summary.dialogue;
+    return (summary.conversationFlow || []).map(l => {
+        const i = l.indexOf(":");
+        return i > 0 ? { speaker: l.slice(0, i).trim(), text: l.slice(i + 1).trim().replace(/^"|"$/g, "") } : { speaker: "—", text: l };
+    });
 }
 
 const SUGGESTED_QUESTIONS = [
-  "Who was assigned the most tasks?",
-  "What deadlines were mentioned?",
-  "Summarize what each person committed to",
-  "Were there any unresolved issues?",
-  "What was decided in this meeting?",
+    "Who was assigned the most tasks?",
+    "What deadlines were mentioned?",
+    "Summarize what each person committed to",
+    "Were there any unresolved issues?",
+    "What was decided in this meeting?",
 ];
 
 const IconSend = () => (
-  <svg
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <line x1="22" y1="2" x2="11" y2="13" />
-    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-  </svg>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
 );
 const IconDownload = () => (
-  <svg
-    width="13"
-    height="13"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
 );
 const IconRefresh = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <polyline points="23 4 23 10 17 10" />
-    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-  </svg>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
 );
 const IconClose = () => (
-  <svg
-    width="13"
-    height="13"
-    viewBox="0 0 14 14"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-  >
-    <line x1="1" y1="1" x2="13" y2="13" />
-    <line x1="13" y1="1" x2="1" y2="13" />
-  </svg>
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <line x1="1" y1="1" x2="13" y2="13" /><line x1="13" y1="1" x2="1" y2="13" />
+    </svg>
 );
 
 const TAB_ICONS = {
-  summary: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="2" y="2" width="12" height="12" rx="2" />
-      <line x1="5" y1="6" x2="11" y2="6" />
-      <line x1="5" y1="9" x2="9" y2="9" />
-    </svg>
-  ),
-  convo: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M14 10a2 2 0 01-2 2H5l-3 2V4a2 2 0 012-2h8a2 2 0 012 2z" />
-    </svg>
-  ),
-  tasks: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="3,8 6,11 13,4" />
-      <circle cx="8" cy="8" r="7" />
-    </svg>
-  ),
-  deadlines: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="8" cy="8" r="6" />
-      <polyline points="8,4 8,8 11,10" />
-    </svg>
-  ),
-  actions: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polygon points="3,2 13,8 3,14" />
-      <line x1="13" y1="2" x2="13" y2="14" />
-    </svg>
-  ),
-  askai: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="8" cy="8" r="6" />
-      <path d="M6 6.5c0-1.1.9-2 2-2s2 .9 2 2c0 1-1 1.5-2 2v1" />
-      <circle cx="8" cy="12" r=".5" fill="currentColor" />
-    </svg>
-  ),
+    summary: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="12" height="12" rx="2" /><line x1="5" y1="6" x2="11" y2="6" /><line x1="5" y1="9" x2="9" y2="9" /></svg>,
+    convo: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 10a2 2 0 01-2 2H5l-3 2V4a2 2 0 012-2h8a2 2 0 012 2z" /></svg>,
+    tasks: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3,8 6,11 13,4" /><circle cx="8" cy="8" r="7" /></svg>,
+    deadlines: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><polyline points="8,4 8,8 11,10" /></svg>,
+    actions: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="3,2 13,8 3,14" /><line x1="13" y1="2" x2="13" y2="14" /></svg>,
+    askai: <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><path d="M6 6.5c0-1.1.9-2 2-2s2 .9 2 2c0 1-1 1.5-2 2v1" /><circle cx="8" cy="12" r=".5" fill="currentColor" /></svg>,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Animated pipeline steps shown during Gemini generation ──────────────────
 function GeneratingSteps() {
-  const [activeStep, setActiveStep] = useState(0);
-  const steps = [
-    { icon: "📥", label: "Fetching audio recordings", duration: 8000 },
-    { icon: "⬆️", label: "Uploading to Gemini API", duration: 18000 },
-    { icon: "🧠", label: "Gemini analyzing conversation", duration: 40000 },
-    { icon: "✍️", label: "Extracting tasks & insights", duration: 15000 },
-    { icon: "✅", label: "Finalizing summary", duration: null },
-  ];
+    const [activeStep, setActiveStep] = useState(0);
+    const steps = [
+        { icon: "📥", label: "Fetching audio recordings", duration: 8000 },
+        { icon: "⬆️", label: "Uploading to Gemini API", duration: 18000 },
+        { icon: "🧠", label: "Gemini analyzing conversation", duration: 40000 },
+        { icon: "✍️", label: "Extracting tasks & insights", duration: 15000 },
+        { icon: "✅", label: "Finalizing summary", duration: null },
+    ];
 
-  useEffect(() => {
-    let step = 0;
-    const advance = () => {
-      if (step < steps.length - 1) {
-        step++;
-        setActiveStep(step);
-        if (steps[step].duration) {
-          setTimeout(advance, steps[step].duration);
-        }
-      }
-    };
-    const t = setTimeout(advance, steps[0].duration || 3000);
-    return () => clearTimeout(t);
-  }, []);
+    useEffect(() => {
+        let step = 0;
+        const advance = () => {
+            if (step < steps.length - 1) {
+                step++;
+                setActiveStep(step);
+                if (steps[step].duration) {
+                    setTimeout(advance, steps[step].duration);
+                }
+            }
+        };
+        const t = setTimeout(advance, steps[0].duration || 3000);
+        return () => clearTimeout(t);
+    }, []);
 
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        width: "100%",
-        maxWidth: 340,
-      }}
-    >
-      {steps.map((step, i) => {
-        const isDone = i < activeStep;
-        const isActive = i === activeStep;
-        return (
-          <div
-            key={i}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 14px",
-              borderRadius: 10,
-              background: isDone ? "#F0FDF4" : isActive ? "#EFF6FF" : "#F8FAFC",
-              border: `1px solid ${isDone ? "#BBF7D0" : isActive ? "#BFDBFE" : "#E2E8F0"}`,
-              transition: "all 0.4s ease",
-              opacity: i > activeStep ? 0.4 : 1,
-            }}
-          >
-            {/* Status icon */}
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                flexShrink: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: isDone
-                  ? "#16A34A"
-                  : isActive
-                    ? "#2563EB"
-                    : "#E2E8F0",
-              }}
-            >
-              {isDone ? (
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#fff"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              ) : isActive ? (
-                <div
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    border: "2px solid rgba(255,255,255,0.4)",
-                    borderTopColor: "#fff",
-                    animation: "_spin 0.7s linear infinite",
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "#9CA3AF",
-                  }}
-                />
-              )}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 500,
-                  color: isDone ? "#15803D" : isActive ? "#1D4ED8" : "#9CA3AF",
-                }}
-              >
-                {step.icon} {step.label}
-              </div>
-              {isActive && (
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: "#6B7280",
-                    marginTop: 2,
-                    display: "flex",
-                    gap: 3,
-                  }}
-                >
-                  {[0, 1, 2].map((j) => (
-                    <span
-                      key={j}
-                      style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: "50%",
-                        background: "#2563EB",
-                        display: "inline-block",
-                        animation: `_dot 1.2s ease-in-out ${j * 0.2}s infinite`,
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 340 }}>
+            {steps.map((step, i) => {
+                const isDone = i < activeStep;
+                const isActive = i === activeStep;
+                return (
+                    <div key={i} style={{
+                        display: "flex", alignItems: "center", gap: 12,
+                        padding: "10px 14px", borderRadius: 10,
+                        background: isDone ? "#F0FDF4" : isActive ? "#EFF6FF" : "#F8FAFC",
+                        border: `1px solid ${isDone ? "#BBF7D0" : isActive ? "#BFDBFE" : "#E2E8F0"}`,
+                        transition: "all 0.4s ease",
+                        opacity: i > activeStep ? 0.4 : 1,
+                    }}>
+                        {/* Status icon */}
+                        <div style={{
+                            width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isDone ? "#16A34A" : isActive ? "#2563EB" : "#E2E8F0"
+                        }}>
+                            {isDone ? (
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                            ) : isActive ? (
+                                <div style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", animation: "_spin 0.7s linear infinite" }} />
+                            ) : (
+                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#9CA3AF" }} />
+                            )}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: isActive ? 600 : 500, color: isDone ? "#15803D" : isActive ? "#1D4ED8" : "#9CA3AF" }}>
+                                {step.icon} {step.label}
+                            </div>
+                            {isActive && (
+                                <div style={{ fontSize: 10, color: "#6B7280", marginTop: 2, display: "flex", gap: 3 }}>
+                                    {[0, 1, 2].map(j => (
+                                        <span key={j} style={{
+                                            width: 4, height: 4, borderRadius: "50%", background: "#2563EB", display: "inline-block",
+                                            animation: `_dot 1.2s ease-in-out ${j * 0.2}s infinite`
+                                        }} />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
 }
 
 export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
-  const [phase, setPhase] = useState("loading");
-  const [summary, setSummary] = useState(null);
-  const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("summary");
-  const [regenToast, setRegenToast] = useState(null);
+    const [phase, setPhase] = useState("loading");
+    const [summary, setSummary] = useState(null);
+    const [error, setError] = useState("");
+    const [activeTab, setActiveTab] = useState("summary");
+    const [regenToast, setRegenToast] = useState(null);
 
-  const [aiMessages, setAiMessages] = useState([]);
-  const [aiInput, setAiInput] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const aiChatEndRef = useRef(null);
+    const [aiMessages, setAiMessages] = useState([]);
+    const [aiInput, setAiInput] = useState("");
+    const [aiLoading, setAiLoading] = useState(false);
+    const aiChatEndRef = useRef(null);
 
-  useEffect(() => {
-    if (!meetId) return;
-    (async () => {
-      try {
-        setPhase("loading");
-        const data = await fetchSummary(meetId);
-        if (data.exists && data.summary) {
-          setSummary(data.summary);
-          setPhase("done");
-        } else setPhase("empty");
-      } catch (e) {
-        setError(e.message);
-        setPhase("error");
-      }
-    })();
-  }, [meetId]);
+    useEffect(() => {
+        if (!meetId) return;
+        (async () => {
+            try {
+                setPhase("loading");
+                const data = await fetchSummary(meetId);
+                if (data.exists && data.summary) { setSummary(data.summary); setPhase("done"); }
+                else setPhase("empty");
+            } catch (e) { setError(e.message); setPhase("error"); }
+        })();
+    }, [meetId]);
 
-  useEffect(() => {
-    const h = (e) => {
-      if (e.key === "Escape") onClose();
+    useEffect(() => {
+        const h = (e) => { if (e.key === "Escape") onClose(); };
+        window.addEventListener("keydown", h);
+        return () => window.removeEventListener("keydown", h);
+    }, [onClose]);
+
+    useEffect(() => {
+        if (activeTab === "askai") aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [aiMessages, activeTab]);
+
+    const handleGenerate = async () => {
+        setPhase("generating"); setError("");
+        try {
+            const data = await generateSummary(meetId);
+            setSummary(data.summary); setPhase("done");
+        } catch (e) { setError(e.message); setPhase("error"); }
     };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
 
-  useEffect(() => {
-    if (activeTab === "askai")
-      aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [aiMessages, activeTab]);
+    // AUTO-FILL dummy summary if user doesn't click Generate within 2.5s.
+    // Triggers only while phase is "empty" (no real summary in DB yet).
+    // User can still click "Regenerate with Gemini" to replace with the real one.
+    useEffect(() => {
+        if (phase !== "empty") return;
+        const t = setTimeout(() => {
+            console.log("[SummaryModal] Auto-filling dummy summary (user didn't click Generate)");
+            setSummary(buildDummySummary(meetTitle));
+            setPhase("done");
+        }, 2500);
+        return () => clearTimeout(t);
+    }, [phase, meetTitle]);
 
-  const handleGenerate = async () => {
-    setPhase("generating");
-    setError("");
-    try {
-      const data = await generateSummary(meetId);
-      setSummary(data.summary);
-      setPhase("done");
-    } catch (e) {
-      setError(e.message);
-      setPhase("error");
-    }
-  };
+    const handleRegenerate = async () => {
+        if (regenToast === "loading") return;
+        setRegenToast("loading"); setError("");
+        try {
+            const data = await generateSummary(meetId, true);
+            setSummary(data.summary);
+            setPhase("done");
+            setActiveTab("summary");
+            setRegenToast(data.cached ? "cached" : "success");
+        } catch (e) {
+            setError(e.message); setPhase("error"); setRegenToast(null); return;
+        }
+        setTimeout(() => setRegenToast(null), 4000);
+    };
 
-  // AUTO-FILL dummy summary if user doesn't click Generate within 2.5s.
-  // Triggers only while phase is "empty" (no real summary in DB yet).
-  // User can still click "Regenerate with Gemini" to replace with the real one.
-  useEffect(() => {
-    if (phase !== "empty") return;
-    const t = setTimeout(() => {
-      console.log(
-        "[SummaryModal] Auto-filling dummy summary (user didn't click Generate)",
-      );
-      setSummary(buildDummySummary(meetTitle));
-      setPhase("done");
-    }, 2500);
-    return () => clearTimeout(t);
-  }, [phase, meetTitle]);
+    const handleAskAI = async (questionOverride) => {
+        const question = (questionOverride || aiInput).trim();
+        if (!question || aiLoading) return;
+        setAiInput("");
+        setAiMessages(prev => [...prev, { role: "user", text: question }]);
+        setAiLoading(true);
+        setAiMessages(prev => [...prev, { role: "ai", text: "", loading: true }]);
+        try {
+            const answer = await askAI(meetId, question);
+            setAiMessages(prev => {
+                const u = [...prev];
+                if (u[u.length - 1]?.loading) u[u.length - 1] = { role: "ai", text: answer, loading: false };
+                return u;
+            });
+        } catch (e) {
+            setAiMessages(prev => {
+                const u = [...prev];
+                if (u[u.length - 1]?.loading) u[u.length - 1] = { role: "ai", text: `Error: ${e.message}`, loading: false, isError: true };
+                return u;
+            });
+        } finally { setAiLoading(false); }
+    };
 
-  const handleRegenerate = async () => {
-    if (regenToast === "loading") return;
-    setRegenToast("loading");
-    setError("");
-    try {
-      const data = await generateSummary(meetId, true);
-      setSummary(data.summary);
-      setPhase("done");
-      setActiveTab("summary");
-      setRegenToast(data.cached ? "cached" : "success");
-    } catch (e) {
-      setError(e.message);
-      setPhase("error");
-      setRegenToast(null);
-      return;
-    }
-    setTimeout(() => setRegenToast(null), 4000);
-  };
+    const TABS = [
+        { id: "summary", label: "Summary", icon: TAB_ICONS.summary, count: null },
+        { id: "convo", label: "Conversation", icon: TAB_ICONS.convo, count: summary ? getRows(summary).length : null },
+        { id: "tasks", label: "Tasks", icon: TAB_ICONS.tasks, count: summary?.tasksAssigned?.length || null },
+        { id: "deadlines", label: "Deadlines", icon: TAB_ICONS.deadlines, count: summary?.deadlines?.length || null },
+        { id: "actions", label: "Action Items", icon: TAB_ICONS.actions, count: summary?.actionItems?.length || null },
+        { id: "askai", label: "Ask AI", icon: TAB_ICONS.askai, count: aiMessages.filter(m => m.role === "user").length || null },
+    ];
 
-  const handleAskAI = async (questionOverride) => {
-    const question = (questionOverride || aiInput).trim();
-    if (!question || aiLoading) return;
-    setAiInput("");
-    setAiMessages((prev) => [...prev, { role: "user", text: question }]);
-    setAiLoading(true);
-    setAiMessages((prev) => [...prev, { role: "ai", text: "", loading: true }]);
-    try {
-      const answer = await askAI(meetId, question);
-      setAiMessages((prev) => {
-        const u = [...prev];
-        if (u[u.length - 1]?.loading)
-          u[u.length - 1] = { role: "ai", text: answer, loading: false };
-        return u;
-      });
-    } catch (e) {
-      setAiMessages((prev) => {
-        const u = [...prev];
-        if (u[u.length - 1]?.loading)
-          u[u.length - 1] = {
-            role: "ai",
-            text: `Error: ${e.message}`,
-            loading: false,
-            isError: true,
-          };
-        return u;
-      });
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const TABS = [
-    { id: "summary", label: "Summary", icon: TAB_ICONS.summary, count: null },
-    {
-      id: "convo",
-      label: "Conversation",
-      icon: TAB_ICONS.convo,
-      count: summary ? getRows(summary).length : null,
-    },
-    {
-      id: "tasks",
-      label: "Tasks",
-      icon: TAB_ICONS.tasks,
-      count: summary?.tasksAssigned?.length || null,
-    },
-    {
-      id: "deadlines",
-      label: "Deadlines",
-      icon: TAB_ICONS.deadlines,
-      count: summary?.deadlines?.length || null,
-    },
-    {
-      id: "actions",
-      label: "Action Items",
-      icon: TAB_ICONS.actions,
-      count: summary?.actionItems?.length || null,
-    },
-    {
-      id: "askai",
-      label: "Ask AI",
-      icon: TAB_ICONS.askai,
-      count: aiMessages.filter((m) => m.role === "user").length || null,
-    },
-  ];
-
-  return (
-    <>
-      <style>{`
+    return (
+        <>
+            <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=DM+Mono:wght@400;500&display=swap');
 
                 @keyframes _in    { from{opacity:0;transform:scale(0.97) translateY(12px)} to{opacity:1;transform:scale(1) translateY(0)} }
@@ -1002,803 +721,373 @@ export default function MeetingSummaryModal({ meetId, meetTitle, onClose }) {
                 }
             `}</style>
 
-      <div
-        className="M-overlay"
-        onClick={(e) => e.target === e.currentTarget && onClose()}
-      >
-        <div className="M-modal">
-          {/* Header */}
-          <div className="M-hdr">
-            <div>
-              <div className="M-hdr-eyebrow">Cowork · Meeting Summary</div>
-              <div className="M-hdr-title">
-                {meetTitle || meetId}
-                <span className="M-hdr-id">{meetId}</span>
-              </div>
-            </div>
-            <button className="M-close" onClick={onClose} aria-label="Close">
-              <IconClose />
-            </button>
-          </div>
+            <div className="M-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+                <div className="M-modal">
 
-          {/* Body */}
-          <div className="M-body">
-            {phase === "loading" && (
-              <div className="M-center">
-                <div
-                  className="M-spin M-spin-md"
-                  style={{ marginBottom: 14 }}
-                />
-                <div style={{ fontSize: 13, color: "#6B7280" }}>
-                  Loading summary…
-                </div>
-              </div>
-            )}
-
-            {phase === "empty" && (
-              <div className="M-center">
-                <div className="M-state-ico">
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
-                  </svg>
-                </div>
-                <div className="M-state-title">No summary generated</div>
-                <div className="M-state-sub">
-                  Gemini AI will analyze all audio recordings and produce a
-                  structured summary with conversation, tasks, and deadlines.
-                </div>
-                <button className="M-btn-gen" onClick={handleGenerate}>
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                  Generate Summary
-                </button>
-              </div>
-            )}
-
-            {phase === "generating" && (
-              <div className="M-center" style={{ gap: 0, padding: "20px 0" }}>
-                {/* Animated spinner with Gemini star icon */}
-                <div
-                  style={{
-                    position: "relative",
-                    width: 64,
-                    height: 64,
-                    marginBottom: 22,
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      borderRadius: "50%",
-                      border: "3px solid #EFF6FF",
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      borderRadius: "50%",
-                      border: "3px solid transparent",
-                      borderTopColor: "#2563EB",
-                      animation: "_spin 0.9s linear infinite",
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 8,
-                      borderRadius: "50%",
-                      background: "#EFF6FF",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <svg
-                      width="22"
-                      height="22"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#2563EB"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                    </svg>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 700,
-                    color: "#0F172A",
-                    marginBottom: 6,
-                  }}
-                >
-                  Generating with Gemini AI
-                </div>
-                <div
-                  style={{ fontSize: 13, color: "#6B7280", marginBottom: 24 }}
-                >
-                  Analyzing your meeting audio…
-                </div>
-
-                {/* Animated pipeline steps */}
-                <GeneratingSteps />
-
-                <div style={{ marginTop: 20, fontSize: 12, color: "#94A3B8" }}>
-                  Typically takes{" "}
-                  <strong style={{ color: "#2563EB" }}>20–90 seconds</strong>{" "}
-                  depending on recording length
-                </div>
-              </div>
-            )}
-
-            {phase === "error" && (
-              <div className="M-center">
-                <div
-                  className="M-state-ico"
-                  style={{
-                    background: "#FEF2F2",
-                    borderColor: "#FECDD3",
-                    color: "#DC2626",
-                  }}
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                </div>
-                <div className="M-state-title" style={{ color: "#DC2626" }}>
-                  Something went wrong
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#6B7280",
-                    background: "#FEF2F2",
-                    border: "1px solid #FECDD3",
-                    borderRadius: 7,
-                    padding: "11px 16px",
-                    maxWidth: 380,
-                    lineHeight: 1.6,
-                    margin: "10px 0 18px",
-                    textAlign: "left",
-                  }}
-                >
-                  {error}
-                </div>
-                <button className="M-btn-ghost" onClick={handleGenerate}>
-                  <IconRefresh /> Try Again
-                </button>
-              </div>
-            )}
-
-            {phase === "done" && summary && (
-              <>
-                {/* Participants */}
-                {summary.participants?.length > 0 && (
-                  <div className="M-chips">
-                    <span className="M-chips-lbl">Participants</span>
-                    {[...new Set(summary.participants)].map((p, i) => {
-                      const c = spkColor(p);
-                      return (
-                        <span
-                          key={i}
-                          className="M-chip"
-                          style={{
-                            background: `${c}12`,
-                            color: c,
-                            border: `1px solid ${c}28`,
-                          }}
-                        >
-                          <span
-                            className="M-chip-dot"
-                            style={{ background: c }}
-                          />
-                          {p}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Tabs */}
-                <div className="M-tabs">
-                  {TABS.map((t) => (
-                    <button
-                      key={t.id}
-                      className={`M-tab${activeTab === t.id ? " on" : ""}`}
-                      onClick={() => setActiveTab(t.id)}
-                    >
-                      {t.icon}
-                      {t.label}
-                      {t.count > 0 && (
-                        <span className="M-badge">{t.count}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Scrollable content */}
-                <div className="M-scroll">
-                  {/* SUMMARY */}
-                  {activeTab === "summary" &&
-                    (() => {
-                      const tasks = summary.tasksAssigned || [];
-                      const deadlines = summary.deadlines || [];
-                      const actions = summary.actionItems || [];
-                      return (
+                    {/* Header */}
+                    <div className="M-hdr">
                         <div>
-                          <div className="M-prose">
-                            {summary.summary || "No summary available."}
-                          </div>
-
-                          {tasks.length > 0 && (
-                            <div className="M-card">
-                              <div
-                                className="M-card-hdr"
-                                style={{ color: "#059669" }}
-                              >
-                                {TAB_ICONS.tasks} Tasks Assigned
-                                <span className="M-card-hdr-cnt">
-                                  {tasks.length}
-                                </span>
-                              </div>
-                              <div className="M-card-body">
-                                {tasks.slice(0, 4).map((t, i) => {
-                                  const ci = t.indexOf(":");
-                                  const h = ci > 0 && ci < 30;
-                                  const name = h ? t.slice(0, ci).trim() : null;
-                                  const text = h ? t.slice(ci + 1).trim() : t;
-                                  const c = spkColor(name || "task");
-                                  return (
-                                    <div key={i} className="M-task">
-                                      {name && (
-                                        <span
-                                          className="M-task-tag"
-                                          style={{
-                                            background: `${c}12`,
-                                            color: c,
-                                          }}
-                                        >
-                                          {name}
-                                        </span>
-                                      )}
-                                      <span className="M-task-txt">
-                                        {text.length > 90
-                                          ? text.slice(0, 90) + "…"
-                                          : text}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                                {tasks.length > 4 && (
-                                  <span
-                                    className="M-more"
-                                    onClick={() => setActiveTab("tasks")}
-                                  >
-                                    +{tasks.length - 4} more →
-                                  </span>
-                                )}
-                              </div>
+                            <div className="M-hdr-eyebrow">Cowork · Meeting Summary</div>
+                            <div className="M-hdr-title">
+                                {meetTitle || meetId}
+                                <span className="M-hdr-id">{meetId}</span>
                             </div>
-                          )}
-
-                          {deadlines.length > 0 && (
-                            <div className="M-card">
-                              <div
-                                className="M-card-hdr"
-                                style={{ color: "#D97706" }}
-                              >
-                                {TAB_ICONS.deadlines} Deadlines
-                                <span className="M-card-hdr-cnt">
-                                  {deadlines.length}
-                                </span>
-                              </div>
-                              <div className="M-card-body">
-                                {deadlines.slice(0, 3).map((d, i) => (
-                                  <div key={i} className="M-dl">
-                                    <div className="M-dl-dot" />
-                                    <span
-                                      style={{
-                                        fontSize: 13,
-                                        color: "#374151",
-                                        lineHeight: 1.6,
-                                      }}
-                                    >
-                                      {d.length > 95 ? d.slice(0, 95) + "…" : d}
-                                    </span>
-                                  </div>
-                                ))}
-                                {deadlines.length > 3 && (
-                                  <span
-                                    className="M-more"
-                                    onClick={() => setActiveTab("deadlines")}
-                                  >
-                                    +{deadlines.length - 3} more →
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {actions.length > 0 && (
-                            <div className="M-card">
-                              <div
-                                className="M-card-hdr"
-                                style={{ color: "#2563EB" }}
-                              >
-                                {TAB_ICONS.actions} Action Items
-                                <span className="M-card-hdr-cnt">
-                                  {actions.length}
-                                </span>
-                              </div>
-                              <div style={{ padding: "4px 15px 12px" }}>
-                                {actions.slice(0, 3).map((a, i) => (
-                                  <div key={i} className="M-action">
-                                    <span className="M-action-n">{i + 1}</span>
-                                    <span
-                                      style={{
-                                        fontSize: 13,
-                                        color: "#374151",
-                                        lineHeight: 1.6,
-                                        paddingTop: 1,
-                                      }}
-                                    >
-                                      {a.length > 95 ? a.slice(0, 95) + "…" : a}
-                                    </span>
-                                  </div>
-                                ))}
-                                {actions.length > 3 && (
-                                  <span
-                                    className="M-more"
-                                    style={{ marginTop: 5 }}
-                                    onClick={() => setActiveTab("actions")}
-                                  >
-                                    +{actions.length - 3} more →
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="M-meta">
-                            <span>
-                              {summary.audioFilesCount || 0} audio files
-                            </span>
-                            <span className="M-meta-sep">·</span>
-                            <span>
-                              {summary.participants?.length || 0} participants
-                            </span>
-                            <span className="M-meta-sep">·</span>
-                            <span>
-                              {summary.createdAtMs
-                                ? new Date(summary.createdAtMs).toLocaleString(
-                                    "en-IN",
-                                    { dateStyle: "medium", timeStyle: "short" },
-                                  )
-                                : "Generated recently"}
-                            </span>
-                          </div>
                         </div>
-                      );
-                    })()}
-
-                  {/* CONVERSATION */}
-                  {activeTab === "convo" &&
-                    (() => {
-                      const rows = getRows(summary);
-                      if (!rows.length)
-                        return (
-                          <div className="M-empty">
-                            No conversation data available.
-                          </div>
-                        );
-                      return (
-                        <div>
-                          <div
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              color: "#9CA3AF",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.08em",
-                              marginBottom: 13,
-                            }}
-                          >
-                            Full Conversation · {rows.length} exchanges
-                          </div>
-                          <table className="M-tbl">
-                            <thead>
-                              <tr>
-                                <th className="M-tbl-spk">Speaker</th>
-                                <th>Dialogue</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map((row, i) => {
-                                const c = spkColor(row.speaker);
-                                return (
-                                  <tr
-                                    key={i}
-                                    style={{ animationDelay: `${i * 0.022}s` }}
-                                  >
-                                    <td
-                                      className="M-tbl-spk"
-                                      style={{ color: c, fontWeight: 600 }}
-                                    >
-                                      {row.speaker}
-                                    </td>
-                                    <td>"{row.text}"</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })()}
-
-                  {/* TASKS */}
-                  {activeTab === "tasks" && (
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: "#9CA3AF",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                          marginBottom: 13,
-                        }}
-                      >
-                        Tasks Assigned
-                      </div>
-                      {!summary.tasksAssigned?.length ? (
-                        <div className="M-empty">No tasks were assigned.</div>
-                      ) : (
-                        summary.tasksAssigned.map((task, i) => {
-                          const ci = task.indexOf(":");
-                          const h = ci > 0 && ci < 30;
-                          const name = h ? task.slice(0, ci).trim() : null;
-                          const text = h ? task.slice(ci + 1).trim() : task;
-                          const c = spkColor(name || "task");
-                          return (
-                            <div
-                              key={i}
-                              className="M-task"
-                              style={{ marginBottom: 7 }}
-                            >
-                              {name && (
-                                <span
-                                  className="M-task-tag"
-                                  style={{ background: `${c}12`, color: c }}
-                                >
-                                  {name}
-                                </span>
-                              )}
-                              <span className="M-task-txt">{text}</span>
-                            </div>
-                          );
-                        })
-                      )}
+                        <button className="M-close" onClick={onClose} aria-label="Close"><IconClose /></button>
                     </div>
-                  )}
 
-                  {/* DEADLINES */}
-                  {activeTab === "deadlines" && (
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: "#9CA3AF",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                          marginBottom: 13,
-                        }}
-                      >
-                        Deadlines Mentioned
-                      </div>
-                      {!summary.deadlines?.length ? (
-                        <div className="M-empty">
-                          No specific deadlines were mentioned.
-                        </div>
-                      ) : (
-                        summary.deadlines.map((d, i) => (
-                          <div key={i} className="M-dl">
-                            <div className="M-dl-dot" />
-                            <div
-                              style={{
-                                fontSize: 13.5,
-                                color: "#374151",
-                                lineHeight: 1.65,
-                              }}
-                            >
-                              {d}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
+                    {/* Body */}
+                    <div className="M-body">
 
-                  {/* ACTIONS */}
-                  {activeTab === "actions" && (
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: "#9CA3AF",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                          marginBottom: 13,
-                        }}
-                      >
-                        Action Items &amp; Next Steps
-                      </div>
-                      {!summary.actionItems?.length ? (
-                        <div className="M-empty">No action items recorded.</div>
-                      ) : (
-                        summary.actionItems.map((a, i) => (
-                          <div key={i} className="M-action">
-                            <span className="M-action-n">{i + 1}</span>
-                            <div
-                              style={{
-                                fontSize: 13.5,
-                                color: "#374151",
-                                lineHeight: 1.65,
-                                paddingTop: 1,
-                              }}
-                            >
-                              {typeof a === "string" ? a : a?.item || ""}
-                              {a?.owner && (
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    color: "#6B7280",
-                                    marginLeft: 8,
-                                  }}
-                                >
-                                  — {a.owner}
-                                </span>
-                              )}
+                        {phase === "loading" && (
+                            <div className="M-center">
+                                <div className="M-spin M-spin-md" style={{ marginBottom: 14 }} />
+                                <div style={{ fontSize: 13, color: "#6B7280" }}>Loading summary…</div>
                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-
-                  {/* ASK AI */}
-                  {activeTab === "askai" && (
-                    <div className="M-ai-wrap">
-                      <div className="M-ai-hdr">
-                        <div className="M-ai-hdr-title">
-                          Ask AI about this meeting
-                        </div>
-                        <div className="M-ai-hdr-sub">
-                          Gemini re-reads the audio recordings to answer your
-                          question · Each query takes 20–40 seconds
-                        </div>
-                      </div>
-
-                      <div className="M-ai-chat">
-                        {aiMessages.length === 0 ? (
-                          <div className="M-ai-empty">
-                            <div className="M-ai-empty-ico">
-                              {/* AI avatar image — set your path in AI_AVATAR_SRC at the top */}
-                              <img
-                                src={AI_AVATAR_SRC}
-                                alt="AI"
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "cover",
-                                  display: "block",
-                                }}
-                                onError={(e) => {
-                                  e.target.style.display = "none";
-                                  e.target.parentNode.style.color = "#6B7280";
-                                  e.target.parentNode.innerHTML =
-                                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-                                }}
-                              />
-                            </div>
-                            <div className="M-ai-empty-title">
-                              Ask anything about this meeting
-                            </div>
-                            <div className="M-ai-empty-sub">
-                              Who was assigned tasks? What did each person say?
-                              <br />
-                              What decisions were made?
-                            </div>
-                            <div className="M-ai-suggestions">
-                              {SUGGESTED_QUESTIONS.map((q, i) => (
-                                <button
-                                  key={i}
-                                  className="M-ai-sug"
-                                  onClick={() => handleAskAI(q)}
-                                  disabled={aiLoading}
-                                >
-                                  {q}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          aiMessages.map((msg, i) => (
-                            <div
-                              key={i}
-                              className={`M-ai-row ${msg.role}`}
-                              style={{ animationDelay: `${i * 0.025}s` }}
-                            >
-                              <div className={`M-ai-av ${msg.role}`}>
-                                {msg.role === "ai" ? (
-                                  <img
-                                    src={AI_AVATAR_SRC}
-                                    alt="AI"
-                                    style={{
-                                      width: "100%",
-                                      height: "100%",
-                                      objectFit: "cover",
-                                      display: "block",
-                                    }}
-                                    onError={(e) => {
-                                      e.target.style.display = "none";
-                                    }}
-                                  />
-                                ) : (
-                                  "U"
-                                )}
-                              </div>
-                              <div
-                                className={`M-ai-bbl ${msg.role}${msg.isError ? " err" : ""}`}
-                              >
-                                {msg.loading ? (
-                                  <div className="M-dots">
-                                    <div className="M-dot" />
-                                    <div className="M-dot" />
-                                    <div className="M-dot" />
-                                  </div>
-                                ) : (
-                                  msg.text
-                                )}
-                              </div>
-                            </div>
-                          ))
                         )}
-                        <div ref={aiChatEndRef} />
-                      </div>
 
-                      <div className="M-ai-bar">
-                        <input
-                          className="M-ai-inp"
-                          type="text"
-                          placeholder="Ask anything about this meeting…"
-                          value={aiInput}
-                          onChange={(e) => setAiInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              handleAskAI();
-                            }
-                          }}
-                          disabled={aiLoading}
-                        />
-                        <button
-                          className="M-ai-send"
-                          onClick={() => handleAskAI()}
-                          disabled={aiLoading || !aiInput.trim()}
-                        >
-                          {aiLoading ? (
-                            <div className="M-spin M-spin-w" />
-                          ) : (
-                            <IconSend />
-                          )}
-                        </button>
-                      </div>
-                      <div className="M-ai-note">
-                        Each question re-downloads audio from Drive and sends to
-                        Gemini independently.
-                      </div>
+                        {phase === "empty" && (
+                            <div className="M-center">
+                                <div className="M-state-ico">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
+                                </div>
+                                <div className="M-state-title">No summary generated</div>
+                                <div className="M-state-sub">Gemini AI will analyze all audio recordings and produce a structured summary with conversation, tasks, and deadlines.</div>
+                                <button className="M-btn-gen" onClick={handleGenerate}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                    Generate Summary
+                                </button>
+                            </div>
+                        )}
+
+                        {phase === "generating" && (
+                            <div className="M-center" style={{ gap: 0, padding: "20px 0" }}>
+                                {/* Animated spinner with Gemini star icon */}
+                                <div style={{ position: "relative", width: 64, height: 64, marginBottom: 22 }}>
+                                    <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid #EFF6FF" }} />
+                                    <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid transparent", borderTopColor: "#2563EB", animation: "_spin 0.9s linear infinite" }} />
+                                    <div style={{ position: "absolute", inset: 8, borderRadius: "50%", background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                                    </div>
+                                </div>
+
+                                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>Generating with Gemini AI</div>
+                                <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 24 }}>Analyzing your meeting audio…</div>
+
+                                {/* Animated pipeline steps */}
+                                <GeneratingSteps />
+
+                                <div style={{ marginTop: 20, fontSize: 12, color: "#94A3B8" }}>
+                                    Typically takes <strong style={{ color: "#2563EB" }}>20–90 seconds</strong> depending on recording length
+                                </div>
+                            </div>
+                        )}
+
+                        {phase === "error" && (
+                            <div className="M-center">
+                                <div className="M-state-ico" style={{ background: "#FEF2F2", borderColor: "#FECDD3", color: "#DC2626" }}>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                                </div>
+                                <div className="M-state-title" style={{ color: "#DC2626" }}>Something went wrong</div>
+                                <div style={{ fontSize: 12, color: "#6B7280", background: "#FEF2F2", border: "1px solid #FECDD3", borderRadius: 7, padding: "11px 16px", maxWidth: 380, lineHeight: 1.6, margin: "10px 0 18px", textAlign: "left" }}>
+                                    {error}
+                                </div>
+                                <button className="M-btn-ghost" onClick={handleGenerate}><IconRefresh /> Try Again</button>
+                            </div>
+                        )}
+
+                        {phase === "done" && summary && (
+                            <>
+                                {/* Participants */}
+                                {summary.participants?.length > 0 && (
+                                    <div className="M-chips">
+                                        <span className="M-chips-lbl">Participants</span>
+                                        {[...new Set(summary.participants)].map((p, i) => {
+                                            const c = spkColor(p);
+                                            return (
+                                                <span key={i} className="M-chip" style={{ background: `${c}12`, color: c, border: `1px solid ${c}28` }}>
+                                                    <span className="M-chip-dot" style={{ background: c }} />{p}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* Tabs */}
+                                <div className="M-tabs">
+                                    {TABS.map(t => (
+                                        <button key={t.id} className={`M-tab${activeTab === t.id ? " on" : ""}`} onClick={() => setActiveTab(t.id)}>
+                                            {t.icon}{t.label}
+                                            {t.count > 0 && <span className="M-badge">{t.count}</span>}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Scrollable content */}
+                                <div className="M-scroll">
+
+                                    {/* SUMMARY */}
+                                    {activeTab === "summary" && (() => {
+                                        const tasks = summary.tasksAssigned || [];
+                                        const deadlines = summary.deadlines || [];
+                                        const actions = summary.actionItems || [];
+                                        return (
+                                            <div>
+                                                <div className="M-prose">{summary.summary || "No summary available."}</div>
+
+                                                {tasks.length > 0 && (
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#059669" }}>
+                                                            {TAB_ICONS.tasks} Tasks Assigned
+                                                            <span className="M-card-hdr-cnt">{tasks.length}</span>
+                                                        </div>
+                                                        <div className="M-card-body">
+                                                            {tasks.slice(0, 4).map((t, i) => {
+                                                                const ci = t.indexOf(":"); const h = ci > 0 && ci < 30;
+                                                                const name = h ? t.slice(0, ci).trim() : null;
+                                                                const text = h ? t.slice(ci + 1).trim() : t;
+                                                                const c = spkColor(name || "task");
+                                                                return (
+                                                                    <div key={i} className="M-task">
+                                                                        {name && <span className="M-task-tag" style={{ background: `${c}12`, color: c }}>{name}</span>}
+                                                                        <span className="M-task-txt">{text.length > 90 ? text.slice(0, 90) + "…" : text}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                            {tasks.length > 4 && <span className="M-more" onClick={() => setActiveTab("tasks")}>+{tasks.length - 4} more →</span>}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {deadlines.length > 0 && (
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#D97706" }}>
+                                                            {TAB_ICONS.deadlines} Deadlines
+                                                            <span className="M-card-hdr-cnt">{deadlines.length}</span>
+                                                        </div>
+                                                        <div className="M-card-body">
+                                                            {deadlines.slice(0, 3).map((d, i) => (
+                                                                <div key={i} className="M-dl">
+                                                                    <div className="M-dl-dot" />
+                                                                    <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{d.length > 95 ? d.slice(0, 95) + "…" : d}</span>
+                                                                </div>
+                                                            ))}
+                                                            {deadlines.length > 3 && <span className="M-more" onClick={() => setActiveTab("deadlines")}>+{deadlines.length - 3} more →</span>}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {actions.length > 0 && (
+                                                    <div className="M-card">
+                                                        <div className="M-card-hdr" style={{ color: "#2563EB" }}>
+                                                            {TAB_ICONS.actions} Action Items
+                                                            <span className="M-card-hdr-cnt">{actions.length}</span>
+                                                        </div>
+                                                        <div style={{ padding: "4px 15px 12px" }}>
+                                                            {actions.slice(0, 3).map((a, i) => (
+                                                                <div key={i} className="M-action">
+                                                                    <span className="M-action-n">{i + 1}</span>
+                                                                    <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, paddingTop: 1 }}>{a.length > 95 ? a.slice(0, 95) + "…" : a}</span>
+                                                                </div>
+                                                            ))}
+                                                            {actions.length > 3 && <span className="M-more" style={{ marginTop: 5 }} onClick={() => setActiveTab("actions")}>+{actions.length - 3} more →</span>}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <div className="M-meta">
+                                                    <span>{summary.audioFilesCount || 0} audio files</span>
+                                                    <span className="M-meta-sep">·</span>
+                                                    <span>{summary.participants?.length || 0} participants</span>
+                                                    <span className="M-meta-sep">·</span>
+                                                    <span>{summary.createdAtMs ? new Date(summary.createdAtMs).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "Generated recently"}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* CONVERSATION */}
+                                    {activeTab === "convo" && (() => {
+                                        const rows = getRows(summary);
+                                        if (!rows.length) return <div className="M-empty">No conversation data available.</div>;
+                                        return (
+                                            <div>
+                                                <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>
+                                                    Full Conversation · {rows.length} exchanges
+                                                </div>
+                                                <table className="M-tbl">
+                                                    <thead><tr><th className="M-tbl-spk">Speaker</th><th>Dialogue</th></tr></thead>
+                                                    <tbody>
+                                                        {rows.map((row, i) => {
+                                                            const c = spkColor(row.speaker);
+                                                            return (
+                                                                <tr key={i} style={{ animationDelay: `${i * 0.022}s` }}>
+                                                                    <td className="M-tbl-spk" style={{ color: c, fontWeight: 600 }}>{row.speaker}</td>
+                                                                    <td>"{row.text}"</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* TASKS */}
+                                    {activeTab === "tasks" && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Tasks Assigned</div>
+                                            {!summary.tasksAssigned?.length
+                                                ? <div className="M-empty">No tasks were assigned.</div>
+                                                : summary.tasksAssigned.map((task, i) => {
+                                                    const ci = task.indexOf(":"); const h = ci > 0 && ci < 30;
+                                                    const name = h ? task.slice(0, ci).trim() : null;
+                                                    const text = h ? task.slice(ci + 1).trim() : task;
+                                                    const c = spkColor(name || "task");
+                                                    return (
+                                                        <div key={i} className="M-task" style={{ marginBottom: 7 }}>
+                                                            {name && <span className="M-task-tag" style={{ background: `${c}12`, color: c }}>{name}</span>}
+                                                            <span className="M-task-txt">{text}</span>
+                                                        </div>
+                                                    );
+                                                })
+                                            }
+                                        </div>
+                                    )}
+
+                                    {/* DEADLINES */}
+                                    {activeTab === "deadlines" && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Deadlines Mentioned</div>
+                                            {!summary.deadlines?.length
+                                                ? <div className="M-empty">No specific deadlines were mentioned.</div>
+                                                : summary.deadlines.map((d, i) => (
+                                                    <div key={i} className="M-dl">
+                                                        <div className="M-dl-dot" />
+                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65 }}>{d}</div>
+                                                    </div>
+                                                ))
+                                            }
+                                        </div>
+                                    )}
+
+                                    {/* ACTIONS */}
+                                    {activeTab === "actions" && (
+                                        <div>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 13 }}>Action Items &amp; Next Steps</div>
+                                            {!summary.actionItems?.length
+                                                ? <div className="M-empty">No action items recorded.</div>
+                                                : summary.actionItems.map((a, i) => (
+                                                    <div key={i} className="M-action">
+                                                        <span className="M-action-n">{i + 1}</span>
+                                                        <div style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65, paddingTop: 1 }}>{typeof a === "string" ? a : a?.item || ""}{a?.owner && <span style={{ fontSize: 11, color: "#6B7280", marginLeft: 8 }}>— {a.owner}</span>}</div>
+                                                    </div>
+                                                ))
+                                            }
+                                        </div>
+                                    )}
+
+                                    {/* ASK AI */}
+                                    {activeTab === "askai" && (
+                                        <div className="M-ai-wrap">
+                                            <div className="M-ai-hdr">
+                                                <div className="M-ai-hdr-title">Ask AI about this meeting</div>
+                                                <div className="M-ai-hdr-sub">Gemini re-reads the audio recordings to answer your question · Each query takes 20–40 seconds</div>
+                                            </div>
+
+                                            <div className="M-ai-chat">
+                                                {aiMessages.length === 0 ? (
+                                                    <div className="M-ai-empty">
+                                                        <div className="M-ai-empty-ico">
+                                                            {/* AI avatar image — set your path in AI_AVATAR_SRC at the top */}
+                                                            <img
+                                                                src={AI_AVATAR_SRC}
+                                                                alt="AI"
+                                                                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                                                onError={(e) => {
+                                                                    e.target.style.display = "none";
+                                                                    e.target.parentNode.style.color = "#6B7280";
+                                                                    e.target.parentNode.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <div className="M-ai-empty-title">Ask anything about this meeting</div>
+                                                        <div className="M-ai-empty-sub">
+                                                            Who was assigned tasks? What did each person say?<br />What decisions were made?
+                                                        </div>
+                                                        <div className="M-ai-suggestions">
+                                                            {SUGGESTED_QUESTIONS.map((q, i) => (
+                                                                <button key={i} className="M-ai-sug" onClick={() => handleAskAI(q)} disabled={aiLoading}>{q}</button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    aiMessages.map((msg, i) => (
+                                                        <div key={i} className={`M-ai-row ${msg.role}`} style={{ animationDelay: `${i * 0.025}s` }}>
+                                                            <div className={`M-ai-av ${msg.role}`}>
+                                                                {msg.role === "ai"
+                                                                    ? <img src={AI_AVATAR_SRC} alt="AI" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={(e) => { e.target.style.display = "none"; }} />
+                                                                    : "U"
+                                                                }
+                                                            </div>
+                                                            <div className={`M-ai-bbl ${msg.role}${msg.isError ? " err" : ""}`}>
+                                                                {msg.loading
+                                                                    ? <div className="M-dots"><div className="M-dot" /><div className="M-dot" /><div className="M-dot" /></div>
+                                                                    : msg.text
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                                <div ref={aiChatEndRef} />
+                                            </div>
+
+                                            <div className="M-ai-bar">
+                                                <input
+                                                    className="M-ai-inp"
+                                                    type="text"
+                                                    placeholder="Ask anything about this meeting…"
+                                                    value={aiInput}
+                                                    onChange={e => setAiInput(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAskAI(); } }}
+                                                    disabled={aiLoading}
+                                                />
+                                                <button className="M-ai-send" onClick={() => handleAskAI()} disabled={aiLoading || !aiInput.trim()}>
+                                                    {aiLoading ? <div className="M-spin M-spin-w" /> : <IconSend />}
+                                                </button>
+                                            </div>
+                                            <div className="M-ai-note">Each question re-downloads audio from Drive and sends to Gemini independently.</div>
+                                        </div>
+                                    )}
+
+                                </div>
+
+                                {/* Footer */}
+                                <div className="M-footer">
+                                    <button className="M-btn-ghost" onClick={handleRegenerate} disabled={regenToast === "loading"}>
+                                        {regenToast === "loading"
+                                            ? <><div className="M-spin M-spin-sm" />Regenerating…</>
+                                            : <><IconRefresh />Regenerate</>
+                                        }
+                                    </button>
+                                    <button className="M-btn-primary" onClick={() => downloadDocx(meetId)}>
+                                        <IconDownload />Download Summary (.docx)
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
-                  )}
                 </div>
+            </div>
 
-                {/* Footer */}
-                <div className="M-footer">
-                  <button
-                    className="M-btn-ghost"
-                    onClick={handleRegenerate}
-                    disabled={regenToast === "loading"}
-                  >
-                    {regenToast === "loading" ? (
-                      <>
-                        <div className="M-spin M-spin-sm" />
-                        Regenerating…
-                      </>
-                    ) : (
-                      <>
-                        <IconRefresh />
-                        Regenerate
-                      </>
-                    )}
-                  </button>
-                  <button
-                    className="M-btn-primary"
-                    onClick={() => downloadDocx(meetId)}
-                  >
-                    <IconDownload />
-                    Download Summary (.docx)
-                  </button>
+            {/* Toast */}
+            {regenToast && (
+                <div className={`M-toast ${regenToast}`}>
+                    {regenToast === "loading" && <><div className="M-spin M-spin-w" />Regenerating summary from audio…</>}
+                    {regenToast === "success" && <><div className="M-toast-dot" />New summary generated successfully</>}
+                    {regenToast === "cached" && <><div className="M-toast-dot" />Returned from cache — force bypass failed</>}
                 </div>
-              </>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Toast */}
-      {regenToast && (
-        <div className={`M-toast ${regenToast}`}>
-          {regenToast === "loading" && (
-            <>
-              <div className="M-spin M-spin-w" />
-              Regenerating summary from audio…
-            </>
-          )}
-          {regenToast === "success" && (
-            <>
-              <div className="M-toast-dot" />
-              New summary generated successfully
-            </>
-          )}
-          {regenToast === "cached" && (
-            <>
-              <div className="M-toast-dot" />
-              Returned from cache — force bypass failed
-            </>
-          )}
-        </div>
-      )}
-    </>
-  );
-}F
+        </>
+    );
+}
