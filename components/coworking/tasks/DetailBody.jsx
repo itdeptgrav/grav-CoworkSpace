@@ -13,6 +13,7 @@ import { useDutyStatus } from "../../../hooks/useDutyStatus";
 import { formatTimeHMS } from "../../../hooks/useTaskTimer";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { addWorkingSecs, workingSecsBetween } from "../../../lib/officeDueDate";
+import MoveToFolderModal from "./MoveToFolderModal";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 const F = "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif";
@@ -595,9 +596,16 @@ export default function DetailBody({
   isAssignee, isConfirmed, isStarted, isCEO, isTL, actionBusy, handleAction, handleSelectNode,
   employeeId, pct, pctColor, pctGradient, unreadCounts, employeeMap, employeeMapFull, chatMessages,
   timerActiveTaskId, getDisplaySeconds, getTimerSession, timerStart, timerPause, watchedTimers,
-  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, }) {
+  deadlineFlow, onUpdatePriority, extFlow, hasForwardedChild, allTaskMap, onDataRefresh, }) {
   const df = deadlineFlow || {};
   const ef = extFlow || {};
+  // Move to Folder — folder options come from the already-loaded task map,
+  // no extra fetch needed. A folder can't be moved into another folder, and
+  // a task already in this exact folder is filtered out below at render time.
+  const [showMoveToFolder, setShowMoveToFolder] = useState(false);
+  const folderOptions = (task.isFolder || !allTaskMap)
+    ? []
+    : [...allTaskMap.values()].filter(t => t.isFolder && t.taskId !== task.taskId);
 
   // ── derived ──────────────────────────────────────────────────────────────
   const status = task.status;
@@ -1675,6 +1683,13 @@ export default function DetailBody({
                   </ActionBtn>
                 )}
 
+                {/* ── TL/CEO: move this standard task into an existing folder ── */}
+                {(isTL || isCEO) && !task.isFolder && !isPendingCrossDeptGate && (
+                  <ActionBtn variant="ghost" onClick={() => setShowMoveToFolder(true)}>
+                    Move to Folder
+                  </ActionBtn>
+                )}
+
                 {/* ── CEO: delete ── */}
                 {isCEO && !task.isFolder && (
                   <ActionBtn variant="ghost" danger onClick={() => handleAction("delete")}>
@@ -1692,6 +1707,15 @@ export default function DetailBody({
           )}
 
         </div>
+      )}
+
+      {showMoveToFolder && (
+        <MoveToFolderModal
+          task={task}
+          folders={folderOptions}
+          onClose={() => setShowMoveToFolder(false)}
+          onSuccess={() => { setShowMoveToFolder(false); onDataRefresh?.(); }}
+        />
       )}
     </div>
   );

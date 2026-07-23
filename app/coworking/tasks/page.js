@@ -48,7 +48,7 @@ import EmergencyApprovalsPanel from "../../../components/coworking/shared/Emerge
 import MessageBubble from "../../../components/coworking/messaging/MessageBubble";
 import LinkedText from "../../../components/coworking/messaging/LinkedText";
 import { GwAvatar, GwSpinner, GwEmpty, GwSectionLabel, GwConfirm, btnStyle } from "../../../components/coworking/shared/CoworkShared";
-import { listTasks, getFullTask, getDailyReports, deleteTask } from "../../../lib/mediaUploadApi";
+import { listTasks, getFullTask, getDailyReports, deleteTask, moveTaskToFolder } from "../../../lib/mediaUploadApi";
 import ThirdPartyTask from "../../../components/coworking/tasks/ThirdPartyTask";
 import GoalTask from "../../../components/coworking/tasks/GoalTask";
 import { taskForwardApi } from "../../../lib/taskForwardApi";
@@ -1489,6 +1489,29 @@ export default function TasksPage() {
     const dragTask = allTaskMapRef.current.get(dragId);
     const dropTask = allTaskMapRef.current.get(dropOnTaskId);
     if (!dragTask || !dropTask) return;
+
+    // ── Drop onto a folder, OR onto a task that already lives directly
+    // inside one: both cases mean "move into that folder" and must ALWAYS
+    // land as the folder's own direct child — never nested one level deeper
+    // under whichever sibling row you happened to drop on. Skips the
+    // assignee-guard and the priority/sibling machinery below entirely;
+    // neither applies here (folders have no assignees or priority, and a
+    // drop target's sibling doesn't get to decide the destination).
+    const _dropParentTask = dropTask.parentTaskId ? allTaskMapRef.current.get(dropTask.parentTaskId) : null;
+    const _targetFolder = dropTask.isFolder ? dropTask : (_dropParentTask?.isFolder ? _dropParentTask : null);
+    if (_targetFolder) {
+      if (dragTask.isFolder) { alert("A folder can't be moved into another folder."); return; }
+      if ((dragTask.parentTaskId || null) === _targetFolder.taskId) return; // already inside this folder
+      setDragWarnModal({
+        dragId, dropOnTaskId: _targetFolder.taskId,
+        dragTitle: dragTask.title || dragId,
+        dropTitle: _targetFolder.title || _targetFolder.taskId,
+        newParentId: _targetFolder.taskId,
+        isRootMove: false,
+        isMoveIntoFolder: true,
+      });
+      return;
+    }
 
     // ── Same-assignee guard ────────────────────────────────────────────────
     // In Person grouping mode the UI shows one card per assignee. Dragging a
@@ -5778,9 +5801,11 @@ em-emoji-picker,
             <div style={{ padding: "16px 20px" }}>
               <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 12 }}>
                 <strong>"{dragWarnModal.dragTitle}"</strong> will be moved{" "}
-                {dragWarnModal.isRootMove
-                  ? <span>to the <strong>root level</strong> (becomes a parent task)</span>
-                  : <span>under <strong>"{dragWarnModal.dropTitle}"</strong>'s parent</span>
+                {dragWarnModal.isMoveIntoFolder
+                  ? <span>inside the folder <strong>"{dragWarnModal.dropTitle}"</strong></span>
+                  : dragWarnModal.isRootMove
+                    ? <span>to the <strong>root level</strong> (becomes a parent task)</span>
+                    : <span>under <strong>"{dragWarnModal.dropTitle}"</strong>'s parent</span>
                 }.
               </div>
               <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 9, padding: "10px 14px", fontSize: 12, color: "#166534" }}>
@@ -5794,8 +5819,19 @@ em-emoji-picker,
                 Cancel — keep position
               </button>
               <button onClick={() => {
-                const { dragId, dropOnTaskId, newParentId } = dragWarnModal;
+                const { dragId, dropOnTaskId, newParentId, isMoveIntoFolder } = dragWarnModal;
                 setDragWarnModal(null);
+                if (isMoveIntoFolder) {
+                  (async () => {
+                    try {
+                      await moveTaskToFolder(dragId, dropOnTaskId);
+                      await loadAllTasks();
+                    } catch (e) {
+                      alert(e?.message || "Move failed.");
+                    }
+                  })();
+                  return;
+                }
                 // Route through priority modal so reason is collected and conflict check fires
                 const _dragTask = allTaskMapRef.current?.get(dragId);
                 const _dropTask = allTaskMapRef.current?.get(dropOnTaskId);
@@ -6564,13 +6600,23 @@ em-emoji-picker,
                   .map(sid => allTasks.find(t => t.taskId === sid) || allTaskMap.get(sid))
                   .filter(Boolean)
                   .sort((a, b) => {
-                    if (a.order !== undefined || b.order !== undefined) {
-                      const ao = a.order !== undefined ? a.order : 90000 + (Number(a.priority ?? 5)) * 1000;
-                      const bo = b.order !== undefined ? b.order : 90000 + (Number(b.priority ?? 5)) * 1000;
-                      return ao - bo;
-                    }
+                    // Priority is now ALWAYS the dominant key, across every tier —
+                    // the old version let `order` override priority entirely
+                    // whenever either task had one, and its fallback for the task
+                    // WITHOUT an order (90000 + priority*1000) doesn't reliably
+                    // land after a real small order value anyway. That's what
+                    // produced the "random" ordering: a task moved into a folder
+                    // (no order field) could sort below or above an unrelated
+                    // higher-priority task purely based on whether that OTHER
+                    // task happened to carry a leftover order from a past
+                    // same-tier drag-reorder.
                     const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
                     if (pa !== pb) return pa - pb;
+                    // Equal priority — respect a manual drag-reorder position
+                    // between the two, but only as a tie-breaker within the
+                    // same tier, never as a way to jump ahead of a genuinely
+                    // higher-priority task.
+                    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
                     return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
                   })
                   .map(sub => <TblRow key={sub.taskId} t={sub} depth={depth + 1} isSubtask />)}
@@ -7713,19 +7759,29 @@ em-emoji-picker,
                           {/* Subtasks recursive */}
                           {hasSubtasks && isExpanded && (
                             <div>
-                              {(t.subtaskIds || []).map(sid => {
-                                const sub = allTaskMap?.get(sid);
-                                if (!sub) return null;
-                                if (sub.isSelfAssigned && sub.status === "cancelled") return null;
-                                return (
+                              {(t.subtaskIds || [])
+                                .map(sid => allTaskMap?.get(sid))
+                                .filter(sub => sub && !(sub.isSelfAssigned && sub.status === "cancelled"))
+                                .sort((a, b) => {
+                                  // Same rule as the other task-row renderer: priority
+                                  // always wins across tiers, order only breaks a tie
+                                  // within the same priority. This component had no
+                                  // sort at all before — children rendered in raw
+                                  // subtaskIds order, i.e. whatever order they were
+                                  // added to the folder in.
+                                  const pa = Number(a.priority ?? 5), pb = Number(b.priority ?? 5);
+                                  if (pa !== pb) return pa - pb;
+                                  if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                                  return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+                                })
+                                .map(sub => (
                                   <TaskRow
                                     key={sub.taskId} t={sub} depth={depth + 1} section={section}
                                     allTaskMap={allTaskMap} employeeMap={employeeMap}
                                     employeeId={employeeId} onSelect={onSelect}
                                     selectedId={selectedId} expandedIds={expandedIds} toggleExpand={toggleExpand}
                                   />
-                                );
-                              })}
+                                ))}
                             </div>
                           )}
                         </div>
@@ -9249,6 +9305,7 @@ em-emoji-picker,
                     <DetailBody
                       task={task}
                       allTaskMap={allTaskMap}
+                      onDataRefresh={loadAllTasks}
                       hasForwardedChild={(task?.subtaskIds || []).length > 0}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}
@@ -9415,6 +9472,7 @@ em-emoji-picker,
                 <DetailBody
                   task={task}
                   allTaskMap={allTaskMap}
+                  onDataRefresh={loadAllTasks}
                   hasForwardedChild={(task?.subtaskIds || []).length > 0}
                   dailyReports={dailyReports}
                   reportsLoading={reportsLoading}
@@ -9670,6 +9728,7 @@ em-emoji-picker,
                     <DetailBody
                       task={task}
                       allTaskMap={allTaskMap}
+                      onDataRefresh={loadAllTasks}
                       hasForwardedChild={(task?.subtaskIds || []).length > 0}
                       dailyReports={dailyReports}
                       reportsLoading={reportsLoading}

@@ -176,11 +176,40 @@ export default function ForwardTaskModal({ task, currentEmployeeId, onClose, onS
                       {(row.requirements || []).length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
                           {(row.requirements || []).map((req, ri) => (
-                            <div key={ri} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
-                              <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0, marginTop: 1 }}>•</span>
-                              <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5 }}>{req}</span>
-                              <button type="button" onClick={() => updateRow(i, "requirements", (row.requirements || []).filter((_, j2) => j2 !== ri))}
-                                style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                            <div key={ri} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 9px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 5 }}>
+                              {row.editingReqIndex === ri ? (
+                                <input
+                                  autoFocus
+                                  style={{ ...inp, flex: 1, padding: "4px 8px" }}
+                                  value={row.editReqValue ?? ""}
+                                  onChange={e => updateRow(i, "editReqValue", e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === "Enter" && (row.editReqValue || "").trim()) {
+                                      e.preventDefault();
+                                      updateRow(i, "requirements", (row.requirements || []).map((r, j2) => j2 === ri ? row.editReqValue.trim() : r));
+                                      updateRow(i, "editingReqIndex", null);
+                                    } else if (e.key === "Escape") {
+                                      updateRow(i, "editingReqIndex", null);
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if ((row.editReqValue || "").trim()) {
+                                      updateRow(i, "requirements", (row.requirements || []).map((r, j2) => j2 === ri ? row.editReqValue.trim() : r));
+                                    }
+                                    updateRow(i, "editingReqIndex", null);
+                                  }}
+                                />
+                              ) : (
+                                <>
+                                  <span style={{ color: "#1B4F8A", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>•</span>
+                                  <span style={{ flex: 1, fontSize: 12, color: "#111827", lineHeight: 1.5, cursor: "pointer" }}
+                                    onClick={() => { updateRow(i, "editingReqIndex", ri); updateRow(i, "editReqValue", req); }}>{req}</span>
+                                  <button type="button" title="Edit" onClick={() => { updateRow(i, "editingReqIndex", ri); updateRow(i, "editReqValue", req); }}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 0, flexShrink: 0, lineHeight: 1 }}>✎</button>
+                                  <button type="button" onClick={() => updateRow(i, "requirements", (row.requirements || []).filter((_, j2) => j2 !== ri))}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+                                </>
+                              )}
                             </div>
                           ))}
                         </div>
