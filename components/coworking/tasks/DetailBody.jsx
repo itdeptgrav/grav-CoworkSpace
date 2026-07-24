@@ -1669,12 +1669,12 @@ export default function DetailBody({
                   </ActionBtn>
                 )}
 
-                {/* ── CEO: edit deadline ── */}
+                {/* ── CEO: edit deadline ── 
                 {isCEO && !task.isFolder && (
                   <ActionBtn variant="ghost" onClick={() => handleAction("deadline")}>
                     Edit Deadline
                   </ActionBtn>
-                )}
+                )}*/}
 
                 {/* ── TL/CEO: edit title/description/requirements — available even
                     while the task is still in the cross-department pending
