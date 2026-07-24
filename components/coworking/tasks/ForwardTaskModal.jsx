@@ -152,7 +152,6 @@ export default function ForwardTaskModal({ task, currentEmployeeId, onClose, onS
                             onChange={e => updateRow(i, "timerDurationUnit", e.target.value)}>
                             <option value="minutes">min</option>
                             <option value="hours">hrs</option>
-                            <option value="days">days</option>
                           </select>
                         </div>
                         {budget?.hasBudget && (

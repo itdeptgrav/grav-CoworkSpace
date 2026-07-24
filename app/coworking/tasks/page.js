@@ -66,7 +66,7 @@ import {
 
 import {
   collection, doc, setDoc, updateDoc, deleteDoc,
-  query, orderBy, limit, onSnapshot, serverTimestamp, getDocs,
+  query, orderBy, limit, limitToLast, onSnapshot, serverTimestamp, getDocs,
   writeBatch, where, arrayUnion, increment,
 } from "firebase/firestore";
 
@@ -987,6 +987,45 @@ export default function TasksPage() {
   const isTL = role === "tl";
   const isEmployee = role === "employee";
   const canDrag = (isCEO || isTL) && taskSection === "created"; // employees see order but cannot drag; drag-and-drop is only available in "Created by Me" — not "Assigned to Me" or "Self Tasks"
+
+  // ── SUBMITTED TAB ──────────────────────────────────────────────────────────
+  // Lifecycle values written by taskForward.service.js
+  // submitCompletionRequest() → "submitted"
+  // reviewCompletion()        → tl_approved | tl_final_approved | ceo_approved
+  //                             tl_rejected | ceo_rejected
+  const SUBMITTED_LIFECYCLE = [
+    "submitted", "tl_approved", "tl_rejected",
+    "ceo_rejected", "tl_final_approved", "ceo_approved",
+  ];
+
+  // Sitting on MY desk right now → drives the red badge
+  const isAwaitingMyReview = (t) => {
+    if (!t || t.status === "cancelled") return false;
+    const flow = t.reviewFlow || "tl_final";
+    if (t.completionStatus === "submitted") {
+      if (flow === "ceo_direct") return isCEO;
+      return t.assignedBy === employeeId || t.originalAssignedBy === employeeId;
+    }
+    // tl_then_ceo: TL already signed off, CEO still owes a decision
+    if (t.completionStatus === "tl_approved" && flow === "tl_then_ceo") return isCEO;
+    return false;
+  };
+
+  // Should this task be listed in the Submitted tab at all?
+  const isInSubmittedTab = (t) => {
+    if (!t || !t.completionStatus) return false;
+    if (!SUBMITTED_LIFECYCLE.includes(t.completionStatus)) return false;
+    if (t.status === "cancelled") return false;
+    if (isCEO) return true;                                          // CEO sees every submission
+    if ((t.assigneeIds || []).includes(employeeId)) return true;     // I submitted it
+    if (t.completionSubmission?.submittedBy === employeeId) return true;
+    if (t.assignedBy === employeeId) return true;                    // I'm in the review chain
+    if (t.originalAssignedBy === employeeId) return true;
+    if (t.tlHoursSetBy === employeeId) return true;
+    return false;
+  };
+
+  const submittedPendingCount = allTasks.filter(isAwaitingMyReview).length;
 
   // Drag cross-level warning modal
   const [dragWarnModal, setDragWarnModal] = useState(null);
@@ -2166,7 +2205,10 @@ export default function TasksPage() {
     if (!taskId || chatCacheRef.current[taskId] || prefetchingRef.current.has(taskId)) return;
     prefetchingRef.current.add(taskId);
     const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
-    const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+    // limitToLast, NOT limit — with asc, limit() returns the OLDEST 100,
+    // which hid every recent message in any group past 100 messages and
+    // left the sidebar badge permanently stuck.
+    const q = query(msgsRef, orderBy("createdAt", "asc"), limitToLast(100));
     getDocs(q).then(snap => {
       chatCacheRef.current[taskId] = snap.docs.map(d => ({
         ...d.data(), id: d.id,
@@ -3736,7 +3778,10 @@ export default function TasksPage() {
     }, err => console.error("task doc listener:", err));
 
     const msgsRef = collection(firebaseDb, "cowork_tasks", taskId, "chat");
-    const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+    // limitToLast, NOT limit — with asc, limit() returns the OLDEST 100,
+    // which hid every recent message in any group past 100 messages and
+    // left the sidebar badge permanently stuck.
+    const q = query(msgsRef, orderBy("createdAt", "asc"), limitToLast(100));
     const unsub = onSnapshot(q, snap => {
       const incoming = snap.docs.map(d => ({
         ...d.data(), id: d.id,
@@ -3768,7 +3813,10 @@ export default function TasksPage() {
       });
     }, err => console.error("chat listener:", err));
     return () => { unsub(); unsubDraft(); unsubTask(); pendingMapRef.current.clear(); socket.off("task_draft_chat_message", draftHandler); socket.off("timer_blocked", timerBlockedHandler); };
-  }, [selectedTask?.taskId]);
+    // employeeId MUST be here — the readBy marking inside this effect uses it,
+    // and useCoworkAuth resolves it async. Without it the effect can capture ""
+    // and write readBy: arrayUnion("") instead of the real ID.
+  }, [selectedTask?.taskId, employeeId]);
 
   useEffect(() => {
     // Small delay to let DOM render complete before scrolling
@@ -4079,6 +4127,7 @@ export default function TasksPage() {
       }
       return false;
     }); if (taskSection === "self") return base.filter(t => t.isSelfAssigned && (t.assigneeIds || []).includes(employeeId));
+    if (taskSection === "submitted") return dedupedForStats.filter(isInSubmittedTab);
     return base;
   })();
   const stats = {
@@ -5945,11 +5994,15 @@ em-emoji-picker,
           // Deduplicate allTasks first — guards against any race condition duplicates
           const dedupedTasks = [...new Map([...allTasks, ...myPendingCrossDeptTasks, ...myTlHoursSetTasks].map(t => [t.taskId, t])).values()];
 
-          const rootTasks = (role === "employee"
-            ? dedupedTasks.filter(t => !t.parentTaskId || t.isForwardedTask || !allTaskMapRef.current.has(t.parentTaskId))
-            : dedupedTasks.filter(t => !t.parentTaskId)
+          const rootTasks = (
+            taskSection === "submitted"
+              ? dedupedTasks   // submissions live on SUBTASKS — do not strip them here
+              : role === "employee"
+                ? dedupedTasks.filter(t => !t.parentTaskId || t.isForwardedTask || !allTaskMapRef.current.has(t.parentTaskId))
+                : dedupedTasks.filter(t => !t.parentTaskId)
           ).filter(t => {
             if (isGoalView ? !t.isGoal : t.isGoal) return false;
+            if (taskSection === "submitted") return isInSubmittedTab(t);
             if (taskSection === "assigned") {
               if (t.isSelfAssigned) return (t.assigneeIds || []).includes(employeeId) && t.assignedBy === employeeId;
               if ((t.assigneeIds || []).includes(employeeId) && t.assignedBy !== employeeId) return true;
@@ -5982,7 +6035,7 @@ em-emoji-picker,
             const matchQ = !q || t.title?.toLowerCase().includes(q) || t.taskId?.toLowerCase().includes(q);
             const isSelfTaskForApprover = t.isSelfAssigned && (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)));
 
-            const matchSt = isSelfTaskForApprover ? true : viewFilter === "completed"
+            const matchSt = taskSection === "submitted" ? true : isSelfTaskForApprover ? true : viewFilter === "completed"
               ? true
               : activeStatTab === "all"
                 ? true  // show ALL including done — user wants to see completed tasks
@@ -6851,7 +6904,7 @@ em-emoji-picker,
                                 onChange={e => setDraftHoursUnitMap(m => ({ ...m, [t.taskId]: e.target.value }))}>
                                 <option value="minutes">Minutes</option>
                                 <option value="hours">Hours</option>
-                                <option value="days">Days</option>
+
                               </select>
                             </div>
                             <button disabled={isBusy} onClick={() => handleSetDraftHours(t.taskId)}
@@ -7012,6 +7065,7 @@ em-emoji-picker,
                   { key: "assigned", label: "Assigned to Me" },
                   { key: "created", label: "Created by Me" },
                   { key: "self", label: "Self Tasks" },
+                  { key: "submitted", label: "Submitted" },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -7048,6 +7102,15 @@ em-emoji-picker,
                         </span>
                       ) : null;
                     })()}
+                    {tab.key === "submitted" && submittedPendingCount > 0 && (
+                      <span style={{
+                        marginLeft: 6, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        minWidth: 16, height: 16, padding: "0 4px", borderRadius: 999,
+                        background: "#DC2626", color: "#fff", fontSize: 10, fontWeight: 700, lineHeight: 1,
+                      }}>
+                        {submittedPendingCount}
+                      </span>
+                    )}
                   </button>
                 ))}
                   <div style={{ flex: 1 }} />
@@ -8213,6 +8276,76 @@ em-emoji-picker,
                                 </div>
                               );
                             })()}
+
+                            {/* Submitted */}
+                            {taskSection === "submitted" && (() => {
+                              const mine = filteredRoots.filter(isAwaitingMyReview);
+                              const others = filteredRoots.filter(t => !isAwaitingMyReview(t));
+                              const CS_LABEL = {
+                                submitted: { text: "Awaiting review", color: "#B45309", bg: "#FEF3C7" },
+                                tl_approved: { text: "TL approved · CEO pending", color: "#1D4ED8", bg: "#EFF6FF" },
+                                tl_final_approved: { text: "Approved", color: "#16A34A", bg: "#F0FDF4" },
+                                ceo_approved: { text: "Approved", color: "#16A34A", bg: "#F0FDF4" },
+                                tl_rejected: { text: "Rejected by TL", color: "#DC2626", bg: "#FEF2F2" },
+                                ceo_rejected: { text: "Rejected by CEO", color: "#DC2626", bg: "#FEF2F2" },
+                              };
+                              // plain render fn, NOT a component — avoids remount on every parent render
+                              const row = (t) => {
+                                const lbl = CS_LABEL[t.completionStatus] || CS_LABEL.submitted;
+                                const sub = t.completionSubmission || {};
+                                return (
+                                  <div
+                                    key={t.taskId}
+                                    onClick={() => handleSelectNode(t)}
+                                    style={{
+                                      padding: "10px 12px", borderBottom: "1px solid #F1F5F9",
+                                      cursor: "pointer",
+                                      background: task?.taskId === t.taskId ? "#F1F5F9" : "#fff",
+                                    }}
+                                  >
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", flexShrink: 0 }}>{t.taskId}</span>
+                                      <span style={{ fontSize: 12, fontWeight: 600, color: "#0F172A", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                                      <span style={{ fontSize: 9.5, fontWeight: 700, padding: "2px 8px", borderRadius: 99, color: lbl.color, background: lbl.bg, whiteSpace: "nowrap", flexShrink: 0 }}>{lbl.text}</span>
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: "#94A3B8", marginTop: 3 }}>
+                                      {sub.submittedByName
+                                        ? <>Submitted by <strong style={{ color: "#64748B" }}>{sub.submittedByName}</strong></>
+                                        : "Submitted"}
+                                      {sub.submittedAt && <> · {new Date(sub.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</>}
+                                      {t.parentTaskId && <> · subtask</>}
+                                    </div>
+                                  </div>
+                                );
+                              };
+                              if (filteredRoots.length === 0) return (
+                                <div className="gv-empty">
+                                  <div className="gv-empty-icon">📤</div>
+                                  <p className="gv-empty-t">No submitted work</p>
+                                  <p className="gv-empty-s">Tasks submitted for completion review appear here</p>
+                                </div>
+                              );
+                              return (
+                                <div style={{ background: "#fff" }}>
+                                  {mine.length > 0 && (
+                                    <>
+                                      <div style={{ padding: "7px 12px", background: "#FEF3C7", fontSize: 10.5, fontWeight: 700, color: "#B45309", letterSpacing: "0.02em" }}>
+                                        NEEDS YOUR APPROVAL · {mine.length}
+                                      </div>
+                                      {mine.map(row)}
+                                    </>
+                                  )}
+                                  {others.length > 0 && (
+                                    <>
+                                      <div style={{ padding: "7px 12px", background: "#F8FAFC", fontSize: 10.5, fontWeight: 700, color: "#64748B", borderTop: "1px solid #E2E8F0", letterSpacing: "0.02em" }}>
+                                        ALL SUBMISSIONS · {others.length}
+                                      </div>
+                                      {others.map(row)}
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </>
                         )}
                       </>
@@ -8621,7 +8754,7 @@ em-emoji-picker,
                                 <select className="ctm-inp" style={{ ..._inp, flex: 1, cursor: "pointer" }} value={draftHoursUnitMap[task.taskId] || "hours"} onChange={e => setDraftHoursUnitMap(m => ({ ...m, [task.taskId]: e.target.value }))}>
                                   <option value="minutes">Minutes</option>
                                   <option value="hours">Hours</option>
-                                  <option value="days">Days</option>
+
                                 </select>
                               </div>
                               <button disabled={draftBusyHere} onClick={() => handleSetDraftHours(task.taskId)} style={{ width: "100%", padding: "8px 16px", border: "none", borderRadius: 6, background: "#1B4F8A", color: "#fff", fontSize: 12, fontWeight: 600, cursor: draftBusyHere ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: draftBusyHere ? 0.6 : 1 }}>
@@ -8723,7 +8856,7 @@ em-emoji-picker,
                                   style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
                                   <option value="minutes">min</option>
                                   <option value="hours">hrs</option>
-                                  <option value="days">days</option>
+
                                 </select>
                                 <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
                                   style={{ padding: "5px 14px", border: "1px solid #D97706", borderRadius: 5, background: "#D97706", color: "#fff", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
@@ -8756,7 +8889,7 @@ em-emoji-picker,
                                 style={{ width: 70, padding: "5px 4px", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 12, fontFamily: "inherit", background: "#fff", cursor: "pointer", outline: "none", color: "#111827" }}>
                                 <option value="minutes">min</option>
                                 <option value="hours">hrs</option>
-                                <option value="days">days</option>
+
                               </select>
                               <button disabled={!df.proposedDurationVal || df.proposing} onClick={df.onPropose}
                                 style={{ padding: "5px 14px", border: "1px solid #1B4F8A", borderRadius: 5, background: "#fff", color: "#1B4F8A", fontSize: 11, fontWeight: 600, cursor: !df.proposedDurationVal || df.proposing ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: !df.proposedDurationVal || df.proposing ? 0.5 : 1 }}>
@@ -8905,7 +9038,6 @@ em-emoji-picker,
                               style={{ width: 72, padding: "7px 4px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 12, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
                               <option value="minutes">min</option>
                               <option value="hours">hrs</option>
-                              <option value="days">days</option>
                             </select>
                           </div>
                           <textarea value={counterMessage} onChange={e => setCounterMessage(e.target.value)}
@@ -10512,7 +10644,6 @@ function SenderTimerNegotiateModal({ task, onApprove, onPropose, onReject, onClo
                 style={{ ...inp, width: 80, cursor: "pointer", background: "#fff" }}>
                 <option value="minutes">min</option>
                 <option value="hours">hrs</option>
-                <option value="days">days</option>
               </select>
             </div>
             <button onClick={() => { if (!durationVal || busy) return; onPropose(durationVal, durationUnit); }}

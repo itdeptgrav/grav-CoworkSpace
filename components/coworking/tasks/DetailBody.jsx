@@ -1249,7 +1249,7 @@ export default function DetailBody({
                             style={{ width: 72, padding: "7px 6px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, background: "#fff", outline: "none", cursor: "pointer" }}>
                             <option value="minutes">min</option>
                             <option value="hours">hrs</option>
-                            <option value="days">days</option>
+
                           </select>
                         </div>
                         <ActionBtn onClick={df.onPropose} busy={df.proposing} disabled={!df.proposedDurationVal}>
@@ -1292,7 +1292,7 @@ export default function DetailBody({
                                 style={{ width: 72, padding: "7px 6px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, background: "#fff", outline: "none", cursor: "pointer" }}>
                                 <option value="minutes">min</option>
                                 <option value="hours">hrs</option>
-                                <option value="days">days</option>
+
                               </select>
                             </div>
                             <input placeholder="Message (optional)" value={df.empCounterMsg || ""}
@@ -1540,7 +1540,7 @@ export default function DetailBody({
                             style={{ width: 72, padding: "7px 6px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, fontFamily: F, background: "#fff", outline: "none", cursor: "pointer" }}>
                             <option value="minutes">min</option>
                             <option value="hours">hrs</option>
-                            <option value="days">days</option>
+
                           </select>
                         </div>
                         <input placeholder="Message to employee (optional)" value={df.counterMessage || ""}

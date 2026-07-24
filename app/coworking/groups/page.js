@@ -29,7 +29,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     doc, getDoc, getDocs, setDoc, updateDoc, where,
-    collection, query, orderBy, limit, limitToLast, endBefore,
+    collection, query, orderBy, limit, limitToLast, limitToLast, endBefore,
     onSnapshot, serverTimestamp, writeBatch, arrayUnion,
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
