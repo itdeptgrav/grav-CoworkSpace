@@ -2722,7 +2722,7 @@ export default function TasksPage() {
     const targetTask = allTaskMap.get(tid) || selectedTask;
 
     // Modal actions
-    if (["add_subtask", "add_goal_task", "forward", "report", "submit_completion", "review_completion", "ceo_review", "deadline"].includes(type)) {
+    if (["add_subtask", "add_goal_task", "edit_task", "forward", "report", "submit_completion", "review_completion", "ceo_review", "deadline"].includes(type)) {
       setActiveModal({ type, taskId: tid, task: targetTask });
       return;
     }
@@ -9939,6 +9939,21 @@ em-emoji-picker,
           currentEmployeeName={employeeName}
           currentRole={role}
           parentTask={activeModal.task}
+        />
+      }
+      {/* ── Edit Task — same CreateTaskModal, in edit mode (editTask=task) ── */}
+      {
+        activeModal?.type === "edit_task" && <CreateTaskModal
+          onClose={() => setActiveModal(null)}
+          onSuccess={async () => {
+            setActiveModal(null);
+            await loadAllTasks();
+            if (selectedTask) loadDetail(selectedTask.taskId);
+          }}
+          currentEmployeeId={employeeId}
+          currentEmployeeName={employeeName}
+          currentRole={role}
+          editTask={activeModal.task}
         />
       }
       {/* ── Add Goal Task — opens same CreateTaskModal with isGoal=true pre-set ── */}

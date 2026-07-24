@@ -2,7 +2,7 @@
 import React from "react";
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { createTask, listAllEmployees, uploadImage, uploadPDF } from "../../../lib/mediaUploadApi";
+import { createTask, listAllEmployees, uploadImage, uploadPDF, editTaskDetails, resetTaskToDraft } from "../../../lib/mediaUploadApi";
 import { getC2Config, validateC2Weightage } from "../../../lib/coworkApi";
 import { firebaseDb } from "../../../lib/coworkFirebase";
 import { collection, doc, setDoc, updateDoc, serverTimestamp, increment, getDocs, query, where, orderBy, getDoc } from "firebase/firestore";
@@ -162,6 +162,12 @@ export default function CreateTaskModal({
   // closes it before a row/mode switch can leave it pointed at stale data.
   const [editingReqIndex, setEditingReqIndex] = useState(null);
   const [editReqValue, setEditReqValue] = useState("");
+  // Shown after successfully editing an already-started task, asking whether
+  // to also reset it back to Draft. Only relevant in edit mode on a
+  // passed-draft task — see the isEditMode branch of handleSubmit.
+  const [showResetPrompt, setShowResetPrompt] = useState(false);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetError, setResetError] = useState("");
 
   // ── C2 Band (Gold Task) state ─────────────────────────────────────────────
   const [isGoldTask, setIsGoldTask] = useState(false);
@@ -576,24 +582,52 @@ export default function CreateTaskModal({
     setError(""); setSubmitting(true);
     try {
 
-      // ── Edit mode: update existing draft task ──────────────────────────────
+      // ── Edit mode: update existing task ────────────────────────────────────
       if (isEditMode) {
         if (!form.title.trim()) { setError("Title is required."); setSubmitting(false); return; }
         const fixedDeadlineISO = (!form.hasTimer && form.deadline)
           ? new Date(`${form.deadline}T${form.deadlineTime || "23:59"}`).toISOString() : null;
-        const taskRef = doc(firebaseDb, "cowork_tasks", editTask.taskId);
-        await updateDoc(taskRef, {
+
+        // Same classification the Edit Task button already used on the
+        // Details page. A task this far along doesn't go through a direct
+        // client write anymore — it goes through the same safe backend
+        // endpoints, with an explicit reset decision, instead of silently
+        // forcing status back to draft/open on every save the way this
+        // branch used to for every edit regardless of task state.
+        const PASSED_DRAFT_STATUSES = ["confirmed", "in_progress", "done", "submitted", "tl_approved", "tl_final_approved", "ceo_approved"];
+        const hasPassedDraft = PASSED_DRAFT_STATUSES.includes(editTask.status);
+
+        if (!hasPassedDraft) {
+          // Unchanged — still-draft tasks are a direct write, exactly as before.
+          const taskRef = doc(firebaseDb, "cowork_tasks", editTask.taskId);
+          await updateDoc(taskRef, {
+            title: form.title.trim(),
+            description: form.description,
+            notes: form.notes,
+            requirements: form.requirements || [],
+            hasTimer: form.hasTimer,
+            fixedDeadline: fixedDeadlineISO || null,
+            priority: form.priority || 1,
+            assigneeIds: selectedIds,
+            status: asDraft ? "draft" : "open",
+            updatedAt: serverTimestamp(),
+          });
+          onSuccess?.();
+          return;
+        }
+
+        // Already confirmed/started: only title, description, and
+        // requirements are actually saved here. Changing the assignee,
+        // duration, or timer type on a task someone is already working on is
+        // a bigger, separate decision than either "edit the content" or
+        // "reset to draft" — this form still shows those fields for context,
+        // but changes to them are not applied while editing an active task.
+        await editTaskDetails(editTask.taskId, {
           title: form.title.trim(),
           description: form.description,
-          notes: form.notes,
-          hasTimer: form.hasTimer,
-          fixedDeadline: fixedDeadlineISO || null,
-          priority: form.priority || 1,
-          assigneeIds: selectedIds,
-          status: asDraft ? "draft" : "open",
-          updatedAt: serverTimestamp(),
+          requirements: form.requirements || [],
         });
-        onSuccess?.();
+        setShowResetPrompt(true);
         return;
       }
 
@@ -725,6 +759,18 @@ export default function CreateTaskModal({
       }
     } catch (err) { setError(err.message); }
     finally { setSubmitting(false); }
+  };
+
+  const handleResetDecision = async (shouldReset) => {
+    if (!shouldReset) { onSuccess?.(); return; }
+    setResetSubmitting(true); setResetError("");
+    try {
+      await resetTaskToDraft(editTask.taskId);
+      onSuccess?.();
+    } catch (err) {
+      setResetError(err.message);
+      setResetSubmitting(false);
+    }
   };
 
   const canAdvance = () => {
@@ -1545,6 +1591,41 @@ export default function CreateTaskModal({
           )}
         </div>
       </div>
+
+      {showResetPrompt && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 7500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "rgba(15,23,42,0.35)" }}>
+          <div style={{ background: "#fff", borderRadius: 10, width: "100%", maxWidth: 420, boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif", overflow: "hidden" }}>
+            <div style={{ background: "#FFFBEB", borderBottom: "1px solid #FDE68A", padding: "18px 24px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#FEF3C7", border: "1px solid #FDE68A", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>⚠️</div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#92400E" }}>Changes saved.</div>
+                <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>Reset this task to Draft too?</div>
+              </div>
+            </div>
+            <div style={{ padding: "20px 24px" }}>
+              {resetError && <div style={{ marginBottom: 14, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 6, padding: "9px 12px", color: "#991B1B", fontSize: 12 }}>⚠️ {resetError}</div>}
+              <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, margin: 0 }}>
+                This task was already confirmed or in progress. Resetting it to <strong>Draft</strong> will clear its
+                status back to Not Started and remove its current deadline — the assignee will negotiate a new
+                duration from scratch, same as a brand-new task.
+              </p>
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#6B7280" }}>
+                Choosing <strong>No</strong> keeps everything else exactly as it is — only the title/description/requirements you just edited change.
+              </div>
+            </div>
+            <div style={{ padding: "12px 24px 20px", display: "flex", gap: 10, borderTop: "1px solid #F1F5F9" }}>
+              <button type="button" onClick={() => handleResetDecision(false)} disabled={resetSubmitting}
+                style={{ flex: 1, padding: "9px 0", border: "1px solid #E5E7EB", borderRadius: 6, background: "#fff", color: "#374151", fontSize: 13, fontWeight: 500, cursor: resetSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                No, just keep the edit
+              </button>
+              <button type="button" onClick={() => handleResetDecision(true)} disabled={resetSubmitting}
+                style={{ flex: 1, padding: "9px 0", border: "none", borderRadius: 6, background: resetSubmitting ? "#FCD34D" : "#D97706", color: "#fff", fontSize: 13, fontWeight: 700, cursor: resetSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {resetSubmitting ? "Resetting…" : "Yes, reset to Draft"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </SliderPortal>
   );
 }
