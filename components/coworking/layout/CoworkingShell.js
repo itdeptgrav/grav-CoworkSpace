@@ -3590,7 +3590,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
             <div className="cw-topbar-right">
-              <DutyStatusToggle employeeId={employeeId} onStatusChange={(nowOnline) => { if (nowOnline) socket?.emit("workspace-set-online", employeeId); }} />
+              <DutyStatusToggle employeeId={employeeId} employeeName={employeeName} onStatusChange={(nowOnline) => { if (nowOnline) socket?.emit("workspace-set-online", employeeId); }} />
               {/* SOP button removed from topbar — accessible via sidebar only */}
 
               <div style={{ position: "relative" }}>
