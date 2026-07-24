@@ -3286,15 +3286,25 @@ export default function TasksPage() {
 
   // ── Draft chat send handler — writes directly to Firestore ─────────────────
   const handleSendDraftChat = async (text, attachments, messageType) => {
-    if (!selectedTask?.taskId || !text?.trim()) return;
+    // Allow attachment-only messages — was previously blocked by requiring text.
+    if (!selectedTask?.taskId || (!text?.trim() && !(attachments || []).length)) return;
     const tid = selectedTask.taskId;
     const tempId = "draft_temp_" + Date.now();
     const resolvedType = messageType || "text";
 
+    // Strip undefined fields — Firestore setDoc throws on undefined nested values.
+    // uploadImage() returns publicId (not fileId) and no width/height, so those
+    // land as undefined in the attachment object built by MediaMessageInput.
+    const cleanAttachments = (attachments || []).map(a => {
+      const clean = {};
+      Object.entries(a).forEach(([k, v]) => { if (v !== undefined) clean[k] = v; });
+      return clean;
+    });
+
     // Show optimistic temp message immediately
     setDraftMessages(prev => [...prev, {
       messageId: tempId, senderId: employeeId, senderName: employeeName,
-      text, attachments: attachments || [], messageType: resolvedType,
+      text, attachments: cleanAttachments, messageType: resolvedType,
       temp: true, createdAt: new Date().toISOString(),
     }]);
 
@@ -3304,7 +3314,7 @@ export default function TasksPage() {
       await setDoc(doc(draftRef, messageId), {
         messageId, taskId: tid,
         senderId: employeeId, senderName: employeeName,
-        text: text || "", attachments: attachments || [],
+        text: text || "", attachments: cleanAttachments,
         messageType: resolvedType,
         createdAt: serverTimestamp(),
       });
@@ -9018,6 +9028,29 @@ em-emoji-picker,
                             <div className="gv-bubble-wrapper">
                               <div className={`gv-bubble${msg.temp ? " gv-sending" : ""}${msg.error ? " gv-error" : ""}`}>
                                 {msg.text && <div><LinkedText text={msg.text} isMe={isMe} /></div>}
+                                {msg.attachments?.map((att, ai) => {
+                                  if (att.type === "image") {
+                                    return (
+                                      <img key={ai} src={att.url} alt="attachment" className="gv-image-preview"
+                                        onClick={() => setLightboxImage(att.url)} />
+                                    );
+                                  }
+                                  if (att.type === "pdf") {
+                                    return (
+                                      <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer" className="gv-attachment">
+                                        📄 {att.name || "Document"}
+                                      </a>
+                                    );
+                                  }
+                                  if (att.type === "voice") {
+                                    return (
+                                      <div key={ai} style={{ marginTop: 6 }}>
+                                        <audio controls src={att.url} style={{ maxWidth: "200px", height: "32px" }} />
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })}
                                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                                   <span style={{ fontSize: 10, color: isMe ? "rgba(255,255,255,0.65)" : "var(--text-4)" }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
                                 </div>
