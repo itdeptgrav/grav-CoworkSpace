@@ -7008,33 +7008,48 @@ em-emoji-picker,
                 <div style={{
                   display: "flex", alignItems: "center", borderBottom: "1px solid #E5E7EB",
                   background: "#fff", flexShrink: 0, padding: "0 16px",
-                }}>
-                  {[
-                    { key: "assigned", label: "Assigned to Me" },
-                    { key: "created", label: "Created by Me" },
-                    { key: "self", label: "Self Tasks" },
-                  ].map(tab => (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      onClick={() => setTaskSection(tab.key)}
-                      style={{
-                        padding: "10px 14px",
-                        border: "none",
-                        borderBottom: `2px solid ${taskSection === tab.key ? "#1B4F8A" : "transparent"}`,
-                        background: "transparent",
-                        fontFamily: "var(--font)",
-                        fontSize: 13,
-                        fontWeight: taskSection === tab.key ? 600 : 400,
-                        color: taskSection === tab.key ? "#1B4F8A" : "#6B7280",
-                        cursor: "pointer",
-                        transition: "all 0.15s",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
+                }}> {[
+                  { key: "assigned", label: "Assigned to Me" },
+                  { key: "created", label: "Created by Me" },
+                  { key: "self", label: "Self Tasks" },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setTaskSection(tab.key)}
+                    style={{
+                      padding: "10px 14px",
+                      border: "none",
+                      borderBottom: `2px solid ${taskSection === tab.key ? "#1B4F8A" : "transparent"}`,
+                      background: "transparent",
+                      fontFamily: "var(--font)",
+                      fontSize: 13,
+                      fontWeight: taskSection === tab.key ? 600 : 400,
+                      color: taskSection === tab.key ? "#1B4F8A" : "#6B7280",
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {tab.label}
+                    {tab.key === "self" && (() => {
+                      const pendingCount = allTasks.filter(t =>
+                        t.status !== "cancelled" && t.status !== "done" &&
+                        t.selfAssignApproved !== true &&
+                        (t.approverId === employeeId || (Array.isArray(t.visibleTo) && t.visibleTo.includes(employeeId)))
+                      ).length;
+                      return pendingCount > 0 ? (
+                        <span style={{
+                          marginLeft: 6, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          minWidth: 16, height: 16, padding: "0 4px", borderRadius: 999,
+                          background: "#DC2626", color: "#fff", fontSize: 10, fontWeight: 700, lineHeight: 1,
+                        }}>
+                          {pendingCount}
+                        </span>
+                      ) : null;
+                    })()}
+                  </button>
+                ))}
                   <div style={{ flex: 1 }} />
                   {taskSection === "created" && (
                     <button
