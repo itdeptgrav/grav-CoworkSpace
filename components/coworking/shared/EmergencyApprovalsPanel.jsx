@@ -21,6 +21,32 @@ function formatDuration(ms) {
 export default function EmergencyApprovalsPanel({ currentEmployeeId, isCEO }) {
     const [requests, setRequests] = useState([]);
     const [busyId, setBusyId] = useState(null);
+    // employeeId -> real name, for legacy docs where employeeName was saved as the ID
+    const [nameMap, setNameMap] = useState({});
+
+    useEffect(() => {
+        const missing = requests.filter(r =>
+            (!r.employeeName || r.employeeName === r.employeeId) && !nameMap[r.employeeId]
+        );
+        if (missing.length === 0) return;
+        (async () => {
+            const { firebaseDb } = await import("../../../lib/coworkFirebase");
+            const { doc, getDoc } = await import("firebase/firestore");
+            const found = {};
+            for (const r of missing) {
+                try {
+                    const s = await getDoc(doc(firebaseDb, "cowork_employees", r.employeeId));
+                    if (s.exists()) found[r.employeeId] = s.data().name || s.data().employeeName || r.employeeId;
+                } catch { /* keep ID as fallback */ }
+            }
+            if (Object.keys(found).length) setNameMap(prev => ({ ...prev, ...found }));
+        })();
+    }, [requests]);
+
+    const displayName = (req) =>
+        (req.employeeName && req.employeeName !== req.employeeId)
+            ? req.employeeName
+            : (nameMap[req.employeeId] || req.employeeName || req.employeeId);
 
     useEffect(() => {
         let unsub = () => { };
@@ -33,8 +59,18 @@ export default function EmergencyApprovalsPanel({ currentEmployeeId, isCEO }) {
                 : query(col, where("status", "==", "pending"), where("tlId", "==", currentEmployeeId));
             unsub = onSnapshot(q, (snap) => {
                 const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                // For CEO: only show orphaned (tlId null) ones alongside their own, not every TL's queue
-                setRequests(isCEO ? list.filter(r => !r.tlId || r.tlId === currentEmployeeId) : list);
+                // CEO sees: orphaned (no manager on record), TL/CEO escalations,
+                // and anything routed to them directly. Still not every TL's queue.
+                // requesterRole check also catches legacy docs written before
+                // escalateToCeo existed.
+                setRequests(isCEO
+                    ? list.filter(r =>
+                        !r.tlId
+                        || r.escalateToCeo === true
+                        || r.requesterRole === "tl"
+                        || r.requesterRole === "ceo"
+                        || r.tlId === currentEmployeeId)
+                    : list);
             }, (e) => console.error("[EmergencyApprovalsPanel] snapshot:", e.message));
         })();
         return () => unsub();
@@ -72,8 +108,10 @@ export default function EmergencyApprovalsPanel({ currentEmployeeId, isCEO }) {
                 {requests.map(req => (
                     <div key={req.id} style={{ padding: "9px 10px", background: "#fff", border: "1px solid #E4E7EC", borderRadius: 6 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1A1D21", marginBottom: 2 }}>
-                            {req.employeeName} — {formatDuration(req.gapMs)}
-                            {!req.tlId && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#B45309", background: "#FFFBEB", padding: "1px 6px", borderRadius: 4 }}>NO MANAGER ON RECORD</span>}
+                            {displayName(req)} — {formatDuration(req.gapMs)}
+                            {(req.escalateToCeo || req.requesterRole === "tl" || req.requesterRole === "ceo")
+                                ? <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#1B4F8A", background: "#EFF6FF", padding: "1px 6px", borderRadius: 4 }}>REQUEST</span>
+                                : !req.tlId && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#B45309", background: "#FFFBEB", padding: "1px 6px", borderRadius: 4 }}>NO MANAGER ON RECORD</span>}
                         </div>
                         <div style={{ fontSize: 12, color: "#667085", marginBottom: 8 }}>"{req.reason || "No reason given"}"</div>
                         <div style={{ display: "flex", gap: 8 }}>

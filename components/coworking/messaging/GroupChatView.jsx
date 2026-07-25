@@ -29,7 +29,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     doc, getDoc, getDocs, setDoc, updateDoc, where,
-    collection, query, orderBy, limit,
+    collection, query, orderBy, limit, limitToLast,
     onSnapshot, serverTimestamp, writeBatch, arrayUnion,
 } from "firebase/firestore";
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth";
@@ -333,7 +333,10 @@ export default function GroupChatView({ groupId, onBack }) {
         setMsgsLoading(true);
 
         const msgsRef = collection(firebaseDb, "cowork_groups", groupId, "messages");
-        const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+        // limitToLast, NOT limit — with asc, limit() returns the OLDEST 100,
+        // which hid every recent message in any group past 100 messages and
+        // left the sidebar badge permanently stuck.
+        const q = query(msgsRef, orderBy("createdAt", "asc"), limitToLast(100));
 
         const unsub = onSnapshot(q,
             snap => {
@@ -378,7 +381,11 @@ export default function GroupChatView({ groupId, onBack }) {
 
         unsubRef.current = unsub;
         return unsub;
-    }, [groupId]);
+        // employeeId MUST be here. useCoworkAuth resolves it async, so on first
+        // render it is "". With deps [groupId] this callback was frozen with the
+        // empty value and wrote readBy: arrayUnion("") instead of the real ID —
+        // the sidebar badge could never decrement.
+    }, [groupId, employeeId]);
 
     useEffect(() => { if (!loading && !user) router.push("/"); }, [user, loading, router]);
 

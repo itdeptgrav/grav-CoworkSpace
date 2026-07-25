@@ -1662,7 +1662,7 @@ export default function StatusTrackingPage() {
                                                             style={{ width: 64, padding: "6px 3px", border: "1.5px solid #DDD6FE", borderRadius: 7, fontSize: 11, fontFamily: "inherit", background: "#F9FAFB", cursor: "pointer", outline: "none" }}>
                                                             <option value="minutes">min</option>
                                                             <option value="hours">hrs</option>
-                                                            <option value="days">days</option>
+
                                                         </select>
                                                     </div>
                                                     <textarea value={counterMsg} onChange={e => setCounterMsg(e.target.value)}

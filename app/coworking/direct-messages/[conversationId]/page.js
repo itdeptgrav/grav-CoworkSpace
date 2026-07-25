@@ -82,7 +82,10 @@ export default function ConversationPage() {
     setMsgsLoading(true);
 
     const msgsRef = collection(firebaseDb, "cowork_direct_messages", conversationId, "messages");
-    const q = query(msgsRef, orderBy("createdAt", "asc"), limit(100));
+    // limitToLast, NOT limit — with asc, limit() returns the OLDEST 100,
+    // which hid every recent message in any group past 100 messages and
+    // left the sidebar badge permanently stuck.
+    const q = query(msgsRef, orderBy("createdAt", "asc"), limitToLast(100));
 
     const unsub = onSnapshot(
       q,

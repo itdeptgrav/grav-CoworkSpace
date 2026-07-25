@@ -24,7 +24,7 @@ const useLocalParticipant = dynamic ? null : null; // accessed via window event 
 
 import {
   collection, doc, setDoc, updateDoc, getDocs, getDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch, limit, DocumentReference,
+  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch, limit, limitToLast, DocumentReference,
 } from "firebase/firestore";
 import { docs } from "googleapis/build/src/apis/docs";
 
@@ -1837,7 +1837,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
   useEffect(() => {
     if (!employeeId || !role) return;
-    const taskUnsubs = [];
+    const taskUnsubs = {};   // taskId -> unsub (was an array — could not be pruned)
     const normalMap = {};
     const goalMap = {};
     const recalc = () => {
@@ -1865,7 +1865,19 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
         }
       } catch (e) { console.error("task badge:", e); return; }
 
+      // PRUNE — task deleted or reassigned away from me
+      const liveTaskIds = new Set(taskDocs.map(t => t.id));
+      Object.keys(taskUnsubs).forEach(tid => {
+        if (liveTaskIds.has(tid)) return;
+        taskUnsubs[tid]?.();
+        delete taskUnsubs[tid];
+        delete normalMap[tid];
+        delete goalMap[tid];
+      });
+      recalc();
+
       taskDocs.forEach(({ id: taskId, isGoal }) => {
+        if (taskUnsubs[taskId]) return;   // already watching
         const unsub = onSnapshot(
           query(collection(firebaseDb, "cowork_tasks", taskId, "chat"), orderBy("createdAt", "desc"), limit(200)),
           snap => {
@@ -1883,11 +1895,18 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
             recalc();
           }
         );
-        taskUnsubs.push(unsub);
+        taskUnsubs[taskId] = unsub;
       });
     };
     run();
-    return () => taskUnsubs.forEach(u => u());
+    // Re-run the task list every 60s so newly assigned tasks start being watched
+    // without a page refresh. getDocs is one-shot; this is the cheap fix that
+    // avoids restructuring three role-dependent queries into live listeners.
+    const rescan = setInterval(run, 60_000);
+    return () => {
+      clearInterval(rescan);
+      Object.values(taskUnsubs).forEach(u => u());
+    };
   }, [employeeId, role]);
 
   // ── Messages: per-conversation message onSnapshot ─────────────────────────
@@ -1933,36 +1952,54 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   const [groupUnreadCount, setGroupUnreadCount] = useState(0);
   useEffect(() => {
     if (!employeeId) return;
-    const grpUnsubs = [];
+    const grpUnsubs = {};   // gid -> unsub (was an array — could not be pruned)
     const grpCountMap = {};
     const recalcGrp = () => setGroupUnreadCount(Object.values(grpCountMap).reduce((s, n) => s + n, 0));
     let grpListenerUnsub = null;
 
+    // No where("deleted","==",false) — Firestore's == skips docs where the field
+    // is MISSING, so groups created before that flag existed were never counted.
+    // Filter client-side instead.
     grpListenerUnsub = onSnapshot(
-      query(collection(firebaseDb, "cowork_groups"), where("memberIds", "array-contains", employeeId), where("deleted", "==", false)),
+      query(collection(firebaseDb, "cowork_groups"), where("memberIds", "array-contains", employeeId)),
       grpSnap => {
-        grpSnap.docs.forEach(grpDoc => {
-          const gid = grpDoc.id;
+        const liveIds = new Set(
+          grpSnap.docs.filter(d => d.data().deleted !== true).map(d => d.id)
+        );
+
+        // PRUNE — group deleted, or I was removed from it. Without this the stale
+        // count stays in the map forever and the badge never clears.
+        Object.keys(grpCountMap).forEach(gid => {
+          if (liveIds.has(gid)) return;
+          grpUnsubs[gid]?.();
+          delete grpUnsubs[gid];
+          delete grpCountMap[gid];
+        });
+
+        // ADD newly-joined groups
+        liveIds.forEach(gid => {
           if (grpCountMap[gid] !== undefined) return; // already listening
           grpCountMap[gid] = 0;
-          const unsub = onSnapshot(
-            query(collection(firebaseDb, "cowork_groups", gid, "messages"), orderBy("createdAt", "asc"), limit(100)),
+          grpUnsubs[gid] = onSnapshot(
+            // limitToLast — must watch the NEWEST 100 and must match
+            // GroupChatView's window, or the badge can never reach zero.
+            query(collection(firebaseDb, "cowork_groups", gid, "messages"), orderBy("createdAt", "asc"), limitToLast(100)),
             msgSnap => {
               grpCountMap[gid] = msgSnap.docs.filter(d => {
                 const data = d.data();
-                // Only count messages from others that haven't been read by me
                 return data.senderId !== employeeId && !(data.readBy || []).includes(employeeId);
               }).length;
               recalcGrp();
             },
             () => { grpCountMap[gid] = 0; recalcGrp(); }
           );
-          grpUnsubs.push(unsub);
         });
+
+        recalcGrp();
       },
       () => { }
     );
-    return () => { grpListenerUnsub?.(); grpUnsubs.forEach(u => u()); };
+    return () => { grpListenerUnsub?.(); Object.values(grpUnsubs).forEach(u => u()); };
   }, [employeeId]);
 
   // ── Notes reminder badge — count notes whose reminder fires within 30 min ─
@@ -3553,7 +3590,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
 
             <div className="cw-topbar-right">
-              <DutyStatusToggle employeeId={employeeId} onStatusChange={(nowOnline) => { if (nowOnline) socket?.emit("workspace-set-online", employeeId); }} />
+              <DutyStatusToggle employeeId={employeeId} employeeName={employeeName} onStatusChange={(nowOnline) => { if (nowOnline) socket?.emit("workspace-set-online", employeeId); }} />
               {/* SOP button removed from topbar — accessible via sidebar only */}
 
               <div style={{ position: "relative" }}>
