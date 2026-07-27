@@ -17,8 +17,6 @@ export default function CoworkingLoginPage() {
   const [authChecking, setAuthChecking] = useState(true);
   const [logoutToast, setLogoutToast] = useState(false);
   
-
-
   
   // ── Auto-redirect if already logged in ──────────────────────────────────
   useEffect(() => {
