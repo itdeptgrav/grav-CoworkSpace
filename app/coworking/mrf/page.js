@@ -72,11 +72,12 @@ function StatusBadge({ status }) {
 
 // ── Plain-English "what's happening" line, derived per-MRF from real state ──
 function StatusExplainer({ mrf }) {
-  const issuedCount = mrf.items.filter(i => (i.issuedQty || 0) > 0).length
+  const fullyIssuedCount = mrf.items.filter(i => (i.issuedQty || 0) >= (i.requestedQty || 0) && (i.requestedQty || 0) > 0).length
+  const anyIssuedCount = mrf.items.filter(i => (i.issuedQty || 0) > 0).length
   const returnedCount = mrf.items.filter(i => (i.returnedQty || 0) > 0).length
   const totalItems = mrf.items.length
-  const allIssued = issuedCount === totalItems && totalItems > 0
-  const someIssued = issuedCount > 0 && !allIssued
+  const allIssued = fullyIssuedCount === totalItems && totalItems > 0
+  const someIssued = anyIssuedCount > 0 && !allIssued
 
   let text, color, bg, border
   if (mrf.status === "PENDING") {
@@ -97,7 +98,11 @@ function StatusExplainer({ mrf }) {
     text = "All items have been issued to you by the store."
     color = C.green; bg = C.greenLight; border = C.greenBorder
   } else if (someIssued) {
-    text = `${issuedCount} of ${totalItems} item(s) issued so far — the rest are still with the store.`
+    const totalRequested = mrf.items.reduce((s, i) => s + (i.requestedQty || 0), 0)
+    const totalIssued = mrf.items.reduce((s, i) => s + (i.issuedQty || 0), 0)
+    text = totalItems === 1
+      ? `${fmtNum(totalIssued)} of ${fmtNum(totalRequested)} ${mrf.items[0].unit} issued so far — the rest is still with the store.`
+      : `${fullyIssuedCount} of ${totalItems} item(s) fully issued so far — the rest are still with the store.`
     color = C.primary; bg = C.primaryLight; border = C.primaryBorder
   } else if (mrf.status === "COMPLETED") {
     text = "Completed — all issued items have been returned."
@@ -164,6 +169,9 @@ function TimeItemRow({ item, deadline }) {
 }
 
 function UsesItemRow({ item }) {
+  const issued = item.issuedQty || 0
+  const requested = item.requestedQty || 0
+  const pct = requested > 0 ? Math.min(100, Math.round((issued / requested) * 100)) : 0
   return (
     <tr style={{ borderTop: `1px solid ${C.borderLight}` }}>
       <td style={{ padding: "5px 10px 5px 0", verticalAlign: "top" }}>
@@ -171,6 +179,14 @@ function UsesItemRow({ item }) {
         {item.variantCombination?.length > 0 && <div style={{ fontSize: 10, color: "#6366F1" }}>{item.variantCombination.join(" · ")}</div>}
       </td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: C.textSub, whiteSpace: "nowrap" }}>{fmtNum(item.requestedQty)} {item.unit}</td>
+      <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: "#059669", fontWeight: 500, whiteSpace: "nowrap", verticalAlign: "top" }}>
+        {fmtNum(issued)} {item.unit}
+        {issued > 0 && (
+          <div style={{ width: 60, height: 3, background: C.borderLight, borderRadius: 2, marginTop: 3 }}>
+            <div style={{ height: 3, borderRadius: 2, background: pct >= 100 ? "#10B981" : "#D97706", width: `${pct}%` }} />
+          </div>
+        )}
+      </td>
       <td style={{ padding: "5px 0", fontSize: 10, fontWeight: 600, color: ITEM_COLOR[item.itemStatus] || C.textMuted }}>{item.itemStatus}</td>
     </tr>
   )
@@ -241,7 +257,7 @@ function MrfCard({ mrf }) {
             {expanded && (
               <div style={{ marginTop: 6, overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr>{["Item", "Requested", "Status"].map(h => (
+                  <thead><tr>{["Item", "Requested", "Issued", "Status"].map(h => (
                     <th key={h} style={{ textAlign: "left", fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 4, paddingRight: h === "Status" ? 0 : 10 }}>{h}</th>
                   ))}</tr></thead>
                   <tbody>{mrf.items.map((item, i) => <UsesItemRow key={i} item={item} />)}</tbody>
