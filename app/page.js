@@ -263,3 +263,4 @@ export default function CoworkingLoginPage() {
     </div>
   );
 }
+
