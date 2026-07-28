@@ -269,7 +269,7 @@ export default function MediaMessageInput({
         for (const file of files) {
             try {
                 const up = await uploadImage(file);
-                uploaded.push({ type: "image", url: up.url, fileId: up.fileId, name: file.name, width: up.width, height: up.height });
+                uploaded.push({ type: "image", url: up.url, fileId: up.publicId, name: file.name });
             } catch (err) {
                 setError(`Upload failed: ${file.name}`);
                 setTimeout(() => setError(""), 2500);
@@ -305,7 +305,7 @@ export default function MediaMessageInput({
             try {
                 if (file.type.startsWith("image/")) {
                     const up = await uploadImage(file);
-                    out.push({ type: "image", url: up.url, fileId: up.fileId, name: file.name, width: up.width, height: up.height });
+                    out.push({ type: "image", url: up.url, fileId: up.publicId, name: file.name });
                 } else {
                     const up = await uploadPDF(file);
                     out.push({ type: "pdf", url: up.url, fileId: up.fileId, name: file.name, size: file.size });
