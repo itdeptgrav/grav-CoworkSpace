@@ -77,7 +77,14 @@ export default function RootLayout({ children }) {
         <meta name="apple-mobile-web-app-title" content="CoWork" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
-      <body>
+      {/* Browser extensions (password managers, ad blockers, Grammarly and
+          friends) stamp attributes like `bis_register` onto <body> before
+          React hydrates, which React then reports as a hydration mismatch.
+          It is not a real mismatch in our markup and nothing we render can
+          prevent it, so the warning is suppressed on this element only —
+          children still hydrate normally and genuine mismatches inside the
+          app are still reported. */}
+      <body suppressHydrationWarning>
         <Providers> {/* Wrap everything with Providers */}
           <ToastProvider>
             {children}

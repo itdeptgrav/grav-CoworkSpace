@@ -2399,6 +2399,8 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
     ...((isCEO || isTL) ? [{ id: "workload", label: "Workload", icon: "calendar", path: "/coworking/calendar" }] : []),
     ...((isCEO || isTL) ? [{ id: "Statustracking", label: "Statustracking", icon: "calendar", path: "/coworking/status-tracking" }] : []),
     { id: "pmp", label: "My Score", icon: "pmp", path: "/coworking/pmp" },
+    // Approvals live as a tab on this page, not a separate route — a TL's own
+    // requests and the ones they approve belong in one place.
     { id: "mrf", label: "Material Requests", icon: "mrf", path: "/coworking/mrf" },
     { id: "sop", label: "SOP", icon: "sop", path: "/coworking/sop" },
     { id: "settings", label: "Profile", icon: "profile", path: "/coworking/settings" },
@@ -2407,8 +2409,11 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
   ];
 
 
-  const isActive = (path) => {
+  const isActive = (path, exact = false) => {
     if (path === "/coworking") return pathname === "/coworking";
+    // `exact` is for parents that have a sibling nav entry underneath them
+    // (e.g. /coworking/mrf vs /coworking/mrf/approvals).
+    if (exact) return pathname === path;
     return pathname.startsWith(path);
   };
 
@@ -3317,7 +3322,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               if (item.id === "tasks") return (
                 <div key="tasks-group">
                   <div
-                    className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                    className={`cw-nav-item${isActive(item.path, item.exact) ? " active" : ""}`}
                     style={{ userSelect: "none" }}
                     onClick={() => setTasksExpanded(v => !v)}
                   >
@@ -3377,7 +3382,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
               if (item.id === "mail") return (
                 <div key="mail-group">
                   <div
-                    className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                    className={`cw-nav-item${isActive(item.path, item.exact) ? " active" : ""}`}
                     style={{ userSelect: "none" }}
                     onClick={() => setMailExpanded(v => !v)}
                   >
@@ -3427,7 +3432,7 @@ export default function CoworkingShell({ role, employeeName, employeeId, title, 
 
                 <div
                   key={item.id}
-                  className={`cw-nav-item${isActive(item.path) ? " active" : ""}`}
+                  className={`cw-nav-item${isActive(item.path, item.exact) ? " active" : ""}`}
                   onClick={() => handleNav(item.path)}
                 >
                   <NavIcon name={item.icon} size={18} />

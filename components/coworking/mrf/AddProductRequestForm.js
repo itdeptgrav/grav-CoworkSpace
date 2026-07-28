@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect } from "react"
+import ProductImageUploader from "./ProductImageUploader"
 
 const C = {
   primary: "#1B4F8A", primaryLight: "#EBF2FA", primaryBorder: "#BFDBFE",
@@ -39,7 +40,7 @@ const GARMENT_ATTRIBUTE_VALUES = {
 }
 const getValueSuggestions = (n) => GARMENT_ATTRIBUTE_VALUES[(n || "").toLowerCase().trim()] || []
 
-const emptyProduct = () => ({ itemName: "", category: "", unit: "", requestedQty: "", notes: "", attributes: [] })
+const emptyProduct = () => ({ itemName: "", category: "", unit: "", requestedQty: "", notes: "", attributes: [], images: [] })
 const emptyAttribute = () => ({ name: "", values: [""] })
 
 export default function AddProductRequestForm({
@@ -133,11 +134,20 @@ export default function AddProductRequestForm({
               <textarea rows={2} value={p.notes} onChange={e => updateProductRow(pIdx, "notes", e.target.value)} placeholder="Any details that help the store find/source this" style={{ ...iS, resize: "none" }} onFocus={fBlue} onBlur={fGray} />
             </div>
 
+            {/* A photo is often the fastest way for the store to recognise a
+                product that isn't in the catalogue yet. */}
+            <ProductImageUploader
+              images={p.images || []}
+              onChange={imgs => updateProductRow(pIdx, "images", imgs)}
+              folder="mrf-product-requests"
+              label="Reference Photo(s)"
+              compact
+            />
+
             {/* Attributes → values, same parent/child structure as the store RawItemForm */}
             <div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 10, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 }}>Attributes (optional)</span>
-                <button type="button" onClick={() => addAttribute(pIdx)} style={{ background: "none", border: "none", cursor: "pointer", color: C.primary, fontSize: 11, fontWeight: 600, fontFamily: FONT }}>+ Add Attribute</button>
+
               </div>
               {p.attributes.length === 0 && (
                 <div style={{ fontSize: 10, color: C.textMuted, fontStyle: "italic" }}>No attributes — single item, no variants.</div>

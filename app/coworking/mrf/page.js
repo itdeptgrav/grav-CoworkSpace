@@ -5,19 +5,17 @@ import { useState, useEffect, useRef } from "react"
 import { useCoworkAuth } from "../../../hooks/useCoworkAuth"
 import CoworkingShell from "../../../components/coworking/layout/CoworkingShell"
 import AddProductRequestForm from "../../../components/coworking/mrf/AddProductRequestForm"
-import { firebaseAuth } from "../../../lib/coworkFirebase"
+import MrfContextBanner from "../../../components/coworking/mrf/MrfContextBanner"
+import MrfChatSidebar from "../../../components/coworking/mrf/MrfChatSidebar"
+import MrfApprovalCard from "../../../components/coworking/mrf/MrfApprovalCard"
+import ProductRequestApprovalCard from "../../../components/coworking/mrf/ProductRequestApprovalCard"
+import ProductImageUploader, { ProductImageStrip } from "../../../components/coworking/mrf/ProductImageUploader"
 import { initPushNotifications } from "../../../lib/coworkPushNotifications"
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-
-async function getAuthHeaders() {
-  try {
-    const token = await firebaseAuth.currentUser?.getIdToken()
-    return token
-      ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-      : { "Content-Type": "application/json" }
-  } catch { return { "Content-Type": "application/json" } }
-}
+import {
+  fetchCategories, fetchUnits, searchRawItems as apiSearchRawItems,
+  fetchMyApprover, listMyMrfs, createMrf, cancelMrf,
+  listProductRequests, createProductRequest, listApprovals,
+} from "../../../lib/mrfApi"
 
 const C = {
   primary: "#1B4F8A", primaryLight: "#EBF2FA", primaryBorder: "#BFDBFE",
@@ -70,55 +68,27 @@ function StatusBadge({ status }) {
   )
 }
 
-// ── Plain-English "what's happening" line, derived per-MRF from real state ──
-function StatusExplainer({ mrf }) {
-  const fullyIssuedCount = mrf.items.filter(i => (i.issuedQty || 0) >= (i.requestedQty || 0) && (i.requestedQty || 0) > 0).length
-  const anyIssuedCount = mrf.items.filter(i => (i.issuedQty || 0) > 0).length
-  const returnedCount = mrf.items.filter(i => (i.returnedQty || 0) > 0).length
-  const totalItems = mrf.items.length
-  const allIssued = fullyIssuedCount === totalItems && totalItems > 0
-  const someIssued = anyIssuedCount > 0 && !allIssued
+// The "what's happening" copy now comes from the backend
+// (services/mrfContext.service.js) as mrf.context, so the requester, the
+// approving TL and the Store Person are never shown three different accounts
+// of the same request. Rendered by <MrfContextBanner />.
 
-  let text, color, bg, border
-  if (mrf.status === "PENDING") {
-    text = "Waiting for the Project Manager to approve this request."
-    color = C.amber; bg = C.amberLight; border = C.amberBorder
-  } else if (mrf.status === "REJECTED") {
-    text = mrf.rejectionNote
-      ? `This request was rejected. Reason: "${mrf.rejectionNote}"`
-      : "This request was rejected."
-    color = C.red; bg = C.redLight; border = C.redBorder
-  } else if (mrf.status === "CANCELLED") {
-    text = "You cancelled this request."
-    color = C.textMuted; bg = C.surface; border = C.border
-  } else if (mrf.status === "APPROVED" && !someIssued && !allIssued) {
-    text = "Approved — waiting for the store to hand over the materials."
-    color = C.primary; bg = C.primaryLight; border = C.primaryBorder
-  } else if (allIssued && returnedCount === 0) {
-    text = "All items have been issued to you by the store."
-    color = C.green; bg = C.greenLight; border = C.greenBorder
-  } else if (someIssued) {
-    const totalRequested = mrf.items.reduce((s, i) => s + (i.requestedQty || 0), 0)
-    const totalIssued = mrf.items.reduce((s, i) => s + (i.issuedQty || 0), 0)
-    text = totalItems === 1
-      ? `${fmtNum(totalIssued)} of ${fmtNum(totalRequested)} ${mrf.items[0].unit} issued so far — the rest is still with the store.`
-      : `${fullyIssuedCount} of ${totalItems} item(s) fully issued so far — the rest are still with the store.`
-    color = C.primary; bg = C.primaryLight; border = C.primaryBorder
-  } else if (mrf.status === "COMPLETED") {
-    text = "Completed — all issued items have been returned."
-    color = C.green; bg = C.greenLight; border = C.greenBorder
-  } else if (mrf.status === "PARTIALLY_RETURNED") {
-    text = "Some issued items have been returned; the rest are still with you."
-    color = C.purple; bg = C.purpleLight; border = C.purpleBorder
-  } else {
-    text = "Status updated."
-    color = C.textSub; bg = C.surface; border = C.border
-  }
-
+// When the requester needs the material IN HAND — distinct from the return
+// deadline on TIME_BASED requests. Goes red once it's past, because a request
+// that missed the date the person needed it is the one worth chasing.
+function NeededByText({ neededBy }) {
+  const days = daysFromNow(neededBy)
+  if (days === null) return null
+  const overdue = days < 0
+  const urgent = days >= 0 && days <= 2
+  const color = overdue ? C.red : urgent ? "#D97706" : C.textSub
   return (
-    <div style={{ marginTop: 6, padding: "7px 10px", background: bg, border: `1px solid ${border}`, borderRadius: 5, fontSize: 12, color, fontWeight: 500, lineHeight: 1.4 }}>
-      {text}
-    </div>
+    <span style={{ fontSize: 11, color, fontWeight: overdue || urgent ? 600 : 500 }}>
+      Needed by: {fmtDate(neededBy)}
+      {overdue && ` — ${Math.abs(days)}d overdue`}
+      {!overdue && days === 0 && " — today"}
+      {!overdue && days > 0 && ` — in ${days}d`}
+    </span>
   )
 }
 
@@ -138,6 +108,37 @@ function DeadlineText({ deadline }) {
   )
 }
 
+// What the Store found for this line, in the unit the requester asked in.
+// Only rendered once the Store has actually looked — "UNREVIEWED" says
+// nothing useful and would just add noise.
+const AVAILABILITY_UI = {
+  AVAILABLE: { label: "Available in store", color: "#059669", bg: "#F0FDF4", border: "#A7F3D0" },
+  PARTIAL: { label: "Partially available", color: "#B45309", bg: "#FFFBEB", border: "#FDE68A" },
+  NOT_AVAILABLE: { label: "Not available", color: "#B91C1C", bg: "#FEF2F2", border: "#FECACA" },
+  ALTERNATIVE: { label: "Alternative offered", color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" },
+}
+
+function AvailabilityNote({ item }) {
+  const cfg = AVAILABILITY_UI[item.availability]
+  if (!cfg) return null
+  const requested = item.requestedQty || 0
+  const available = item.availableQty
+  const shortfall = available != null ? Math.max(0, requested - (item.issuedQty || 0) - available) : 0
+
+  return (
+    <div style={{ marginTop: 4, padding: "4px 7px", background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 4, fontSize: 10, color: cfg.color, lineHeight: 1.4 }}>
+      <strong>{cfg.label}</strong>
+      {item.availability === "PARTIAL" && available != null && (
+        <> — {fmtNum(available)} of {fmtNum(requested)} {item.unit} on hand{shortfall > 0 ? `, ${fmtNum(shortfall)} ${item.unit} still pending` : ""}</>
+      )}
+      {item.availability === "ALTERNATIVE" && item.alternativeItem?.name && (
+        <> — {item.alternativeItem.name}</>
+      )}
+      {item.availabilityNote && <div style={{ marginTop: 2, opacity: 0.9 }}>Store: {item.availabilityNote}</div>}
+    </div>
+  )
+}
+
 function TimeItemRow({ item, deadline }) {
   const issued = item.issuedQty || 0, returned = item.returnedQty || 0
   const pending = Math.max(0, issued - returned)
@@ -149,6 +150,10 @@ function TimeItemRow({ item, deadline }) {
       <td style={{ padding: "5px 10px 5px 0", verticalAlign: "top" }}>
         <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{item.rawItemName}</div>
         {item.variantCombination?.length > 0 && <div style={{ fontSize: 10, color: "#6366F1" }}>{item.variantCombination.join(" · ")}</div>}
+        {(item.images || []).length > 0 && (
+          <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
+        )}
+        <AvailabilityNote item={item} />
       </td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: C.textSub, whiteSpace: "nowrap", verticalAlign: "top" }}>{fmtNum(item.requestedQty)} {item.unit}</td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: "#059669", fontWeight: 500, verticalAlign: "top" }}>{fmtNum(issued)}</td>
@@ -177,6 +182,10 @@ function UsesItemRow({ item }) {
       <td style={{ padding: "5px 10px 5px 0", verticalAlign: "top" }}>
         <div style={{ fontSize: 12, fontWeight: 500, color: C.text }}>{item.rawItemName}</div>
         {item.variantCombination?.length > 0 && <div style={{ fontSize: 10, color: "#6366F1" }}>{item.variantCombination.join(" · ")}</div>}
+        {(item.images || []).length > 0 && (
+          <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
+        )}
+        <AvailabilityNote item={item} />
       </td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: C.textSub, whiteSpace: "nowrap" }}>{fmtNum(item.requestedQty)} {item.unit}</td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: "#059669", fontWeight: 500, whiteSpace: "nowrap", verticalAlign: "top" }}>
@@ -192,8 +201,12 @@ function UsesItemRow({ item }) {
   )
 }
 
-function MrfCard({ mrf }) {
+function MrfCard({ mrf, onOpenChat, onCancel }) {
   const [expanded, setExpanded] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelNote, setCancelNote] = useState("")
+  const [cancelError, setCancelError] = useState("")
+  const [busy, setBusy] = useState(false)
   const isTime = mrf.requestType === "TIME_BASED"
   const days = isTime ? daysFromNow(mrf.deadline) : null
   const overdue = isTime && days !== null && days < 0 && mrf.items.some(i => ["ISSUED", "OVERDUE", "PARTIALLY_RETURNED"].includes(i.itemStatus))
@@ -218,6 +231,8 @@ function MrfCard({ mrf }) {
 
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 3 }}>
           <span style={{ fontSize: 11, color: C.textMuted }}>Raised {relTime(mrf.createdAt)} ({fmtDateTime(mrf.createdAt)})</span>
+          {/* When it's needed in hand — everyone on the request sees this. */}
+          {mrf.neededBy && <NeededByText neededBy={mrf.neededBy} />}
           {isTime && mrf.deadline && <DeadlineText deadline={mrf.deadline} />}
           <span style={{ fontSize: 11, color: C.textMuted }}>{mrf.items.length} item{mrf.items.length !== 1 ? "s" : ""}</span>
         </div>
@@ -228,8 +243,9 @@ function MrfCard({ mrf }) {
           </div>
         )}
 
-        {/* ── Plain-English status explainer — the main fix ── */}
-        <StatusExplainer mrf={mrf} />
+        {/* Situation, next action and who acted last — all from the backend
+            so it matches exactly what the TL and Store are being told. */}
+        <MrfContextBanner context={mrf.context} style={{ marginTop: 6 }} />
 
         {mrf.storeNotes && mrf.status !== "REJECTED" && (
           <div style={{ marginTop: 5, padding: "5px 9px", background: C.primaryLight, borderLeft: `3px solid ${C.primary}`, fontSize: 11, color: C.primary }}>
@@ -266,35 +282,143 @@ function MrfCard({ mrf }) {
             )}
           </div>
         )}
+
+        {/* ── Actions ── */}
+        <div style={{ display: "flex", gap: 7, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            onClick={() => onOpenChat(mrf)}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" /></svg>
+            Chat with Store
+            {mrf.chatMessageCount > 0 && (
+              <span style={{ background: C.primary, color: "#fff", borderRadius: 8, padding: "0 5px", fontSize: 9.5, fontWeight: 700 }}>
+                {mrf.chatMessageCount}
+              </span>
+            )}
+          </button>
+
+          {/* Cancelling is blocked once material has moved — the backend
+              enforces it too, this just avoids offering a dead button. */}
+          {["PENDING", "APPROVED"].includes(mrf.status) &&
+            !mrf.items.some(i => (i.issuedQty || 0) > 0) && !cancelling && (
+              <button
+                onClick={() => { setCancelling(true); setCancelError("") }}
+                style={{ padding: "5px 10px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textMuted, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}
+              >
+                Cancel request
+              </button>
+            )}
+        </div>
+
+        {cancelling && (
+          <div style={{ marginTop: 8, padding: "9px 11px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5 }}>
+            <div style={{ fontSize: 11.5, color: C.textSub, marginBottom: 6 }}>
+              {mrf.status === "APPROVED"
+                ? "This request is already with the Store — cancelling tells them to stop processing it."
+                : "Cancel this request? Your Primary Manager/TL will be told."}
+            </div>
+            <input
+              type="text"
+              value={cancelNote}
+              onChange={e => setCancelNote(e.target.value)}
+              placeholder="Reason (optional)…"
+              style={{ width: "100%", boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 11.5, fontFamily: FONT, color: C.text, outline: "none", marginBottom: 7 }}
+            />
+            {cancelError && <div style={{ fontSize: 11, color: C.red, marginBottom: 6 }}>{cancelError}</div>}
+            <div style={{ display: "flex", gap: 7, justifyContent: "flex-end" }}>
+              <button onClick={() => { setCancelling(false); setCancelNote(""); setCancelError("") }} disabled={busy}
+                style={{ padding: "5px 11px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 11, cursor: "pointer", fontFamily: FONT }}>
+                Keep it
+              </button>
+              <button
+                onClick={async () => {
+                  setBusy(true); setCancelError("")
+                  try {
+                    await onCancel(mrf._id, cancelNote.trim())
+                    setCancelling(false); setCancelNote("")
+                  } catch (e) {
+                    setCancelError(e.message || "Could not cancel this request.")
+                  } finally { setBusy(false) }
+                }}
+                disabled={busy}
+                style={{ padding: "5px 13px", border: "none", borderRadius: 5, background: busy ? "#FECACA" : C.red, color: "#fff", fontSize: 11, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer", fontFamily: FONT }}>
+                {busy ? "Cancelling…" : "Confirm Cancel"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 // ── Product (raw-item add) request card ─────────────────────────────────────
-function ProductRequestCard({ r }) {
-  const st = r.status === "ADDED"
-    ? { label: "Added to Store", color: C.green, bg: C.greenLight, border: C.greenBorder }
-    : r.status === "MATCHED"
-      ? { label: "Matched to Existing Item", color: C.primary, bg: C.primaryLight, border: C.primaryBorder }
-      : r.status === "RESOLVED"
-        ? { label: "Resolved", color: C.green, bg: C.greenLight, border: C.greenBorder }
-        : r.status === "REJECTED"
-          ? { label: "Rejected", color: C.red, bg: C.redLight, border: C.redBorder }
-          : { label: "Pending Review", color: C.amber, bg: C.amberLight, border: C.amberBorder }
+// Shown inline in My Requests alongside MRFs. A product request goes to the
+// TL first — the Store never sees it until then — so the status shown here
+// leads with the approval stage, not the store stage.
+function ProductRequestCard({ r, onOpenChat }) {
+  const awaitingTl = r.approvalStatus === "PENDING_TL"
+  const tlRejected = r.approvalStatus === "TL_REJECTED"
+
+  const st = tlRejected
+    ? { label: "Rejected by TL", color: C.red, bg: C.redLight, border: C.redBorder }
+    : awaitingTl
+      ? { label: "Pending TL Approval", color: C.amber, bg: C.amberLight, border: C.amberBorder }
+      : r.status === "ADDED"
+        ? { label: "Added to Store", color: C.green, bg: C.greenLight, border: C.greenBorder }
+        : r.status === "MATCHED"
+          ? { label: "Matched to Existing Item", color: C.primary, bg: C.primaryLight, border: C.primaryBorder }
+          : r.status === "RESOLVED"
+            ? { label: "Resolved", color: C.green, bg: C.greenLight, border: C.greenBorder }
+            : r.status === "REJECTED"
+              ? { label: "Rejected", color: C.red, bg: C.redLight, border: C.redBorder }
+              : { label: "With Store", color: C.primary, bg: C.primaryLight, border: C.primaryBorder }
+
+  // Same plain-English treatment MRFs get, for the same reason.
+  const explain = tlRejected
+    ? `Your Primary Manager/TL rejected this request.${r.tlRejectionNote ? ` Reason: "${r.tlRejectionNote}"` : ""}`
+    : awaitingTl
+      ? `Waiting for approval from ${r.approverName || "your Primary Manager/TL"}. The Store will only see it once approved.`
+      : r.autoForwarded
+        ? (r.autoForwardReason || "No Primary Manager/TL could be identified, so this went straight to the Store.")
+        : r.status === "RESOLVED" || r.status === "ADDED" || r.status === "MATCHED"
+          ? "The Store has handled this — check My Requests for the material request it created."
+          : `Approved by ${r.tlApprovedByName || "your Primary Manager/TL"} — the Store is checking whether this already exists in inventory or needs registering.`
+
   return (
     <div style={{ background: C.white, border: `1px solid ${C.border}`, borderLeft: `3px solid ${st.color}`, marginBottom: 8, padding: "10px 14px", fontFamily: FONT }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+        <span style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: C.purpleLight, border: `1px solid ${C.purpleBorder}`, color: C.purple }}>
+          New Product
+        </span>
         <span style={{ fontSize: 11, fontWeight: 700, color: C.text }}>{r.products.length} product{r.products.length !== 1 ? "s" : ""} requested</span>
         <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: st.bg, border: `1px solid ${st.border}`, color: st.color }}>{st.label}</span>
         <span style={{ fontSize: 11, color: C.textMuted }}>{relTime(r.createdAt)}</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: (r.storeNote || r.matchedTo?.name) ? 6 : 0 }}>
+
+      {r.neededBy && (
+        <div style={{ fontSize: 11, color: C.text, marginBottom: 5 }}>
+          <strong>Needed by:</strong> {fmtDate(r.neededBy)}
+        </div>
+      )}
+
+      <div style={{ padding: "7px 10px", background: st.bg, border: `1px solid ${st.border}`, borderRadius: 5, fontSize: 11.5, color: st.color, lineHeight: 1.45, marginBottom: 7 }}>
+        {explain}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: (r.storeNote || r.matchedTo?.name) ? 6 : 0 }}>
         {r.products.map((p, i) => (
           <div key={i} style={{ fontSize: 12, color: C.textSub }}>
             • <strong style={{ color: C.text }}>{p.itemName}</strong>
             {p.category && <span style={{ color: C.textMuted }}> · {p.category}</span>}
+            {p.requestedQty ? <span style={{ color: C.text }}> · {fmtNum(p.requestedQty)} {p.unit || ""}</span> : null}
             {p.attributes?.length > 0 && <span style={{ color: "#6366F1" }}> · {p.attributes.length} attribute{p.attributes.length !== 1 ? "s" : ""}</span>}
+            {(p.images || []).length > 0 && (
+              <div style={{ marginTop: 4, marginLeft: 10 }}>
+                <ProductImageStrip images={p.images} size={40} />
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -308,6 +432,22 @@ function ProductRequestCard({ r }) {
           Store: {r.storeNote}
         </div>
       )}
+
+      {/* Every request has its own thread — same as MRFs. */}
+      <div style={{ display: "flex", gap: 7, marginTop: 9, flexWrap: "wrap" }}>
+        <button
+          onClick={() => onOpenChat?.(r)}
+          style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" /></svg>
+          {awaitingTl ? "Chat with your TL" : "Chat with Store"}
+          {r.chatMessageCount > 0 && (
+            <span style={{ background: C.primary, color: "#fff", borderRadius: 8, padding: "0 5px", fontSize: 9.5, fontWeight: 700 }}>
+              {r.chatMessageCount}
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   )
 }
@@ -333,7 +473,18 @@ export default function MRFPage() {
     }
   }, [authLoading, employeeId])
 
-  const [tab, setTab] = useState("mrf") // "mrf" | "product-requests"
+  // "mrf" | "approvals" | "product-requests".
+  // Approvals is a tab here rather than its own page so a TL's own requests
+  // and the ones they approve live in one place.
+  const [tab, setTab] = useState("mrf")
+
+  // Approvals queue (only loaded for TL/CEO) — MRFs and product requests
+  const [approvals, setApprovals] = useState([])
+  const [approvalProductRequests, setApprovalProductRequests] = useState([])
+  const [approvalStats, setApprovalStats] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 })
+  const [approvalStatus, setApprovalStatus] = useState("PENDING")
+  const [approvalsLoading, setApprovalsLoading] = useState(false)
+  const [approvalsError, setApprovalsError] = useState("")
 
   const [mrfs, setMrfs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -351,6 +502,9 @@ export default function MRFPage() {
   // MRF form state
   const [requestType, setRequestType] = useState("USES_BASED")
   const [deadline, setDeadline] = useState("")
+  // When the requester needs the material in hand. Applies to both request
+  // kinds, and is separate from `deadline` (the TIME_BASED return date).
+  const [neededBy, setNeededBy] = useState("")
   const [reason, setReason] = useState("")
   const [priority, setPriority] = useState("NORMAL")
   const [cartItems, setCartItems] = useState([])
@@ -365,9 +519,22 @@ export default function MRFPage() {
   const [searchedNoResult, setSearchedNoResult] = useState(false)
   const rawTimer = useRef(null)
 
+  // Which request's chat sidebar is open, and which kind it is — material
+  // requests and new-product requests each have their own thread, served from
+  // different endpoints but rendered by the same sidebar.
+  const [chatMrf, setChatMrf] = useState(null)
+  const [chatType, setChatType] = useState("MRF")
+  const openMrfChat = (m) => { setChatType("MRF"); setChatMrf(m) }
+  const openProductRequestChat = (r) => { setChatType("PRODUCT_REQUEST"); setChatMrf(r) }
+
+  // Who approves this person's requests — surfaced in the drawer so they know
+  // where the request is going before they fill the form, and hear about a
+  // missing HR reporting link up front rather than after submitting.
+  const [approverInfo, setApproverInfo] = useState(null)
+
   // Add-product form state — attribute/value structure (mirrors store RawItemForm)
   const [newProducts, setNewProducts] = useState([
-    { itemName: "", category: "", unit: "", notes: "", attributes: [] }
+    { itemName: "", category: "", unit: "", notes: "", attributes: [], images: [] }
   ])
   const [rawCategories, setRawCategories] = useState([])
   const [rawUnits, setRawUnits] = useState([])
@@ -375,17 +542,12 @@ export default function MRFPage() {
   useEffect(() => {
     if (!employeeId) return
       ; (async () => {
-        try {
-          const headers = await getAuthHeaders()
-          const [catRes, unitRes] = await Promise.all([
-            fetch(`${API_URL}/api/cowork/mrf/data/categories`, { headers }),
-            fetch(`${API_URL}/api/cowork/mrf/data/units`, { headers }),
-          ])
-          const catData = await catRes.json()
-          const unitData = await unitRes.json()
-          if (catData.success) setRawCategories(catData.categories || [])
-          if (unitData.success) setRawUnits(unitData.units || [])
-        } catch (e) { console.error(e) }
+        const [cats, units, approver] = await Promise.allSettled([
+          fetchCategories(), fetchUnits(), fetchMyApprover(),
+        ])
+        if (cats.status === "fulfilled") setRawCategories(cats.value.categories || [])
+        if (units.status === "fulfilled") setRawUnits(units.value.units || [])
+        if (approver.status === "fulfilled") setApproverInfo(approver.value)
       })()
   }, [employeeId])
 
@@ -397,20 +559,34 @@ export default function MRFPage() {
   }, [rawSearch])
 
   useEffect(() => { if (employeeId) fetchMRFs() }, [filterStatus, filterType, filterPriority, employeeId])
-  useEffect(() => { if (employeeId && tab === "product-requests") fetchProductRequests() }, [employeeId, tab])
+  // Product requests show inline in My Requests, so they load with the page
+  // rather than only when a separate tab is opened.
+  useEffect(() => { if (employeeId) fetchProductRequests() }, [employeeId])
+
+  // Only TLs and the CEO have an approval queue.
+  const canApprove = role === "tl" || role === "ceo"
+
+  // Land on Approvals when a notification deep-links here.
+  useEffect(() => {
+    if (typeof window === "undefined" || !canApprove) return
+    const t = new URLSearchParams(window.location.search).get("tab")
+    if (t === "approvals") setTab("approvals")
+  }, [canApprove])
+
+  // Keep the pending badge live even while the user is on another tab.
+  useEffect(() => {
+    if (employeeId && canApprove) fetchApprovals()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, canApprove, approvalStatus, tab])
 
   const fetchMRFs = async () => {
     if (!employeeId) return
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (filterStatus) params.append("status", filterStatus)
-      if (filterType) params.append("requestType", filterType)
-      if (filterPriority) params.append("priority", filterPriority)
-      const headers = await getAuthHeaders()
-      const r = await fetch(`${API_URL}/api/cowork/mrf?${params}`, { headers })
-      const d = await r.json()
-      if (d.success) setMrfs(d.mrfs || [])
+      const d = await listMyMrfs({
+        status: filterStatus, requestType: filterType, priority: filterPriority,
+      })
+      setMrfs(d.mrfs || [])
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
@@ -418,10 +594,8 @@ export default function MRFPage() {
   const fetchProductRequests = async () => {
     setPrLoading(true)
     try {
-      const headers = await getAuthHeaders()
-      const r = await fetch(`${API_URL}/api/cowork/mrf/product-requests`, { headers })
-      const d = await r.json()
-      if (d.success) setProductRequests(d.requests || [])
+      const d = await listProductRequests()
+      setProductRequests(d.requests || [])
     } catch (e) { console.error(e) }
     finally { setPrLoading(false) }
   }
@@ -429,14 +603,42 @@ export default function MRFPage() {
   const searchRawItems = async (q) => {
     setRawLoading(true)
     try {
-      const headers = await getAuthHeaders()
-      const r = await fetch(`${API_URL}/api/cowork/mrf/data/raw-items?search=${encodeURIComponent(q)}`, { headers })
-      const d = await r.json()
-      if (d.success) {
-        setRawItems(d.rawItems || [])
-        setSearchedNoResult((d.rawItems || []).length === 0)
-      }
+      const d = await apiSearchRawItems(q)
+      setRawItems(d.rawItems || [])
+      setSearchedNoResult((d.rawItems || []).length === 0)
     } catch { } finally { setRawLoading(false) }
+  }
+
+  const handleCancelMrf = async (id, note) => {
+    await cancelMrf(id, note)
+    await fetchMRFs()
+  }
+
+  const fetchApprovals = async () => {
+    setApprovalsLoading(true); setApprovalsError("")
+    try {
+      const d = await listApprovals({ status: approvalStatus, limit: 50 })
+      setApprovals(d.mrfs || [])
+      setApprovalProductRequests(d.productRequests || [])
+      setApprovalStats(d.stats || {})
+    } catch (e) {
+      setApprovalsError(e.message || "Could not load your approval queue.")
+    } finally { setApprovalsLoading(false) }
+  }
+
+  // A decided request leaves the Pending list straight away rather than
+  // lingering until the next refresh. The id may belong to either list.
+  const handleApprovalDecided = (id) => {
+    if (approvalStatus === "PENDING") {
+      setApprovals(prev => prev.filter(m => String(m._id) !== String(id)))
+      setApprovalProductRequests(prev => prev.filter(r => String(r._id) !== String(id)))
+      setApprovalStats(s => ({ ...s, pending: Math.max(0, (s.pending || 1) - 1) }))
+      // A product request that was just approved becomes visible to the store
+      // and changes state in My Requests too.
+      fetchProductRequests()
+    } else {
+      fetchApprovals()
+    }
   }
 
   const addToCart = (rawItem, variant = null) => {
@@ -449,6 +651,8 @@ export default function MRFPage() {
       variantId: variant?._id || null, variantCombination: variant?.combination || [],
       requestedQty: "", unit: baseUnit, baseUnit, allUnits,
       availQty: variant ? variant.quantity : rawItem.quantity, showUnitPicker: false,
+      // Product context the TL and Store see alongside the catalogue record.
+      description: "", specifications: "", images: [], showDetails: false,
     }])
     setRawSearch(""); setRawItems([]); setSelRawForVariant(null); setSearchedNoResult(false)
   }
@@ -456,12 +660,12 @@ export default function MRFPage() {
   const updateCart = (key, field, value) => setCartItems(prev => prev.map(c => c._key === key ? { ...c, [field]: value } : c))
 
   const resetForm = () => {
-    setRequestType("USES_BASED"); setDeadline(""); setReason(""); setPriority("NORMAL")
+    setRequestType("USES_BASED"); setDeadline(""); setNeededBy(""); setReason(""); setPriority("NORMAL")
     setCartItems([]); setRawSearch(""); setRawItems([]); setSelRawForVariant(null); setFormError("")
     setSearchedNoResult(false)
   }
   const resetProductForm = () => {
-    setNewProducts([{ itemName: "", category: "", unit: "", notes: "", attributes: [] }])
+    setNewProducts([{ itemName: "", category: "", unit: "", notes: "", attributes: [], images: [] }])
     setFormError(""); setFormSuccess("")
   }
 
@@ -478,20 +682,30 @@ export default function MRFPage() {
     if (!reason.trim()) { setFormError("Enter a reason / purpose."); return }
     setSubmitting(true)
     try {
-      const authHeaders = await getAuthHeaders()
-      const r = await fetch(`${API_URL}/api/cowork/mrf`, {
-        method: "POST", headers: authHeaders,
-        body: JSON.stringify({
-          requestType, deadline: deadline || null, reason, priority,
-          items: cartItems.map(c => ({ rawItemId: c.rawItemId, variantId: c.variantId, variantCombination: c.variantCombination, requestedQty: parseFloat(c.requestedQty), unit: c.unit })),
-        }),
+      const d = await createMrf({
+        requestType, deadline: deadline || null, neededBy: neededBy || null, reason, priority,
+        items: cartItems.map(c => ({
+          rawItemId: c.rawItemId,
+          variantId: c.variantId,
+          variantCombination: c.variantCombination,
+          requestedQty: parseFloat(c.requestedQty),
+          // The unit chosen here is the unit the whole request is tracked in
+          // — the Store sees availability and issues against this unit, not
+          // the product's catalogue unit.
+          unit: c.unit,
+          description: c.description || "",
+          specifications: c.specifications || "",
+          images: c.images || [],
+        })),
       })
-      const d = await r.json()
-      if (!d.success) { setFormError(d.message || "Failed."); return }
-      setFormSuccess(`${d.mrf.mrfNumber} submitted. The Project Manager will review shortly.`)
+      // The backend writes the message — it knows whether this went to a TL or
+      // straight to the Store, and says so.
+      setFormSuccess(d.message || `${d.mrf?.mrfNumber} submitted.`)
       resetForm()
-      setTimeout(() => { setShowDrawer(false); setFormSuccess(""); fetchMRFs() }, 1800)
-    } catch { setFormError("Network error. Please try again.") }
+      setTimeout(() => { setShowDrawer(false); setFormSuccess(""); fetchMRFs() }, d.duplicate ? 2600 : 1800)
+    } catch (e) {
+      setFormError(e.message || "Network error. Please try again.")
+    }
     finally { setSubmitting(false) }
   }
 
@@ -505,17 +719,13 @@ export default function MRFPage() {
     if (!reason.trim()) { setFormError("Enter a reason / purpose."); return }
     setSubmitting(true)
     try {
-      const authHeaders = await getAuthHeaders()
-      const r = await fetch(`${API_URL}/api/cowork/mrf/product-requests`, {
-        method: "POST", headers: authHeaders,
-        body: JSON.stringify({ products: cleaned, priority, reason }),
-      })
-      const d = await r.json()
-      if (!d.success) { setFormError(d.message || "Failed."); return }
+      await createProductRequest({ products: cleaned, priority, reason, neededBy: neededBy || null })
       setFormSuccess("Sent to the store for review.")
       resetProductForm()
       setTimeout(() => { setShowDrawer(false); setFormSuccess(""); setTab("product-requests"); fetchProductRequests() }, 1500)
-    } catch { setFormError("Network error. Please try again.") }
+    } catch (e) {
+      setFormError(e.message || "Network error. Please try again.")
+    }
     finally { setSubmitting(false) }
   }
 
@@ -551,14 +761,22 @@ export default function MRFPage() {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16 }}>
+        {/* Two tabs only. Product requests are just another kind of request
+            the user raised, so they live in My Requests alongside MRFs rather
+            than on a separate screen the user has to remember to check. */}
+        <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16, flexWrap: "wrap" }}>
           {[
             { key: "mrf", label: "My Requests" },
-            { key: "product-requests", label: `Product Requests${productRequests.length ? ` (${productRequests.length})` : ""}` },
+            ...(canApprove ? [{ key: "approvals", label: "Approvals", badge: approvalStats.pending }] : []),
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              style={{ padding: "8px 14px", border: "none", borderBottom: `2px solid ${tab === t.key ? C.primary : "transparent"}`, background: "none", fontSize: 12, fontWeight: 600, color: tab === t.key ? C.primary : C.textMuted, cursor: "pointer", fontFamily: FONT }}>
+              style={{ padding: "8px 14px", border: "none", borderBottom: `2px solid ${tab === t.key ? C.primary : "transparent"}`, background: "none", fontSize: 12, fontWeight: 600, color: tab === t.key ? C.primary : C.textMuted, cursor: "pointer", fontFamily: FONT, display: "flex", alignItems: "center", gap: 6 }}>
               {t.label}
+              {t.badge > 0 && (
+                <span style={{ background: "#D97706", color: "#fff", borderRadius: 8, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -593,30 +811,154 @@ export default function MRFPage() {
               {hasFilters && <button onClick={clearFilters} style={{ padding: "5px 10px", border: `1px solid ${C.redBorder}`, borderRadius: 5, background: C.redLight, color: C.red, fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: FONT }}>Clear</button>}
             </div>
 
-            {loading ? <Spinner /> : mrfs.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "52px 0", border: `2px dashed ${C.border}` }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
-                  {hasFilters ? "No requests match the current filters." : "No requests yet."}
+            {(() => {
+              // Both kinds of request the user raised, newest first. Product
+              // requests are hidden while a status/type filter is active,
+              // since those filters are MRF-specific and would otherwise make
+              // product requests look like they ignore the filter.
+              const showProductRequests = !hasFilters
+              const combined = [
+                ...mrfs.map(m => ({ kind: "mrf", at: m.createdAt, data: m })),
+                ...(showProductRequests
+                  ? productRequests.map(r => ({ kind: "pr", at: r.createdAt, data: r }))
+                  : []),
+              ].sort((a, b) => new Date(b.at) - new Date(a.at))
+
+              if (loading || prLoading) return <Spinner />
+
+              if (!combined.length) {
+                return (
+                  <div style={{ textAlign: "center", padding: "52px 0", border: `2px dashed ${C.border}` }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>
+                      {hasFilters ? "No requests match the current filters." : "No requests yet."}
+                    </div>
+                    {!hasFilters && (
+                      <button onClick={openRequestDrawer} style={{ marginTop: 10, padding: "8px 20px", background: C.primary, color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                        + New Request
+                      </button>
+                    )}
+                    {hasFilters && (
+                      <button onClick={clearFilters} style={{ marginTop: 10, padding: "6px 16px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 12, cursor: "pointer", fontFamily: FONT }}>
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
+                )
+              }
+
+              return (
+                <div>
+                  {combined.map(entry =>
+                    entry.kind === "mrf" ? (
+                      <MrfCard
+                        key={`mrf-${entry.data._id}`}
+                        mrf={entry.data}
+                        onOpenChat={openMrfChat}
+                        onCancel={handleCancelMrf}
+                      />
+                    ) : (
+                      <ProductRequestCard key={`pr-${entry.data._id}`} r={entry.data} onOpenChat={openProductRequestChat} />
+                    )
+                  )}
                 </div>
-                {!hasFilters && <button onClick={openRequestDrawer} style={{ marginTop: 10, padding: "8px 20px", background: C.primary, color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>+ New Request</button>}                {hasFilters && <button onClick={clearFilters} style={{ marginTop: 10, padding: "6px 16px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 12, cursor: "pointer", fontFamily: FONT }}>Clear filters</button>}
-              </div>
-            ) : (
-              <div>{mrfs.map(mrf => <MrfCard key={mrf._id} mrf={mrf} />)}</div>
-            )}
+              )
+            })()}
           </>
         )}
 
-        {tab === "product-requests" && (
-          prLoading ? <Spinner /> : productRequests.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "52px 0", border: `2px dashed ${C.border}` }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>No product requests yet.</div>
-              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 14 }}>Ask the store to register an item that isn't in the system yet.</div>
-              <button onClick={openAddProductDrawer} style={{ padding: "8px 20px", background: C.purple, color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>+ Request New Product</button>
+        {tab === "approvals" && (
+          <>
+            <div style={{ padding: "9px 12px", background: C.primaryLight, border: `1px solid ${C.primaryBorder}`, borderRadius: 5, fontSize: 11.5, color: C.primary, marginBottom: 14, lineHeight: 1.45 }}>
+              Material requests raised by the people who report to you. Approving sends the
+              request <strong>straight to the Store</strong> — there is no Project Manager step.
             </div>
-          ) : (
-            <div>{productRequests.map(r => <ProductRequestCard key={r._id} r={r} />)}</div>
-          )
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 14 }}>
+              {[
+                { label: "Awaiting me", value: approvalStats.pending ?? 0, color: "#D97706" },
+                { label: "Approved", value: approvalStats.approved ?? 0, color: C.green },
+                { label: "Rejected", value: approvalStats.rejected ?? 0, color: C.red },
+                { label: "Total", value: approvalStats.total ?? 0, color: C.text },
+              ].map(s => (
+                <div key={s.label} style={{ background: C.white, border: `1px solid ${C.border}`, padding: "10px 14px" }}>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{s.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: s.color, lineHeight: 1.2, marginTop: 2 }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: C.white, border: `1px solid ${C.border}`, padding: "10px 12px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500 }}>Show:</span>
+              <select
+                value={approvalStatus}
+                onChange={e => setApprovalStatus(e.target.value)}
+                style={{ padding: "5px 9px", border: `1px solid ${C.border}`, borderRadius: 5, fontSize: 12, fontFamily: FONT, color: C.text, background: C.white, outline: "none", cursor: "pointer" }}
+              >
+                {[["PENDING", "Needs my approval"], ["APPROVED", "Approved"], ["REJECTED", "Rejected"], ["ALL", "All"]]
+                  .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <button onClick={fetchApprovals}
+                style={{ padding: "5px 11px", border: `1px solid ${C.border}`, borderRadius: 5, background: C.white, color: C.textSub, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>
+                Refresh
+              </button>
+            </div>
+
+            {approvalsError && (
+              <div style={{ padding: "9px 12px", background: C.redLight, border: `1px solid ${C.redBorder}`, borderRadius: 5, fontSize: 12, color: C.red, marginBottom: 12 }}>
+                {approvalsError}
+              </div>
+            )}
+
+            {(() => {
+              if (approvalsLoading) return <Spinner />
+
+              // Material requests and new-product requests are approved by the
+              // same person under the same rules — one queue, newest first.
+              const queue = [
+                ...approvals.map(m => ({ kind: "mrf", at: m.createdAt, data: m })),
+                ...approvalProductRequests.map(r => ({ kind: "pr", at: r.createdAt, data: r })),
+              ].sort((a, b) => new Date(b.at) - new Date(a.at))
+
+              if (!queue.length) {
+                return (
+                  <div style={{ textAlign: "center", padding: "52px 16px", border: `2px dashed ${C.border}` }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 5 }}>
+                      {approvalStatus === "PENDING" ? "Nothing waiting on you." : "No requests here."}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.5, maxWidth: 460, margin: "0 auto" }}>
+                      {approvalStatus === "PENDING"
+                        ? "Requests appear here as soon as someone who reports to you raises one — both material requests and requests for new products. If you expected one and it is missing, check that HR has you set as their Primary Manager."
+                        : "Try another filter."}
+                    </div>
+                  </div>
+                )
+              }
+
+              return (
+                <div>
+                  {queue.map(entry =>
+                    entry.kind === "mrf" ? (
+                      <MrfApprovalCard
+                        key={`mrf-${entry.data._id}`}
+                        mrf={entry.data}
+                        onDecided={handleApprovalDecided}
+                        onOpenChat={openMrfChat}
+                      />
+                    ) : (
+                      <ProductRequestApprovalCard
+                        key={`pr-${entry.data._id}`}
+                        request={entry.data}
+                        onDecided={handleApprovalDecided}
+                        onOpenChat={openProductRequestChat}
+                      />
+                    )
+                  )}
+                </div>
+              )
+            })()}
+          </>
         )}
+
       </div>
 
       {/* ══════════ DRAWER — MRF or Add-Product, switched by drawerMode ══════════ */}
@@ -633,6 +975,13 @@ export default function MRFPage() {
                 <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
                   {drawerMode === "mrf" ? <>Requesting as <strong>{employeeName}</strong></> : "Ask the store to register item(s) not yet in the system"}
                 </div>
+                {drawerMode === "mrf" && approverInfo && (
+                  <div style={{ fontSize: 10.5, marginTop: 3, color: approverInfo.willAutoForward ? C.amber : C.primary }}>
+                    {approverInfo.willAutoForward
+                      ? `⚠ ${approverInfo.message}`
+                      : `Goes to ${approverInfo.approver?.name} for approval, then the Store.`}
+                  </div>
+                )}
               </div>
               <button onClick={() => setShowDrawer(false)} style={{ width: 28, height: 28, borderRadius: 5, border: `1px solid ${C.border}`, background: C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.textSub }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -657,6 +1006,24 @@ export default function MRFPage() {
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, color: C.textSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>Reason / Purpose *</div>
                 <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Production batch #12, R&D sampling…" style={{ ...iS, resize: "none" }} onFocus={fBlue} onBlur={fGray} />
+              </div>
+
+              {/* When the material is needed IN HAND. Distinct from the
+                  TIME_BASED return deadline below, and shown to the TL and the
+                  Store so they can prioritise. */}
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: C.textSub, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5 }}>
+                  Needed By <span style={{ color: C.textMuted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>— when do you need this in hand?</span>
+                </div>
+                <input
+                  type="date"
+                  value={neededBy}
+                  min={new Date().toISOString().split("T")[0]}
+                  onChange={e => setNeededBy(e.target.value)}
+                  style={iS}
+                  onFocus={fBlue}
+                  onBlur={fGray}
+                />
               </div>
 
               {drawerMode === "mrf" ? (
@@ -717,7 +1084,7 @@ export default function MRFPage() {
                               setShowDrawer(false)
                               setTimeout(() => {
                                 resetProductForm()
-                                setNewProducts([{ itemName: name, category: "", unit: "", notes: "", attributes: [] }])
+                                setNewProducts([{ itemName: name, category: "", unit: "", notes: "", attributes: [], images: [] }])
                                 setDrawerMode("add-product")
                                 setShowDrawer(true)
                               }, 150)
@@ -785,6 +1152,50 @@ export default function MRFPage() {
                                 )}
                               </div>
                             </div>
+
+                            {/* Product detail — description, specs, photos.
+                                Collapsed by default so the common case (pick
+                                item, type a quantity) stays two clicks. */}
+                            <button
+                              type="button"
+                              onClick={() => updateCart(c._key, "showDetails", !c.showDetails)}
+                              style={{ marginTop: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: C.primary, fontFamily: FONT, display: "flex", alignItems: "center", gap: 4 }}
+                            >
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transform: c.showDetails ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.15s" }}><polyline points="6 9 12 15 18 9" /></svg>
+                              {c.showDetails ? "Hide product details" : "Add description, specs or photos"}
+                              {(c.images?.length > 0 || c.description || c.specifications) && !c.showDetails && (
+                                <span style={{ color: C.green, fontWeight: 700 }}>
+                                  ✓{c.images?.length ? ` ${c.images.length} photo${c.images.length > 1 ? "s" : ""}` : ""}
+                                </span>
+                              )}
+                            </button>
+
+                            {c.showDetails && (
+                              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                                <input
+                                  type="text"
+                                  value={c.description}
+                                  onChange={e => updateCart(c._key, "description", e.target.value)}
+                                  placeholder="Description — what exactly do you need?"
+                                  style={{ ...iS, padding: "6px 9px", fontSize: 11.5 }}
+                                  onFocus={fBlue} onBlur={fGray}
+                                />
+                                <input
+                                  type="text"
+                                  value={c.specifications}
+                                  onChange={e => updateCart(c._key, "specifications", e.target.value)}
+                                  placeholder="Specifications — size, grade, colour, make…"
+                                  style={{ ...iS, padding: "6px 9px", fontSize: 11.5 }}
+                                  onFocus={fBlue} onBlur={fGray}
+                                />
+                                <ProductImageUploader
+                                  images={c.images || []}
+                                  onChange={imgs => updateCart(c._key, "images", imgs)}
+                                  label="Photos"
+                                  compact
+                                />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -825,6 +1236,16 @@ export default function MRFPage() {
         </>
       )
       }
+
+      {/* Per-request chat with the Store and the approving TL */}
+      {chatMrf && (
+        <MrfChatSidebar
+          mrf={chatMrf}
+          subjectType={chatType}
+          employeeId={employeeId}
+          onClose={() => setChatMrf(null)}
+        />
+      )}
     </>
   )
 }
