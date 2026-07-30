@@ -8,6 +8,7 @@ import AddProductRequestForm from "../../../components/coworking/mrf/AddProductR
 import MrfContextBanner from "../../../components/coworking/mrf/MrfContextBanner"
 import MrfChatSidebar from "../../../components/coworking/mrf/MrfChatSidebar"
 import MrfApprovalCard from "../../../components/coworking/mrf/MrfApprovalCard"
+import MrfActivityLog from "../../../components/coworking/mrf/MrfActivityLog"
 import ProductRequestApprovalCard from "../../../components/coworking/mrf/ProductRequestApprovalCard"
 import ProductImageUploader, { ProductImageStrip } from "../../../components/coworking/mrf/ProductImageUploader"
 import { initPushNotifications } from "../../../lib/coworkPushNotifications"
@@ -118,6 +119,70 @@ const AVAILABILITY_UI = {
   ALTERNATIVE: { label: "Alternative offered", color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" },
 }
 
+/**
+ * Every movement on this line, newest first — issues out and returns back.
+ *
+ * The card previously showed only running totals, so a return recorded by the
+ * store left no trace here: the requester could see the number change but not
+ * when it happened, how much, or what note the store attached. Both histories
+ * are on the item already; they were simply never rendered.
+ */
+function MovementHistory({ item, unit }) {
+  const [open, setOpen] = useState(false)
+
+  const entries = [
+    ...(item.issueHistory || []).map(h => ({
+      kind: "issue",
+      qty: h.issuedQty,
+      at: h.recordedAt || h.createdAt,
+      notes: h.notes || "",
+    })),
+    ...(item.returnHistory || []).map(h => ({
+      kind: "return",
+      qty: h.returnedQty,
+      at: h.returnedAt || h.recordedAt || h.createdAt,
+      notes: h.notes || "",
+    })),
+  ].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0))
+
+  if (!entries.length) return null
+  const returns = entries.filter(e => e.kind === "return").length
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 10, color: C.primary, fontFamily: FONT, display: "flex", alignItems: "center", gap: 3 }}
+      >
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transform: open ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.15s" }}><polyline points="6 9 12 15 18 9" /></svg>
+        {open ? "Hide" : "View"} movement history
+        <span style={{ color: C.textMuted }}>
+          ({entries.length} entr{entries.length === 1 ? "y" : "ies"}
+          {returns > 0 ? `, ${returns} return${returns === 1 ? "" : "s"}` : ""})
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 4, borderLeft: `2px solid ${C.borderLight}`, paddingLeft: 7, display: "flex", flexDirection: "column", gap: 4 }}>
+          {entries.map((e, i) => {
+            const isReturn = e.kind === "return"
+            return (
+              <div key={i} style={{ fontSize: 10, lineHeight: 1.45 }}>
+                <span style={{ fontWeight: 700, color: isReturn ? "#7C3AED" : C.green }}>
+                  {isReturn ? "↩ Returned" : "↓ Issued"} {fmtNum(e.qty)} {unit || item.unit}
+                </span>
+                <span style={{ color: C.textMuted }}> · {fmtDateTime(e.at)}</span>
+                {e.notes && <div style={{ color: C.textSub, fontStyle: "italic" }}>{e.notes}</div>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AvailabilityNote({ item }) {
   const cfg = AVAILABILITY_UI[item.availability]
   if (!cfg) return null
@@ -154,6 +219,7 @@ function TimeItemRow({ item, deadline }) {
           <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
         )}
         <AvailabilityNote item={item} />
+        <MovementHistory item={item} />
       </td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: C.textSub, whiteSpace: "nowrap", verticalAlign: "top" }}>{fmtNum(item.requestedQty)} {item.unit}</td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: "#059669", fontWeight: 500, verticalAlign: "top" }}>{fmtNum(issued)}</td>
@@ -176,6 +242,9 @@ function TimeItemRow({ item, deadline }) {
 function UsesItemRow({ item }) {
   const issued = item.issuedQty || 0
   const requested = item.requestedQty || 0
+  const returned = item.returnedQty || 0
+  // What is still physically with the requester after any returns.
+  const pending = Math.max(0, issued - returned)
   const pct = requested > 0 ? Math.min(100, Math.round((issued / requested) * 100)) : 0
   return (
     <tr style={{ borderTop: `1px solid ${C.borderLight}` }}>
@@ -186,6 +255,7 @@ function UsesItemRow({ item }) {
           <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
         )}
         <AvailabilityNote item={item} />
+        <MovementHistory item={item} />
       </td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: C.textSub, whiteSpace: "nowrap" }}>{fmtNum(item.requestedQty)} {item.unit}</td>
       <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: "#059669", fontWeight: 500, whiteSpace: "nowrap", verticalAlign: "top" }}>
@@ -195,6 +265,14 @@ function UsesItemRow({ item }) {
             <div style={{ height: 3, borderRadius: 2, background: pct >= 100 ? "#10B981" : "#D97706", width: `${pct}%` }} />
           </div>
         )}
+      </td>
+      {/* Returns were invisible on uses-based requests — the column did not
+          exist, so material handed back to the store never showed here. */}
+      <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: returned > 0 ? "#7C3AED" : C.textMuted, fontWeight: returned > 0 ? 500 : 400, whiteSpace: "nowrap", verticalAlign: "top" }}>
+        {returned > 0 ? `${fmtNum(returned)} ${item.unit}` : "—"}
+      </td>
+      <td style={{ padding: "5px 10px 5px 0", fontSize: 11, color: pending > 0 ? "#D97706" : C.textMuted, fontWeight: pending > 0 ? 500 : 400, whiteSpace: "nowrap", verticalAlign: "top" }}>
+        {issued > 0 ? `${fmtNum(pending)} ${item.unit}` : "—"}
       </td>
       <td style={{ padding: "5px 0", fontSize: 10, fontWeight: 600, color: ITEM_COLOR[item.itemStatus] || C.textMuted }}>{item.itemStatus}</td>
     </tr>
@@ -273,7 +351,10 @@ function MrfCard({ mrf, onOpenChat, onCancel }) {
             {expanded && (
               <div style={{ marginTop: 6, overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr>{["Item", "Requested", "Issued", "Status"].map(h => (
+                  {/* Returned / Pending were missing here — returns apply to
+                      uses-based requests too, so a return recorded by the store
+                      changed nothing visible on this table. */}
+                  <thead><tr>{["Item", "Requested", "Issued", "Returned", "Pending", "Status"].map(h => (
                     <th key={h} style={{ textAlign: "left", fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", paddingBottom: 4, paddingRight: h === "Status" ? 0 : 10 }}>{h}</th>
                   ))}</tr></thead>
                   <tbody>{mrf.items.map((item, i) => <UsesItemRow key={i} item={item} />)}</tbody>
@@ -282,6 +363,11 @@ function MrfCard({ mrf, onOpenChat, onCancel }) {
             )}
           </div>
         )}
+
+        {/* Full trail — created, approved, issued, RETURNED, closed. Sits at
+            request level so a return recorded by the store is one click away
+            rather than buried inside a collapsed items table. */}
+        <MrfActivityLog mrf={mrf} />
 
         {/* ── Actions ── */}
         <div style={{ display: "flex", gap: 7, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
