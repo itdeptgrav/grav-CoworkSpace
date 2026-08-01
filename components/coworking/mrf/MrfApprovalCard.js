@@ -131,6 +131,13 @@ export default function MrfApprovalCard({ mrf, onDecided, onOpenChat }) {
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: C.text }}>
                       {item.rawItemName}
                       {item.rawItemSku && <span style={{ fontSize: 10, color: C.textMuted, fontFamily: "monospace", marginLeft: 6 }}>{item.rawItemSku}</span>}
+                      {/* Not picked from the catalogue — the Store will match
+                          or add it once this is approved. */}
+                      {!item.rawItem && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 4, padding: "1px 6px", marginLeft: 6 }}>
+                          new product
+                        </span>
+                      )}
                     </div>
                     {item.variantCombination?.length > 0 && (
                       <div style={{ fontSize: 10.5, color: "#6366F1", marginTop: 1 }}>{item.variantCombination.join(" · ")}</div>
@@ -220,8 +227,8 @@ export default function MrfApprovalCard({ mrf, onDecided, onOpenChat }) {
         {isPending && mode === "approve" && (
           <div style={{ marginTop: 9, padding: "10px 12px", background: C.greenLight, border: `1px solid ${C.greenBorder}`, borderRadius: 5 }}>
             <div style={{ fontSize: 11.5, color: "#065F46", marginBottom: 7, lineHeight: 1.45 }}>
-              Approving sends <strong>{approvedCount} of {(mrf.items || []).length} item(s)</strong> straight to the Store for
-              issuance. The Store will then confirm what is actually available.
+              Approving sends <strong>{approvedCount} of {(mrf.items || []).length} item(s)</strong> straight to the Store.
+              They'll issue what's already in the catalogue, and match or add anything marked "new product" first.
             </div>
             <input
               type="text"

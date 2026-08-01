@@ -15,7 +15,7 @@ import { initPushNotifications } from "../../../lib/coworkPushNotifications"
 import {
   fetchCategories, fetchUnits, searchRawItems as apiSearchRawItems,
   fetchMyApprover, listMyMrfs, createMrf, cancelMrf,
-  listProductRequests, createProductRequest, listApprovals,
+  listProductRequests, listApprovals,
 } from "../../../lib/mrfApi"
 
 const C = {
@@ -57,6 +57,18 @@ const STATUS = {
 const ITEM_COLOR = {
   PENDING: "#B45309", APPROVED: "#1D4ED8", ISSUED: "#065F46",
   PARTIALLY_RETURNED: "#5B21B6", RETURNED: "#6B7280", OVERDUE: "#991B1B", REJECTED: "#DC2626",
+  UNMATCHED: "#7C3AED",
+}
+
+// Shown under the item name for a line the requester described but that
+// isn't in the catalogue yet — the Store still has to match it to an
+// existing item or add it as new before it can be issued.
+function UnmatchedNote() {
+  return (
+    <div style={{ marginTop: 2, fontSize: 10, color: "#7C3AED", fontStyle: "italic" }}>
+      Not yet in inventory — the Store will match or add it.
+    </div>
+  )
 }
 
 function StatusBadge({ status }) {
@@ -218,6 +230,7 @@ function TimeItemRow({ item, deadline }) {
         {(item.images || []).length > 0 && (
           <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
         )}
+        {item.itemStatus === "UNMATCHED" && <UnmatchedNote />}
         <AvailabilityNote item={item} />
         <MovementHistory item={item} />
       </td>
@@ -254,6 +267,7 @@ function UsesItemRow({ item }) {
         {(item.images || []).length > 0 && (
           <div style={{ marginTop: 4 }}><ProductImageStrip images={item.images} size={34} /></div>
         )}
+        {item.itemStatus === "UNMATCHED" && <UnmatchedNote />}
         <AvailabilityNote item={item} />
         <MovementHistory item={item} />
       </td>
@@ -439,10 +453,11 @@ function MrfCard({ mrf, onOpenChat, onCancel }) {
   )
 }
 
-// ── Product (raw-item add) request card ─────────────────────────────────────
-// Shown inline in My Requests alongside MRFs. A product request goes to the
-// TL first — the Store never sees it until then — so the status shown here
-// leads with the approval stage, not the store stage.
+// ── Product (raw-item add) request card — LEGACY ─────────────────────────
+// Shown inline in My Requests alongside MRFs, for a request raised before
+// "not in the catalogue" items became a plain MRF line (see createMrf /
+// AddProductRequestForm). Nothing new creates one of these; this stays only
+// so anything already in flight can still be seen through to resolution.
 function ProductRequestCard({ r, onOpenChat }) {
   const awaitingTl = r.approvalStatus === "PENDING_TL"
   const tlRejected = r.approvalStatus === "TL_REJECTED"
@@ -476,7 +491,7 @@ function ProductRequestCard({ r, onOpenChat }) {
     <div style={{ background: C.white, border: `1px solid ${C.border}`, borderLeft: `3px solid ${st.color}`, marginBottom: 8, padding: "10px 14px", fontFamily: FONT }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
         <span style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: C.purpleLight, border: `1px solid ${C.purpleBorder}`, color: C.purple }}>
-          New Product
+          Legacy Request
         </span>
         <span style={{ fontSize: 11, fontWeight: 700, color: C.text }}>{r.products.length} product{r.products.length !== 1 ? "s" : ""} requested</span>
         <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: st.bg, border: `1px solid ${st.border}`, color: st.color }}>{st.label}</span>
@@ -798,17 +813,35 @@ export default function MRFPage() {
   // ── Add-product form helpers ──
 
 
+  // Items not in the catalogue are just MRF lines with no rawItemId — the
+  // Store matches or registers them in place once approved (itemStatus
+  // UNMATCHED). One mrfNumber for the whole request, same as any other MRF.
   const handleSubmitProductRequest = async () => {
     setFormError(""); setFormSuccess("")
     const cleaned = newProducts.filter(p => p.itemName.trim())
     if (!cleaned.length) { setFormError("Enter at least one product name."); return }
+    for (const p of cleaned) {
+      if (!p.requestedQty || parseFloat(p.requestedQty) <= 0) { setFormError(`Enter a quantity for ${p.itemName}.`); return }
+      if (!p.unit.trim()) { setFormError(`Enter a unit for ${p.itemName}.`); return }
+    }
     if (!reason.trim()) { setFormError("Enter a reason / purpose."); return }
     setSubmitting(true)
     try {
-      await createProductRequest({ products: cleaned, priority, reason, neededBy: neededBy || null })
-      setFormSuccess("Sent to the store for review.")
+      const d = await createMrf({
+        requestType: "USES_BASED", deadline: null, neededBy: neededBy || null, reason, priority,
+        items: cleaned.map(p => ({
+          itemName: p.itemName,
+          category: p.category || "",
+          unit: p.unit,
+          requestedQty: parseFloat(p.requestedQty),
+          notes: p.notes || "",
+          attributes: p.attributes || [],
+          images: p.images || [],
+        })),
+      })
+      setFormSuccess(d.message || `${d.mrf?.mrfNumber} submitted.`)
       resetProductForm()
-      setTimeout(() => { setShowDrawer(false); setFormSuccess(""); setTab("product-requests"); fetchProductRequests() }, 1500)
+      setTimeout(() => { setShowDrawer(false); setFormSuccess(""); setTab("mrf"); fetchMRFs() }, d.duplicate ? 2600 : 1800)
     } catch (e) {
       setFormError(e.message || "Network error. Please try again.")
     }

@@ -1,12 +1,10 @@
 // components/coworking/mrf/ProductRequestApprovalCard.js
 //
-// A request to add a product that is NOT in the catalogue yet, awaiting the
-// requester's Primary Manager/TL.
-//
-// The Store does not see these at all until the TL approves — deciding whether
-// the item is even needed comes before deciding which catalogue entry it maps
-// to. Once approved, the Store matches it to an existing item or registers it
-// as new.
+// LEGACY — a request to add a product not in the catalogue, raised before
+// that became a plain MRF line (see createMrf / AddProductRequestForm).
+// Nothing raises a new one of these; this card stays only so anything
+// already awaiting a TL at cutover can still be approved or rejected instead
+// of being stranded.
 "use client"
 
 import { useState } from "react"
@@ -63,7 +61,7 @@ export default function ProductRequestApprovalCard({ request: r, onDecided, onOp
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
           <span style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 4, fontWeight: 700, background: C.purpleLight, border: `1px solid ${C.purpleBorder}`, color: C.purple }}>
-            New Product
+            Legacy Request
           </span>
           <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{r.requestedByName}</span>
           {r.requestedByDept && <span style={{ fontSize: 11, color: C.textMuted }}>{r.requestedByDept}</span>}

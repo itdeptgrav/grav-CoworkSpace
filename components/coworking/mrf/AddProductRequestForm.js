@@ -81,7 +81,7 @@ export default function AddProductRequestForm({
   return (
     <>
       <div style={{ padding: "8px 11px", background: C.purpleLight, border: `1px solid ${C.purpleBorder}`, borderRadius: 5, fontSize: 11, color: C.purple, lineHeight: 1.4 }}>
-        The store will review and register these products. This does not create a material request — once added, you can request them normally.
+        This raises a material request like any other — it just isn't in the catalogue yet. The Store will match it to an existing item or add it as new before issuing it.
       </div>
 
       {products.map((p, pIdx) => (
@@ -110,16 +110,17 @@ export default function AddProductRequestForm({
                   {categories.map(c => <option key={c} value={c} />)}
                 </datalist>
               </div>
-              {/* Quantity — how much the employee thinks they need */}
+              {/* Quantity — how much the employee needs. Required: this is a
+                  real material request now, not just a catalogue registration. */}
               <div>
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 3 }}>Quantity (optional)</div>
+                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 3 }}>Quantity *</div>
                 <input type="number" min="0" step="any" value={p.requestedQty}
                   onChange={e => updateProductRow(pIdx, "requestedQty", e.target.value)}
                   placeholder="e.g. 22" style={iS} onFocus={fBlue} onBlur={fGray} />
               </div>
               {/* Unit — suggested via datalist from existing Unit collection */}
               <div>
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 3 }}>Unit (optional)</div>
+                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 3 }}>Unit *</div>
                 <input type="text" list={`unit-list-${pIdx}`} value={p.unit}
                   onChange={e => updateProductRow(pIdx, "unit", e.target.value)}
                   placeholder="e.g. Metre, Kg, Pieces" style={iS} onFocus={fBlue} onBlur={fGray} />
